@@ -1,0 +1,192 @@
+@import 'tailwindcss';
+
+/* ===========================================================================
+   FlowSense design tokens.
+
+   This file is the single source of truth for color, type, spacing, radius,
+   and motion. Components never write a hex value or a Tailwind color scale
+   class. They use semantic tokens (bg-surface, text-muted, rounded-card) that
+   resolve to the variables below, so changing one variable here repaints the
+   whole app in both themes.
+   =========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  --background: #ffffff;
+  --surface: #f8fafc;
+  --surface-sunken: #f1f5f9;
+  --border: #e2e8f0;
+  --foreground: #0f172a;
+  --muted: #475569;
+  --subtle: #94a3b8;
+  --accent: #2563eb;
+  --accent-soft: #dbeafe;
+  --accent-fg: #ffffff;
+  --highlight: #fdecc8;
+  --highlight-fg: #0f172a;
+  --positive: #15803d;
+  --negative: #b91c1c;
+
+  /* The one soft shadow, reserved for floating elements. */
+  --shadow-tint: rgb(15 23 42 / 0.1);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --background: #0b1120;
+  --surface: #131c2e;
+  --surface-sunken: #0f1727;
+  --border: #22304a;
+  --foreground: #e8edf5;
+  --muted: #9aa9bf;
+  --subtle: #64748b;
+  --accent: #60a5fa;
+  --accent-soft: #1e3a5f;
+  --accent-fg: #0b1120;
+  --highlight: #4a3e1e;
+  --highlight-fg: #f2efe6;
+  --positive: #4ade80;
+  --negative: #f87171;
+
+  --shadow-tint: rgb(0 0 0 / 0.45);
+}
+
+/* Drop Tailwind's built in palettes and scales. A class like `bg-blue-500`,
+   `text-lg` at an off scale size, or `rounded-md` simply does not exist, which
+   turns the design rules into build time guarantees rather than conventions. */
+@theme {
+  --color-*: initial;
+  --text-*: initial;
+  --font-*: initial;
+  --font-weight-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --animate-*: initial;
+}
+
+@theme inline {
+  --color-transparent: transparent;
+
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+  --color-highlight: var(--highlight);
+  --color-highlight-fg: var(--highlight-fg);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+
+  /* Inter carries every piece of text. JetBrains Mono is for measurements
+     only and is applied through the `numeric` utility, never directly. */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  /* Type scale: 12 14 16 20 28 40 56 72. Nothing between. */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.4;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.5;
+  --text-base: 1rem;
+  --text-base--line-height: 1.6;
+  --text-lg: 1.25rem;
+  --text-lg--line-height: 1.4;
+  --text-xl: 1.75rem;
+  --text-xl--line-height: 1.25;
+  --text-xl--letter-spacing: -0.01em;
+  --text-2xl: 2.5rem;
+  --text-2xl--line-height: 1.15;
+  --text-2xl--letter-spacing: -0.02em;
+  --text-3xl: 3.5rem;
+  --text-3xl--line-height: 1.05;
+  --text-3xl--letter-spacing: -0.02em;
+  --text-4xl: 4.5rem;
+  --text-4xl--line-height: 1;
+  --text-4xl--letter-spacing: -0.03em;
+
+  /* Radius: 12 on cards, 8 on inputs, 999 on buttons. */
+  --radius-card: 12px;
+  --radius-input: 8px;
+  --radius-full: 999px;
+
+  --shadow-float: 0 8px 24px -12px var(--shadow-tint);
+
+  --container-column: 640px;
+
+  --animate-skeleton: skeleton 1.6s ease-in-out infinite;
+}
+
+@keyframes skeleton {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* The theme is driven by `data-theme` on <html>, never by the media query, so
+   a manual choice keeps winning after the system theme changes. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background-color: var(--accent-soft);
+    color: var(--foreground);
+  }
+
+  /* Prevent the mobile tap flash from overriding the token colors. */
+  a,
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Measurements read as exact: mono face, tabular figures, always paired. */
+@utility numeric {
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
