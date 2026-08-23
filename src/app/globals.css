@@ -173,6 +173,63 @@
   }
 }
 
+/* Audio scrubber.
+   MediaRecorder blobs carry no duration, so the native <audio> control seeks
+   nonlinearly. The player drives this range input from the duration we measured
+   ourselves. Only the thumb and track need painting; every color is a token. */
+@layer components {
+  .audio-scrubber {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    /* Full 44px tap target with a 4px visual track centered inside it. */
+    height: 44px;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .audio-scrubber::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: var(--radius-full);
+    background: linear-gradient(
+      to right,
+      var(--accent) 0 var(--played, 0%),
+      var(--surface-sunken) var(--played, 0%) 100%
+    );
+  }
+
+  .audio-scrubber::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    margin-top: -6px;
+    border: none;
+    border-radius: var(--radius-full);
+    background: var(--accent);
+  }
+
+  .audio-scrubber::-moz-range-track {
+    height: 4px;
+    border-radius: var(--radius-full);
+    background: var(--surface-sunken);
+  }
+
+  .audio-scrubber::-moz-range-progress {
+    height: 4px;
+    border-radius: var(--radius-full);
+    background: var(--accent);
+  }
+
+  .audio-scrubber::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border: none;
+    border-radius: var(--radius-full);
+    background: var(--accent);
+  }
+}
+
 /* Measurements read as exact: mono face, tabular figures, always paired. */
 @utility numeric {
   font-family: var(--font-jetbrains-mono), ui-monospace, monospace;

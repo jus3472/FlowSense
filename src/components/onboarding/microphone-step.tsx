@@ -2,10 +2,19 @@
 
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import {
+  MICROPHONE_BLOCKED_TITLE,
+  MicrophoneRecovery,
+} from '@/components/media/microphone-recovery'
+import {
+  MicrophoneUnavailable,
+  titleForUnavailable,
+  type UnavailableReason,
+} from '@/components/media/microphone-unavailable'
 import { StepFrame } from '@/components/onboarding/step-frame'
 import { Button, ButtonLink } from '@/components/ui/button'
 
-type Status = 'idle' | 'requesting' | 'granted' | 'denied' | 'missing' | 'unsupported'
+type Status = 'idle' | 'requesting' | 'granted' | 'denied' | UnavailableReason
 
 export function MicrophoneStep() {
   const router = useRouter()
@@ -18,7 +27,7 @@ export function MicrophoneStep() {
     // which is also what the server rendered.
     const detect = async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
-        if (!cancelled) setStatus('unsupported')
+        if (!cancelled) setStatus('no-capture')
         return
       }
 
@@ -56,56 +65,26 @@ export function MicrophoneStep() {
     }
   }
 
+  const skipLink = (
+    <ButtonLink href="/onboarding/focus" variant="ghost" fullWidth>
+      Continue without it for now
+    </ButtonLink>
+  )
+
   if (status === 'denied') {
     return (
-      <StepFrame step={1} title="Microphone access is blocked">
-        <div className="flex flex-col gap-4">
-          <p className="text-muted text-base">
-            Your browser is set to block the microphone for this site. You can change it in 3 steps.
-          </p>
-          <ol className="flex flex-col gap-3">
-            {[
-              'Open the site settings from the icon at the left of the address bar.',
-              'Set Microphone to Allow.',
-              'Reload this page and try again.',
-            ].map((line, index) => (
-              <li key={line} className="flex items-start gap-3">
-                <span className="numeric text-accent text-sm font-medium">{index + 1}</span>
-                <span className="text-muted text-base">{line}</span>
-              </li>
-            ))}
-          </ol>
-          <div className="flex flex-col gap-3">
-            <Button size="lg" fullWidth onClick={requestAccess}>
-              Try again
-            </Button>
-            <ButtonLink href="/onboarding/focus" variant="ghost" fullWidth>
-              Continue without it for now
-            </ButtonLink>
-          </div>
-        </div>
+      <StepFrame step={1} title={MICROPHONE_BLOCKED_TITLE}>
+        <MicrophoneRecovery onRetry={requestAccess}>{skipLink}</MicrophoneRecovery>
       </StepFrame>
     )
   }
 
-  if (status === 'missing' || status === 'unsupported') {
+  if (status === 'missing' || status === 'no-capture') {
     return (
-      <StepFrame step={1} title="No microphone available">
-        <div className="flex flex-col gap-4">
-          <p className="text-muted text-base">
-            {status === 'missing'
-              ? 'Your browser cannot find a microphone. Connect one, then try again.'
-              : 'This browser does not support microphone access. Open FlowSense in Chrome, Safari, Edge, or Firefox.'}
-          </p>
-          <div className="flex flex-col gap-3">
-            <Button size="lg" fullWidth onClick={requestAccess}>
-              Try again
-            </Button>
-            <ButtonLink href="/onboarding/focus" variant="ghost" fullWidth>
-              Continue without it for now
-            </ButtonLink>
-          </div>
-        </div>
+      <StepFrame step={1} title={titleForUnavailable(status)}>
+        <MicrophoneUnavailable reason={status} onRetry={requestAccess}>
+          {skipLink}
+        </MicrophoneUnavailable>
       </StepFrame>
     )
   }

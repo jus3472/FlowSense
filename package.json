@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "verify": "npm run typecheck && npm run lint && npm run test",
-    "db:push": "node scripts/db-push.mjs"
+    "db:push": "node scripts/db-push.mjs",
+    "inspect:attempts": "node scripts/inspect-attempts.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",

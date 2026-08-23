@@ -1,21 +1,54 @@
 import type { Metadata } from 'next'
-import { TextLink } from '@/components/ui/text-link'
+import { redirect } from 'next/navigation'
+import { RecordFlow } from '@/components/record/record-flow'
+import { RetryButton } from '@/components/system/retry-button'
+import { ErrorState } from '@/components/ui/error-state'
+import { createClient } from '@/lib/supabase/server'
+import { pickRandom } from '@/lib/utils'
 
 export const metadata: Metadata = {
   title: 'Record',
 }
 
-export default function RecordPage() {
-  return (
-    <div className="flex flex-col gap-4">
-      <h1 className="text-foreground text-xl font-semibold">Recording is coming next</h1>
-      <p className="text-muted text-base">
-        This is where a prompt appears, a countdown runs, and you answer out loud for up to 60
-        seconds.
-      </p>
-      <p className="text-muted text-base">
-        <TextLink href="/home">Back to home</TextLink>
-      </p>
-    </div>
-  )
+/** A fresh prompt on every visit, never a cached one. */
+export const dynamic = 'force-dynamic'
+
+export default async function RecordPage() {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: prompts, error } = await supabase
+    .from('prompts')
+    .select('id, text')
+    .eq('active', true)
+
+  if (error || !prompts || prompts.length === 0) {
+    return (
+      <ErrorState
+        title="No prompt is available"
+        description="The prompt list could not be loaded. Check your connection and try again."
+      >
+        <RetryButton />
+      </ErrorState>
+    )
+  }
+
+  // Chosen on the server so the prompt reaches the browser without being
+  // rendered. The record screen keeps it hidden until the countdown starts.
+  const prompt = pickRandom(prompts)
+  if (!prompt) {
+    return (
+      <ErrorState
+        title="No prompt is available"
+        description="The prompt list came back empty. Try again in a moment."
+      >
+        <RetryButton />
+      </ErrorState>
+    )
+  }
+
+  return <RecordFlow promptId={prompt.id} promptText={prompt.text} />
 }
