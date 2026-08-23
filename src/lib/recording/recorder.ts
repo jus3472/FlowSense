@@ -7,6 +7,8 @@ import type { AmplitudeSample, PitchSample } from '@/lib/types/metrics'
  */
 export interface MediaRecorderLike {
   readonly state: string
+  /** What the browser actually chose, which can differ from what was asked for. */
+  readonly mimeType: string
   start(timesliceMs?: number): void
   stop(): void
   ondataavailable: ((event: BlobEvent) => void) | null
@@ -22,6 +24,7 @@ export interface CaptureSampler {
 
 export interface AttemptRecording {
   blob: Blob
+  /** The recorder's real output type, not the type that was requested. */
   mimeType: string
   durationMs: number
   startedAt: string
@@ -69,6 +72,7 @@ export class AttemptRecorder {
   private resolveResult: ((recording: AttemptRecording) => void) | null = null
   private rejectResult: ((error: unknown) => void) | null = null
   private autoStopTimer: ReturnType<typeof setTimeout> | null = null
+  private actualMimeType: string
   private startedAtMs = 0
   private startedAtIso = ''
   private durationMs = 0
@@ -77,6 +81,18 @@ export class AttemptRecorder {
 
   constructor(private readonly options: AttemptRecorderOptions) {
     this.maxDurationMs = options.maxDurationMs ?? MAX_RECORDING_MS
+    this.actualMimeType = options.mimeType
+  }
+
+  /**
+   * What the recorder is really producing. `isTypeSupported` is only advisory:
+   * Safari has both refused a type it can record and accepted one it silently
+   * substitutes. Reading this back after start is the only reliable answer, and
+   * it decides the blob type, the stored mime, the file extension, and the
+   * Content-Type the object is served with.
+   */
+  get mimeType(): string {
+    return this.actualMimeType
   }
 
   /** True once a recorder exists. A second start is a no op. */
@@ -115,6 +131,8 @@ export class AttemptRecorder {
       this.options.sampler.start()
       // No timeslice: one dataavailable at stop, so there is nothing to interleave.
       recorder.start()
+      // Only valid once started. An empty string means the browser will not say.
+      if (recorder.mimeType) this.actualMimeType = recorder.mimeType
     } catch (error) {
       this.fail(error)
       return this.resultPromise
@@ -163,13 +181,13 @@ export class AttemptRecorder {
     // Read the timelines before settling. settle() runs onRelease, which tears
     // down the sampler and the stream behind it.
     const { amplitude, pitch } = this.options.sampler.snapshot()
-    const blob = new Blob(this.chunks, { type: this.options.mimeType })
+    const blob = new Blob(this.chunks, { type: this.actualMimeType })
     this.settle()
     this.release()
 
     this.resolveResult?.({
       blob,
-      mimeType: this.options.mimeType,
+      mimeType: this.actualMimeType,
       durationMs: this.durationMs || Math.max(0, Date.now() - this.startedAtMs),
       startedAt: this.startedAtIso,
       amplitude,

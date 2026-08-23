@@ -1,7 +1,11 @@
 /**
  * Playback helpers, kept separate from the player component so the parts worth
- * testing are pure. Everything here exists because of how iOS WebKit behaves.
+ * testing are pure. Everything here exists because of how browsers disagree
+ * about media metadata.
  */
+
+/** HTMLMediaElement.HAVE_METADATA. Enough for the element to accept a seek. */
+export const HAVE_METADATA = 1
 
 /** The slice of TimeRanges this code reads, so tests can stand in for it. */
 export interface TimeRangesLike {
@@ -25,24 +29,28 @@ export function rangesToArray(ranges: TimeRangesLike | null | undefined): Range[
 }
 
 /**
- * Whether a seek to `seconds` will actually land.
+ * Whether the scrubber should be live.
  *
- * Assigning currentTime outside the seekable ranges fails silently on iOS: no
- * throw, no seeked event, no sound. The small tolerance covers the rounding
- * between our measured duration and what the container reports.
+ * Deliberately consults neither `seekable` nor `readyState`. Measured on the
+ * same recording: iOS reports `seekable = [0, NaN]` and Chrome reports
+ * `seekable = [0, Infinity]`, neither of which describes the file, and every
+ * comparison against NaN is false. Readiness is no better, because on a
+ * WebKit recorded WebM the duration stays NaN through loadedmetadata and
+ * through canplay, resolving only after the whole file downloads.
+ *
+ * The duration measured during capture is the one trustworthy number, so it is
+ * the only gate. A seek that the element is not ready for is caught by the
+ * reconciliation in the player rather than pre-emptively refused here.
  */
-export function isWithinRanges(
-  ranges: TimeRangesLike | null | undefined,
-  seconds: number,
-  tolerance = 0.25,
-): boolean {
-  if (!ranges || ranges.length === 0) return false
-  for (let index = 0; index < ranges.length; index += 1) {
-    if (seconds >= ranges.start(index) - tolerance && seconds <= ranges.end(index) + tolerance) {
-      return true
-    }
-  }
-  return false
+export function canScrub(state: { totalMs: number; failed: boolean }): boolean {
+  return state.totalMs > 0 && !state.failed
+}
+
+/** Keeps a seek inside the duration we measured, whatever the container claims. */
+export function clampSeekMs(valueMs: number, totalMs: number): number {
+  if (!Number.isFinite(valueMs) || valueMs < 0) return 0
+  if (!Number.isFinite(totalMs) || totalMs <= 0) return 0
+  return Math.min(valueMs, totalMs)
 }
 
 /**
@@ -71,7 +79,8 @@ export function describePlaybackError(error: unknown): string {
 /**
  * The measured duration is the source of truth, because MediaRecorder
  * containers routinely report Infinity, NaN, or 0. The element's own duration is
- * only a fallback for rows recorded before the length was captured.
+ * only a fallback for rows recorded before the length was captured, and it is
+ * accepted only when finite, so the scrubber math can never see NaN.
  */
 export function resolveDurationMs(measuredMs: number, elementDurationSeconds: number): number {
   if (Number.isFinite(measuredMs) && measuredMs > 0) return measuredMs

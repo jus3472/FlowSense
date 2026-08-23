@@ -8,6 +8,8 @@ import {
 
 class FakeMediaRecorder implements MediaRecorderLike {
   state = 'inactive'
+  /** Browsers report their real choice here, which can differ from the request. */
+  mimeType = ''
   ondataavailable: ((event: BlobEvent) => void) | null = null
   onstop: ((event: Event) => void) | null = null
   onerror: ((event: ErrorEvent) => void) | null = null
@@ -45,18 +47,22 @@ function fakeSampler() {
   } satisfies CaptureSampler & { starts: number; stops: number }
 }
 
-function build(overrides: { maxDurationMs?: number; onRelease?: () => void } = {}) {
+function build(
+  overrides: { maxDurationMs?: number; onRelease?: () => void; actualMimeType?: string } = {},
+) {
   const created: FakeMediaRecorder[] = []
   const sampler = fakeSampler()
+  const { actualMimeType, ...recorderOptions } = overrides
   const recorder = new AttemptRecorder({
     mimeType: 'audio/webm;codecs=opus',
     createRecorder: () => {
       const fake = new FakeMediaRecorder()
+      fake.mimeType = actualMimeType ?? 'audio/webm;codecs=opus'
       created.push(fake)
       return fake
     },
     sampler,
-    ...overrides,
+    ...recorderOptions,
   })
   return { recorder, created, sampler }
 }
@@ -178,6 +184,30 @@ describe('AttemptRecorder', () => {
     const result = await promise
     expect(result.blob.size).toBe(11)
     expect(created).toHaveLength(1)
+  })
+
+  /**
+   * isTypeSupported is advisory. Safari has both refused a type it can record
+   * and accepted one it silently substitutes, so the type that reaches storage,
+   * the file extension, and the Content-Type must come from the recorder.
+   */
+  it('reports the type the recorder actually produced, not the one requested', async () => {
+    const { recorder } = build({ actualMimeType: 'audio/mp4' })
+    const promise = recorder.start()
+    expect(recorder.mimeType).toBe('audio/mp4')
+    recorder.stop()
+
+    const result = await promise
+    expect(result.mimeType).toBe('audio/mp4')
+    expect(result.blob.type).toBe('audio/mp4')
+  })
+
+  it('keeps the requested type when the browser will not say', async () => {
+    const { recorder } = build({ actualMimeType: '' })
+    const promise = recorder.start()
+    recorder.stop()
+    const result = await promise
+    expect(result.mimeType).toBe('audio/webm;codecs=opus')
   })
 
   it('releases the stream when the recording finishes', async () => {

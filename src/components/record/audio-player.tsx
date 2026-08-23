@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { formatDuration } from '@/lib/recording/format'
 import {
+  HAVE_METADATA,
+  canScrub,
+  clampSeekMs,
   describePlaybackError,
-  isWithinRanges,
-  rangesToArray,
   resolveDurationMs,
 } from '@/lib/recording/playback'
 
@@ -33,13 +34,18 @@ interface AudioPlayerProps {
  *    does nothing but call play().
  * 2. play() returns a promise that rejects with no console output and no event.
  *    It is caught here and turned into a visible sentence.
- * 3. Loading lags well behind Chrome. Measured on iOS 18, our own recording
- *    reports readyState 0, duration NaN, and an empty seekable range for the
- *    first second or more, where desktop Chrome has readyState 4 before the
- *    first paint. Assigning currentTime during that window does nothing at all,
- *    silently, which is why scrubbing appeared to "fix" playback: it was really
- *    the wait that fixed it. Scrubbing stays disabled until the element reports
- *    a real seekable range.
+ * 3. Metadata arrives late and out of order. Measured on iOS 26 against a
+ *    recording made by WebKit itself, `duration` was still NaN through
+ *    loadedmetadata and through canplay at readyState 4, and only resolved once
+ *    the whole file had downloaded. Nothing here waits for it: the duration
+ *    measured during capture is authoritative, so the scrubber works from the
+ *    first render and the element catches up on its own.
+ *
+ * The scrubber also ignores `seekable`. On the same file iOS reports
+ * `[0, NaN]` and Chrome reports `[0, Infinity]`, and since every comparison
+ * against NaN is false, trusting it disabled the scrubber outright on iOS.
+ * Seeks are clamped to the measured duration, attempted, and then reconciled
+ * against what the element actually did.
  *
  * Callers pass `key={src}` so a new recording gets a fresh transport.
  */
@@ -47,27 +53,30 @@ export function AudioPlayer({ src, durationMs, label = 'Your answer' }: AudioPla
   const audioRef = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
   const [positionMs, setPositionMs] = useState(0)
-  const [seekableEnd, setSeekableEnd] = useState(0)
+  const [readyState, setReadyState] = useState(0)
   const [elementDuration, setElementDuration] = useState(Number.NaN)
   const [failed, setFailed] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
   const totalMs = resolveDurationMs(durationMs, elementDuration)
-  const canSeek = seekableEnd > 0
+  const canSeek = canScrub({ totalMs, failed })
+  // Metadata can lag the file by seconds. It gates the note, never the control.
+  const loadingMetadata = readyState < HAVE_METADATA
+  const reconcileTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const sync = useCallback(() => {
     const audio = audioRef.current
     if (!audio) return
     setElementDuration(audio.duration)
-    const ranges = rangesToArray(audio.seekable)
-    setSeekableEnd(ranges.length > 0 ? (ranges[ranges.length - 1]?.end ?? 0) : 0)
+    setReadyState(audio.readyState)
   }, [])
 
-  // Nudges desktop browsers into buffering immediately. iOS ignores it until a
-  // gesture, which is expected and handled by the play path below.
-  useEffect(() => {
-    audioRef.current?.load()
-  }, [src])
+  useEffect(
+    () => () => {
+      if (reconcileTimer.current !== null) clearTimeout(reconcileTimer.current)
+    },
+    [],
+  )
 
   // timeupdate fires about 4 times a second, which reads as a stuttering
   // playhead. Reading currentTime every frame keeps it moving at a constant rate.
@@ -113,33 +122,44 @@ export function AudioPlayer({ src, durationMs, label = 'Your answer' }: AudioPla
     startPlayback()
   }
 
+  /**
+   * Moves the playhead optimistically so the thumb follows the finger, asks the
+   * element to seek, then reconciles against what actually happened. If the seek
+   * is refused the display snaps back to the truth rather than lying about it.
+   */
   const seek = (valueMs: number) => {
     const audio = audioRef.current
     if (!audio) return
 
-    const seconds = valueMs / 1000
-    if (!isWithinRanges(audio.seekable, seconds)) {
-      setMessage('That part of the recording has not loaded yet.')
+    const target = clampSeekMs(valueMs, totalMs)
+    setPositionMs(target)
+    setMessage(null)
+
+    try {
+      audio.currentTime = target / 1000
+    } catch {
+      // WebKit throws InvalidStateError if the element loses readiness between
+      // the gate and the assignment.
+      setMessage('Seeking is not available yet. Press play first.')
       return
     }
 
-    try {
-      audio.currentTime = seconds
-      setPositionMs(valueMs)
-      setMessage(null)
-    } catch {
-      // WebKit throws InvalidStateError if the element loses readiness between
-      // the range check and the assignment.
-      setMessage('Seeking is not available yet. Press play first.')
-    }
+    if (reconcileTimer.current !== null) clearTimeout(reconcileTimer.current)
+    reconcileTimer.current = setTimeout(() => {
+      const current = audioRef.current
+      if (!current) return
+      const actualMs = current.currentTime * 1000
+      if (Math.abs(actualMs - target) > 600) {
+        setPositionMs(Math.min(actualMs, totalMs))
+        setMessage('That part of the recording is still loading.')
+      }
+    }, 500)
   }
 
   const status = (() => {
     if (failed) return 'This recording could not be loaded. Reload the page to try again.'
     if (message) return message
-    // iOS reports an empty seekable range for the first second or two even with
-    // preload set, so this is the normal opening state there, not an error.
-    if (!canSeek) return 'Loading audio'
+    if (loadingMetadata) return 'Loading audio'
     return null
   })()
 
@@ -164,7 +184,11 @@ export function AudioPlayer({ src, durationMs, label = 'Your answer' }: AudioPla
         onCanPlay={sync}
         onCanPlayThrough={sync}
         onProgress={sync}
-        onSeeked={sync}
+        onSeeked={() => {
+          sync()
+          const audio = audioRef.current
+          if (audio) setPositionMs(Math.min(audio.currentTime * 1000, totalMs))
+        }}
         onTimeUpdate={() => {
           const audio = audioRef.current
           if (audio && !playing) setPositionMs(Math.min(audio.currentTime * 1000, totalMs))

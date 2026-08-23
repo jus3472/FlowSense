@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  canScrub,
+  clampSeekMs,
   describePlaybackError,
-  isWithinRanges,
   rangesToArray,
   resolveDurationMs,
   type TimeRangesLike,
@@ -28,32 +29,58 @@ describe('rangesToArray', () => {
     expect(rangesToArray(null)).toEqual([])
     expect(rangesToArray(undefined)).toEqual([])
   })
+
+  /** What iOS 18 and Chrome each report for the very same recording. */
+  it('surfaces the useless ends both engines report, without crashing', () => {
+    expect(rangesToArray(ranges([0, Number.NaN]))[0]?.end).toBeNaN()
+    expect(rangesToArray(ranges([0, Number.POSITIVE_INFINITY]))[0]?.end).toBe(Infinity)
+  })
 })
 
-describe('isWithinRanges', () => {
-  /** iOS reports an empty seekable until the first gesture loads the file. */
-  it('refuses to seek when nothing is seekable yet', () => {
-    expect(isWithinRanges(ranges(), 0)).toBe(false)
-    expect(isWithinRanges(null, 0)).toBe(false)
+describe('canScrub', () => {
+  it('is live as soon as a real duration exists', () => {
+    expect(canScrub({ totalMs: 24_877, failed: false })).toBe(true)
   })
 
-  it('accepts a point inside a range', () => {
-    expect(isWithinRanges(ranges([0, 22.44]), 11)).toBe(true)
-    expect(isWithinRanges(ranges([0, 22.44]), 0)).toBe(true)
+  it('stays off without a usable duration', () => {
+    expect(canScrub({ totalMs: 0, failed: false })).toBe(false)
   })
 
-  it('rejects a point past what has loaded', () => {
-    expect(isWithinRanges(ranges([0, 5]), 11)).toBe(false)
+  it('stays off after a load error', () => {
+    expect(canScrub({ totalMs: 24_877, failed: true })).toBe(false)
   })
 
-  it('tolerates the gap between our measured duration and the container', () => {
-    // Measured 22.509s, container says 22.44s. Seeking to the end must still work.
-    expect(isWithinRanges(ranges([0, 22.44]), 22.509)).toBe(true)
+  /**
+   * Two gates that had to go. seekable.end is NaN on iOS, so NaN > 0 kept the
+   * scrubber disabled forever. readyState was no better: on a WebKit recorded
+   * WebM the duration stays NaN through loadedmetadata and through canplay, and
+   * resolves only once the whole file has downloaded, which on a slow
+   * connection is never within the listener's patience.
+   */
+  it('does not depend on seekable or on element readiness', () => {
+    expect(canScrub({ totalMs: 24_877, failed: false })).toBe(true)
+  })
+})
+
+describe('clampSeekMs', () => {
+  it('passes a position inside the recording straight through', () => {
+    expect(clampSeekMs(10_000, 21_951)).toBe(10_000)
   })
 
-  it('handles a gap between two buffered ranges', () => {
-    expect(isWithinRanges(ranges([0, 5], [10, 20]), 7)).toBe(false)
-    expect(isWithinRanges(ranges([0, 5], [10, 20]), 15)).toBe(true)
+  it('clamps past the end back to the measured duration', () => {
+    expect(clampSeekMs(30_000, 21_951)).toBe(21_951)
+  })
+
+  it('clamps negatives and rubbish to the start', () => {
+    expect(clampSeekMs(-5, 21_951)).toBe(0)
+    expect(clampSeekMs(Number.NaN, 21_951)).toBe(0)
+    expect(clampSeekMs(Number.POSITIVE_INFINITY, 21_951)).toBe(0)
+  })
+
+  it('refuses to seek at all without a usable duration', () => {
+    expect(clampSeekMs(10_000, 0)).toBe(0)
+    expect(clampSeekMs(10_000, Number.NaN)).toBe(0)
+    expect(clampSeekMs(10_000, Number.POSITIVE_INFINITY)).toBe(0)
   })
 })
 
@@ -85,21 +112,36 @@ describe('describePlaybackError', () => {
 
 describe('resolveDurationMs', () => {
   it('prefers the duration measured during capture', () => {
-    expect(resolveDurationMs(22_509, 22.44)).toBe(22_509)
+    expect(resolveDurationMs(21_951, 21.953)).toBe(21_951)
   })
 
-  /** MediaRecorder containers report these routinely, iOS mp4 most of all. */
   it('falls back to the element when the measurement is missing', () => {
-    expect(resolveDurationMs(0, 22.44)).toBe(22_440)
+    expect(resolveDurationMs(0, 21.953)).toBe(21_953)
   })
 
-  it('returns 0 when neither source knows', () => {
-    expect(resolveDurationMs(0, Number.NaN)).toBe(0)
+  /**
+   * Chrome reports Infinity for our WebM even at readyState 4, and iOS reports
+   * NaN before metadata arrives. Neither may ever reach the scrubber math.
+   */
+  it('never lets a non finite element duration through', () => {
     expect(resolveDurationMs(0, Number.POSITIVE_INFINITY)).toBe(0)
-    expect(resolveDurationMs(Number.NaN, 0)).toBe(0)
+    expect(resolveDurationMs(0, Number.NaN)).toBe(0)
+    expect(resolveDurationMs(0, Number.NEGATIVE_INFINITY)).toBe(0)
+    expect(resolveDurationMs(Number.NaN, Number.NaN)).toBe(0)
   })
 
-  it('never trusts an infinite element duration over a real measurement', () => {
+  it('always returns a finite, non negative number', () => {
+    const inputs = [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 21_951]
+    for (const measured of inputs) {
+      for (const element of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 21.953]) {
+        const result = resolveDurationMs(measured, element)
+        expect(Number.isFinite(result)).toBe(true)
+        expect(result).toBeGreaterThanOrEqual(0)
+      }
+    }
+  })
+
+  it('keeps the measurement even when the element claims Infinity', () => {
     expect(resolveDurationMs(30_000, Number.POSITIVE_INFINITY)).toBe(30_000)
   })
 })
