@@ -6,6 +6,7 @@ export const PROTECTED_PREFIXES = [
   '/history',
   '/settings',
   '/attempts',
+  '/debug',
 ]
 
 export function isProtectedPath(pathname: string): boolean {
