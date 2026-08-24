@@ -60,6 +60,17 @@ function offenders(pattern: RegExp) {
 }
 
 describe('design system', () => {
+  /**
+   * A gauge implies a target, and this app has no benchmark and no comparison to
+   * anyone else. A short bar on a low score is the honest picture.
+   */
+  it('draws the score bar as a literal proportion of 100', () => {
+    const header = files.find((file) => file.path.endsWith('results/score-header.tsx'))
+    expect(header).toBeDefined()
+    expect(header?.contents).toMatch(/score \/ 100/)
+    expect(header?.contents).toMatch(/scaleX\(\$\{fill\}\)/)
+  })
+
   it('has no hex color in any component', () => {
     expect(offenders(HEX)).toEqual([])
   })

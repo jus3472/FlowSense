@@ -34,6 +34,15 @@ const eslintConfig = defineConfig([
     files: ['src/lib/env/server.ts'],
     rules: { 'no-restricted-syntax': 'off' },
   },
+  {
+    /*
+     * The rule protects the browser bundle. Inspection scripts are run by hand
+     * from a terminal, are never bundled, and cannot import the app's env module
+     * because it is server-only by construction.
+     */
+    files: ['scripts/**'],
+    rules: { 'no-restricted-syntax': 'off' },
+  },
   globalIgnores(['.next/**', 'out/**', 'build/**', 'coverage/**', 'next-env.d.ts', 'supabase/**']),
 ])
 

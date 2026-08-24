@@ -33,7 +33,18 @@ export interface TranscriptMetrics {
   words: TranscriptWord[]
 }
 
+/** Everything the mechanical half computed, stored beside the raw capture. */
+export interface DeliveryBlock {
+  metrics: unknown
+  statistics: unknown
+  pauses: unknown
+  warnings: string[]
+  scored_at: string
+  version: number
+}
+
 export interface AttemptMetrics {
   capture?: CaptureMetrics
   transcript?: TranscriptMetrics
+  delivery?: DeliveryBlock
 }

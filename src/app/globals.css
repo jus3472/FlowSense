@@ -13,42 +13,42 @@
 :root {
   color-scheme: light;
 
-  --background: #ffffff;
-  --surface: #f8fafc;
-  --surface-sunken: #f1f5f9;
-  --border: #e2e8f0;
-  --foreground: #0f172a;
-  --muted: #475569;
-  --subtle: #94a3b8;
-  --accent: #2563eb;
-  --accent-soft: #dbeafe;
+  --background: #f7fafb;
+  --surface: #ffffff;
+  --surface-sunken: #eaf4f7;
+  --border: #dde8ec;
+  --foreground: #12303b;
+  --muted: #54717c;
+  --subtle: #93a7af;
+  --accent: #0c7184;
+  --accent-soft: #d9f2f5;
   --accent-fg: #ffffff;
   --highlight: #fdecc8;
   --highlight-fg: #0f172a;
-  --positive: #15803d;
-  --negative: #b91c1c;
+  --positive: #2a7563;
+  --negative: #a44d42;
 
   /* The one soft shadow, reserved for floating elements. */
-  --shadow-tint: rgb(15 23 42 / 0.1);
+  --shadow-tint: rgb(18 48 59 / 0.12);
 }
 
 [data-theme='dark'] {
   color-scheme: dark;
 
-  --background: #0b1120;
-  --surface: #131c2e;
-  --surface-sunken: #0f1727;
-  --border: #22304a;
-  --foreground: #e8edf5;
-  --muted: #9aa9bf;
-  --subtle: #64748b;
-  --accent: #60a5fa;
-  --accent-soft: #1e3a5f;
-  --accent-fg: #0b1120;
-  --highlight: #4a3e1e;
+  --background: #0b1a21;
+  --surface: #11242c;
+  --surface-sunken: #0e1f26;
+  --border: #1e3a45;
+  --foreground: #e8f2f5;
+  --muted: #96aeb7;
+  --subtle: #64818c;
+  --accent: #72d4e3;
+  --accent-soft: #183e48;
+  --accent-fg: #08161c;
+  --highlight: #4a3e22;
   --highlight-fg: #f2efe6;
-  --positive: #4ade80;
-  --negative: #f87171;
+  --positive: #6fc2a8;
+  --negative: #d08a80;
 
   --shadow-tint: rgb(0 0 0 / 0.45);
 }
@@ -88,6 +88,7 @@
      only and is applied through the `numeric` utility, never directly. */
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+  --font-display: var(--font-sora), ui-sans-serif, system-ui, sans-serif;
 
   --font-weight-normal: 400;
   --font-weight-medium: 500;
@@ -116,15 +117,26 @@
   --text-4xl--letter-spacing: -0.03em;
 
   /* Radius: 12 on cards, 8 on inputs, 999 on buttons. */
-  --radius-card: 12px;
+  --radius-card: 16px;
   --radius-input: 8px;
   --radius-full: 999px;
 
   --shadow-float: 0 8px 24px -12px var(--shadow-tint);
 
-  --container-column: 640px;
+  --container-column: 600px;
 
   --animate-skeleton: skeleton 1.6s ease-in-out infinite;
+  /* The score bar fills once, quickly, and never bounces. */
+  --animate-score-fill: score-fill 300ms ease-out both;
+}
+
+@keyframes score-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(var(--fill, 1));
+  }
 }
 
 @keyframes skeleton {
@@ -235,6 +247,21 @@
   font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
+}
+
+/* Display type carries a prompt or the primary thought. Measurements retain
+   their mono face, and ordinary UI text stays deliberately plain. */
+@utility prompt-display {
+  font-family: var(--font-sora), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 300;
+  line-height: 1.18;
+}
+
+@utility section-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.4;
+  text-transform: uppercase;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -14,7 +14,9 @@
     "test:watch": "vitest",
     "verify": "npm run typecheck && npm run lint && npm run test",
     "db:push": "node scripts/db-push.mjs",
-    "inspect:attempts": "node scripts/inspect-attempts.mjs"
+    "inspect:attempts": "node scripts/inspect-attempts.mjs",
+    "inspect:scores": "node scripts/inspect-scores.mjs",
+    "inspect:rewrites": "node --experimental-transform-types scripts/inspect-rewrites.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",

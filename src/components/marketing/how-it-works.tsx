@@ -15,14 +15,16 @@ const STEPS = [
 
 export function HowItWorks() {
   return (
-    <section className="flex flex-col gap-4 py-12">
-      <h2 className="text-foreground text-lg font-semibold">How it works</h2>
-      <ol className="grid gap-4 sm:grid-cols-3">
+    <section className="flex flex-col gap-6 py-12">
+      <h2 className="section-label text-muted">How it works</h2>
+      <ol className="flex flex-col gap-6">
         {STEPS.map((step, index) => (
-          <li key={step.title} className="rounded-card bg-surface flex flex-col gap-2 p-6">
-            <span className="numeric text-accent text-sm font-medium">{index + 1}</span>
-            <h3 className="text-foreground text-base font-medium">{step.title}</h3>
-            <p className="text-muted text-sm">{step.body}</p>
+          <li key={step.title} className="grid grid-cols-[24px_minmax(0,1fr)] gap-4">
+            <span className="numeric text-accent text-sm">{index + 1}</span>
+            <span className="flex flex-col gap-1">
+              <h3 className="text-foreground text-base font-medium">{step.title}</h3>
+              <p className="text-muted text-sm">{step.body}</p>
+            </span>
           </li>
         ))}
       </ol>

@@ -138,3 +138,20 @@ export async function transcribeAttempt(attemptId: string): Promise<{ wordCount:
   const body: unknown = await response.json()
   return { wordCount: isRecord(body) && typeof body.wordCount === 'number' ? body.wordCount : 0 }
 }
+
+export async function scoreAttempt(attemptId: string): Promise<{ score: number | null }> {
+  const response = await fetchWithTimeout(
+    '/api/score',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attemptId }),
+    },
+    { label: 'Scoring your answer' },
+  )
+
+  if (!response.ok) throw new Error(await readError(response, 'The score could not be computed.'))
+
+  const body: unknown = await response.json()
+  return { score: isRecord(body) && typeof body.score === 'number' ? body.score : null }
+}

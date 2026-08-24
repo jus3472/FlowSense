@@ -35,10 +35,10 @@ export function CountdownStep({ promptText, seconds, onComplete }: CountdownStep
   }, [seconds, onComplete])
 
   return (
-    <div className="flex flex-col gap-8">
-      <p className="text-foreground text-xl font-semibold">{promptText}</p>
+    <div className="flex min-h-[68vh] flex-col justify-center gap-12">
+      <p className="prompt-display text-foreground text-2xl">{promptText}</p>
       <div className="flex flex-col items-center gap-2">
-        <p aria-hidden="true" className="numeric text-accent text-2xl font-medium">
+        <p aria-hidden="true" className="prompt-display text-accent text-3xl">
           {Math.max(1, Math.ceil(remainingMs / 1000))}
         </p>
         <p role="status" className="text-muted text-sm">

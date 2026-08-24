@@ -1,19 +1,21 @@
 export function StreakDisplay({ streak }: { streak: number }) {
   if (streak === 0) {
     return (
-      <div className="flex flex-col gap-2">
-        <p className="text-foreground text-lg font-semibold">Start a streak today</p>
-        <p className="text-muted text-sm">One response a day is enough to keep it going.</p>
+      <div className="flex flex-col gap-6">
+        <p className="section-label text-muted">No days recorded yet</p>
+        <p className="prompt-display text-foreground text-2xl">One prompt, 60 seconds</p>
+        <p className="text-muted text-base">One response a day is enough to keep it going.</p>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-foreground text-lg font-semibold">
-        <span className="numeric">{streak}</span> day streak
+    <div className="flex flex-col gap-6">
+      <p className="section-label text-muted">
+        <span className="numeric">{streak}</span> day{streak === 1 ? '' : 's'} in a row
       </p>
-      <p className="text-muted text-sm">Answer today to keep it going.</p>
+      <p className="prompt-display text-foreground text-2xl">One prompt, 60 seconds</p>
+      <p className="text-muted text-base">Answer today to keep it going.</p>
     </div>
   )
 }

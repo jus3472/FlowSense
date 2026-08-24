@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Inter, JetBrains_Mono } from 'next/font/google'
+import { Inter, JetBrains_Mono, Sora } from 'next/font/google'
 import type { ReactNode } from 'react'
 import './globals.css'
 import { OfflineBanner } from '@/components/system/offline-banner'
@@ -19,6 +19,13 @@ const jetBrainsMono = JetBrains_Mono({
   display: 'swap',
 })
 
+const sora = Sora({
+  subsets: ['latin'],
+  weight: ['300', '400'],
+  variable: '--font-sora',
+  display: 'swap',
+})
+
 export const metadata: Metadata = {
   title: 'FlowSense',
   description:
@@ -33,7 +40,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <head>
         <ThemeScript />
       </head>
-      <body className={`${inter.variable} ${jetBrainsMono.variable} bg-background min-h-dvh`}>
+      <body
+        className={`${inter.variable} ${jetBrainsMono.variable} ${sora.variable} bg-background min-h-dvh`}
+      >
         <OfflineBanner />
         {children}
       </body>

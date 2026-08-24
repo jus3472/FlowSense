@@ -16,7 +16,13 @@ import { ProcessingStep } from '@/components/record/processing-step'
 import { ReadyStep } from '@/components/record/ready-step'
 import { RecordingStep } from '@/components/record/recording-step'
 import { Button, ButtonLink } from '@/components/ui/button'
-import { createAttempt, saveRecording, transcribeAttempt, uploadAudio } from '@/lib/recording/api'
+import {
+  createAttempt,
+  saveRecording,
+  scoreAttempt,
+  transcribeAttempt,
+  uploadAudio,
+} from '@/lib/recording/api'
 import {
   SAMPLE_INTERVAL_MS,
   createAudioSampler,
@@ -140,6 +146,13 @@ export function RecordFlow({ promptId, promptText }: RecordFlowProps) {
           const attempt = attemptRef.current
           if (!attempt) throw new Error('The recording was not saved, so it cannot be transcribed.')
           await transcribeAttempt(attempt.attemptId)
+        },
+        // The mechanical half is instant. The model call is the slow part, and a
+        // model outage is handled inside the route so it cannot cost points.
+        score: async () => {
+          const attempt = attemptRef.current
+          if (!attempt) throw new Error('The recording was not saved, so it cannot be scored.')
+          await scoreAttempt(attempt.attemptId)
         },
       }
 

@@ -24,8 +24,8 @@ export default async function SettingsPage() {
     .maybeSingle()
 
   return (
-    <div className="flex flex-col gap-8">
-      <h1 className="text-foreground text-xl font-semibold">Settings</h1>
+    <div className="flex flex-col gap-12 pt-4 pb-12">
+      <h1 className="prompt-display text-foreground text-2xl">Settings</h1>
 
       <SettingsForm
         displayName={profile?.display_name ?? ''}

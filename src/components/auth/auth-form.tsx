@@ -92,9 +92,9 @@ export function AuthForm() {
         ))}
       </div>
 
-      <div className="flex flex-col gap-2">
-        <h1 className="text-foreground text-xl font-semibold">{copy.heading}</h1>
-        <p className="text-muted text-sm">{copy.body}</p>
+      <div className="flex flex-col gap-3">
+        <h1 className="prompt-display text-foreground text-xl">{copy.heading}</h1>
+        <p className="text-muted text-base">{copy.body}</p>
       </div>
 
       <form action={formAction} onSubmit={onSubmit} noValidate className="flex flex-col gap-6">

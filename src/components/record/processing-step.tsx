@@ -2,7 +2,7 @@
 
 import { AudioPlayer } from '@/components/record/audio-player'
 import { Button } from '@/components/ui/button'
-import { STAGE_LABEL, type ProcessingState } from '@/lib/recording/processing'
+import { STAGE_LABEL, type ProcessingState, type WorkStage } from '@/lib/recording/processing'
 
 interface ProcessingStepProps {
   promptText: string
@@ -12,9 +12,10 @@ interface ProcessingStepProps {
   onRetry: () => void
 }
 
-const REASSURANCE: Record<'uploading' | 'transcribing', string> = {
+const REASSURANCE: Record<WorkStage, string> = {
   uploading: 'Your recording is still here. Trying again sends it without recording you again.',
   transcribing: 'Your recording is already saved. Trying again uses the audio you just recorded.',
+  scoring: 'Your recording and transcript are saved. Trying again only redoes the scoring.',
 }
 
 export function ProcessingStep({

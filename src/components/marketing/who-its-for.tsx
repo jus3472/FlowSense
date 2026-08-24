@@ -8,18 +8,15 @@ const CASES = [
 
 export function WhoItsFor() {
   return (
-    <section className="flex flex-col gap-4 py-12">
-      <h2 className="text-foreground text-lg font-semibold">
+    <section className="flex flex-col gap-6 py-12">
+      <h2 className="prompt-display text-foreground text-xl">
         For anyone who sounds sharper on paper
       </h2>
-      <ul className="flex flex-col gap-3">
+      <ul className="flex flex-col gap-4">
         {CASES.map((item) => (
           <li key={item} className="flex items-start gap-3">
-            <span
-              aria-hidden="true"
-              className="bg-accent-soft ring-accent mt-2 size-2 shrink-0 rounded-full ring-2"
-            />
-            <span className="text-muted text-base">{item}</span>
+            <span aria-hidden="true" className="text-accent mt-0.5 shrink-0 text-lg" />
+            <span className="text-foreground text-base">{item}</span>
           </li>
         ))}
       </ul>

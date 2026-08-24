@@ -27,11 +27,11 @@ const SAMPLE_SECTIONS = [
 
 export function ResultMock() {
   return (
-    <section className="flex flex-col gap-4 py-12">
-      <h2 className="text-foreground text-lg font-semibold">What you get back</h2>
+    <section className="flex flex-col gap-6 py-12">
+      <h2 className="section-label text-muted">What you get back</h2>
 
-      <div className="rounded-card bg-surface flex flex-col gap-6 p-6">
-        <p className="text-foreground text-base">
+      <div className="rounded-card bg-surface flex flex-col gap-8 p-8">
+        <p className="text-foreground text-lg leading-loose">
           {SAMPLE_TRANSCRIPT.map((segment, index) =>
             segment.highlight ? (
               <mark key={index} className="rounded-input bg-highlight text-highlight-fg px-1">
@@ -73,7 +73,7 @@ export function ResultMock() {
         </div>
       </div>
 
-      <p className="text-muted text-xs">
+      <p className="text-muted text-sm">
         A sample result. Yours uses your own words. Marked spans are where the point went soft, not
         mistakes.
       </p>

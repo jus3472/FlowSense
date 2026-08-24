@@ -1,13 +1,16 @@
 import { RequestTimeoutError } from '@/lib/net/fetch-with-timeout'
 
-/** Two working stages, three terminal ones. Nothing else exists. */
-export type WorkStage = 'uploading' | 'transcribing'
+/** Three working stages, three terminal ones. Nothing else exists. */
+export const WORK_STAGES = ['uploading', 'transcribing', 'scoring'] as const
+
+export type WorkStage = (typeof WORK_STAGES)[number]
 export type TerminalStage = 'done' | 'failed' | 'timed_out'
 export type ProcessingStage = WorkStage | TerminalStage
 
 export const STAGE_LABEL: Record<WorkStage, string> = {
   uploading: 'Saving',
   transcribing: 'Transcribing',
+  scoring: 'Scoring',
 }
 
 export interface ProcessingState {
@@ -42,14 +45,23 @@ function terminalFor(stage: WorkStage, error: unknown): ProcessingState {
   }
 }
 
+/** One step per working stage, run in order. */
 export interface PipelineSteps {
   /** Creates the attempt row, puts the audio in storage, records the path. */
   upload: () => Promise<void>
   transcribe: () => Promise<void>
+  score: () => Promise<void>
+}
+
+/** Stage names read as progress, step names read as actions. */
+const STEP_FOR_STAGE: Record<WorkStage, keyof PipelineSteps> = {
+  uploading: 'upload',
+  transcribing: 'transcribe',
+  scoring: 'score',
 }
 
 /**
- * Runs the pipeline and always lands on a terminal state. Both steps are
+ * Runs every stage in order and always lands on a terminal state. Each step is
  * wrapped, so a rejection anywhere produces `failed` or `timed_out` rather than
  * leaving the caller mid flight. Steps are expected to be idempotent: a retry
  * re-runs this with the same closure, and completed work short circuits.
@@ -63,18 +75,13 @@ export async function runProcessingPipeline(
     return state
   }
 
-  emit({ stage: 'uploading', failedStage: null, message: null })
-  try {
-    await steps.upload()
-  } catch (error) {
-    return emit(terminalFor('uploading', error))
-  }
-
-  emit({ stage: 'transcribing', failedStage: null, message: null })
-  try {
-    await steps.transcribe()
-  } catch (error) {
-    return emit(terminalFor('transcribing', error))
+  for (const stage of WORK_STAGES) {
+    emit({ stage, failedStage: null, message: null })
+    try {
+      await steps[STEP_FOR_STAGE[stage]]()
+    } catch (error) {
+      return emit(terminalFor(stage, error))
+    }
   }
 
   return emit({ stage: 'done', failedStage: null, message: null })

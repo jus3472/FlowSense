@@ -12,9 +12,17 @@ const noop = async () => {}
 describe('runProcessingPipeline', () => {
   it('walks uploading then transcribing then done', async () => {
     const { states, onState } = record()
-    const final = await runProcessingPipeline({ upload: noop, transcribe: noop }, onState)
+    const final = await runProcessingPipeline(
+      { upload: noop, transcribe: noop, score: noop },
+      onState,
+    )
 
-    expect(states.map((state) => state.stage)).toEqual(['uploading', 'transcribing', 'done'])
+    expect(states.map((state) => state.stage)).toEqual([
+      'uploading',
+      'transcribing',
+      'scoring',
+      'done',
+    ])
     expect(final.stage).toBe('done')
     expect(final.message).toBeNull()
   })
@@ -27,6 +35,7 @@ describe('runProcessingPipeline', () => {
           throw new Error('The recording could not be saved.')
         },
         transcribe,
+        score: noop,
       },
       () => {},
     )
@@ -41,6 +50,7 @@ describe('runProcessingPipeline', () => {
     const final = await runProcessingPipeline(
       {
         upload: noop,
+        score: noop,
         transcribe: async () => {
           throw new Error('Deepgram rejected the audio: corrupt container')
         },
@@ -57,6 +67,7 @@ describe('runProcessingPipeline', () => {
     const final = await runProcessingPipeline(
       {
         upload: noop,
+        score: noop,
         transcribe: async () => {
           throw new RequestTimeoutError('Transcribing your answer', 30_000)
         },
@@ -81,10 +92,11 @@ describe('runProcessingPipeline', () => {
     ['undefined', undefined],
     ['an object', { code: 500 }],
   ])('reaches a terminal state when a step throws %s', async (_label, thrown) => {
-    for (const failing of ['upload', 'transcribe'] as const) {
+    for (const failing of ['upload', 'transcribe', 'score'] as const) {
       const steps = {
         upload: noop,
         transcribe: noop,
+        score: noop,
         [failing]: async () => {
           throw thrown
         },
@@ -100,6 +112,7 @@ describe('runProcessingPipeline', () => {
     await runProcessingPipeline(
       {
         upload: noop,
+        score: noop,
         transcribe: async () => {
           throw new Error('nope')
         },
@@ -116,6 +129,7 @@ describe('isTerminal', () => {
   it('treats only done, failed, and timed_out as terminal', () => {
     expect(isTerminal('uploading')).toBe(false)
     expect(isTerminal('transcribing')).toBe(false)
+    expect(isTerminal('scoring')).toBe(false)
     expect(isTerminal('done')).toBe(true)
     expect(isTerminal('failed')).toBe(true)
     expect(isTerminal('timed_out')).toBe(true)

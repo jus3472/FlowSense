@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { apiError } from '@/lib/api/responses'
 import { parseCaptureMetrics } from '@/lib/recording/capture-payload'
+import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { createClient } from '@/lib/supabase/server'
 import type { AttemptMetrics } from '@/lib/types/metrics'
 
@@ -54,5 +55,42 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     .eq('id', id)
 
   if (error) return apiError(error.message, 500)
+  return NextResponse.json({ ok: true })
+}
+
+/**
+ * Removes the row and the audio object together. Leaving the recording behind
+ * after the user asked for it to go would be a broken promise, not a tidy up
+ * detail.
+ */
+export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return apiError('Your session ended. Log in and try again.', 401)
+
+  const { data: attempt } = await supabase
+    .from('attempts')
+    .select('id, audio_path')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (!attempt) return apiError('That attempt does not exist.', 404)
+
+  if (attempt.audio_path) {
+    const { error: storageError } = await supabase.storage
+      .from(RECORDINGS_BUCKET)
+      .remove([attempt.audio_path])
+    if (storageError) {
+      return apiError(`The recording could not be deleted: ${storageError.message}`, 500)
+    }
+  }
+
+  const { error } = await supabase.from('attempts').delete().eq('id', id)
+  if (error) return apiError(error.message, 500)
+
   return NextResponse.json({ ok: true })
 }

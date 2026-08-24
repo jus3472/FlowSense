@@ -1,3 +1,3 @@
 export function Wordmark() {
-  return <span className="text-foreground text-base font-semibold tracking-tight">FlowSense</span>
+  return <span className="prompt-display text-foreground text-base">FlowSense</span>
 }
