@@ -279,9 +279,6 @@ describe('history grouping', () => {
     createdAt: new Date(2026, 7, 24 - daysAgo, 9).toISOString(),
     promptText: 'Describe your ideal weekend.',
     score,
-    summary: 'Filler words cost the most',
-    audioUrl: null,
-    durationMs: 30_000,
   })
 
   it('labels today and yesterday by name and older days by date', () => {

@@ -5,10 +5,6 @@ export interface HistoryEntry {
   createdAt: string
   promptText: string
   score: number
-  /** One line naming the largest deduction, never a bare number. */
-  summary: string
-  audioUrl: string | null
-  durationMs: number
 }
 
 export interface HistoryGroup {

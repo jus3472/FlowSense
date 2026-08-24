@@ -2,9 +2,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { AudioPlayer } from '@/components/record/audio-player'
 import { TrendChart } from '@/components/history/trend-chart'
-import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { deleteAttempt } from '@/lib/results/api'
@@ -20,6 +18,25 @@ import { cn } from '@/lib/utils'
 
 const FILTERS: HistoryFilter[] = ['all', 'high', 'low']
 
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" className="size-4" fill="none" stroke="currentColor">
+      <path d="M4.5 6.5h11M8 3.5h4m-6.5 3 1 10h7l1-10M8.5 9v4.5m3-4.5v4.5" strokeWidth="1.5" />
+    </svg>
+  )
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" className="size-4" fill="none" stroke="currentColor">
+      <path d="m6 6 8 8m0-8-8 8" strokeWidth="1.5" />
+    </svg>
+  )
+}
+
+const ICON_BUTTON =
+  'text-muted hover:bg-surface-sunken hover:text-foreground flex size-11 items-center justify-center rounded-full transition duration-150 ease-out disabled:pointer-events-none disabled:opacity-60'
+
 export function HistoryList({
   entries: initial,
   focusPhrase,
@@ -29,7 +46,6 @@ export function HistoryList({
 }) {
   const [entries, setEntries] = useState(initial)
   const [filter, setFilter] = useState<HistoryFilter>('all')
-  const [playing, setPlaying] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -109,66 +125,54 @@ export function HistoryList({
 
           <ul className="flex flex-col gap-2">
             {group.entries.map((entry) => (
-              <li key={entry.id} className="bg-surface rounded-card flex flex-col gap-3 p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex min-w-0 flex-col gap-1">
-                    <p className="text-foreground truncate text-sm font-medium">
-                      {entry.promptText}
-                    </p>
-                    <p className="text-muted text-xs">{entry.summary}</p>
-                  </div>
+              <li key={entry.id} className="relative">
+                <Link
+                  href={`/attempts/${entry.id}`}
+                  className="bg-surface rounded-card hover:bg-surface-sunken focus:ring-accent-soft flex min-h-20 cursor-pointer items-start justify-between gap-4 p-6 pr-16 transition duration-150 ease-out focus:ring-2"
+                >
+                  <p className="text-foreground min-w-0 text-sm font-medium">
+                    {entry.promptText}
+                  </p>
                   <span className="numeric text-foreground shrink-0 text-lg">{entry.score}</span>
-                </div>
+                </Link>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  {entry.audioUrl ? (
-                    <Button
-                      variant="ghost"
-                      onClick={() =>
-                        setPlaying((current) => (current === entry.id ? null : entry.id))
-                      }
-                    >
-                      {playing === entry.id ? 'Hide' : 'Play'}
-                    </Button>
-                  ) : null}
-                  <Link
-                    href={`/attempts/${entry.id}`}
-                    className="text-foreground hover:bg-surface-sunken flex min-h-11 items-center rounded-full px-6 text-sm font-medium transition duration-150 ease-out"
-                  >
-                    Open
-                  </Link>
-
-                  {confirming === entry.id ? (
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span className="text-muted text-xs">
-                        Delete this response and its audio?
-                      </span>
-                      <Button
-                        variant="secondary"
-                        loading={busy === entry.id}
-                        loadingLabel="Deleting"
+                {confirming === entry.id ? (
+                  <div className="bg-surface rounded-card absolute inset-0 z-10 flex items-center justify-between gap-4 px-6">
+                    <p className="text-foreground text-sm">Delete this response?</p>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        aria-label="Confirm delete"
+                        title="Delete response"
+                        disabled={busy === entry.id}
                         onClick={() => void remove(entry.id)}
+                        className={ICON_BUTTON}
                       >
-                        Delete
-                      </Button>
-                      <Button variant="ghost" onClick={() => setConfirming(null)}>
-                        Cancel
-                      </Button>
+                        <TrashIcon />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Cancel delete"
+                        title="Cancel"
+                        disabled={busy === entry.id}
+                        onClick={() => setConfirming(null)}
+                        className={ICON_BUTTON}
+                      >
+                        <CloseIcon />
+                      </button>
                     </span>
-                  ) : (
-                    <Button variant="ghost" onClick={() => setConfirming(entry.id)}>
-                      Delete
-                    </Button>
-                  )}
-                </div>
-
-                {playing === entry.id && entry.audioUrl ? (
-                  <AudioPlayer
-                    key={entry.audioUrl}
-                    src={entry.audioUrl}
-                    durationMs={entry.durationMs}
-                  />
-                ) : null}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    aria-label="Delete response"
+                    title="Delete response"
+                    onClick={() => setConfirming(entry.id)}
+                    className={`${ICON_BUTTON} absolute top-4 right-3`}
+                  >
+                    <TrashIcon />
+                  </button>
+                )}
               </li>
             ))}
           </ul>
