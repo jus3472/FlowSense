@@ -12,6 +12,10 @@ interface ScoreHeaderProps {
  */
 export function ScoreHeader({ score, contentEarned, deliveryEarned }: ScoreHeaderProps) {
   const fill = Math.max(0, Math.min(1, score / 100))
+  const fillStyle = {
+    '--fill': fill,
+    transform: `scaleX(${fill})`,
+  } as CSSProperties
 
   return (
     <section className="flex flex-col gap-6">
@@ -22,17 +26,17 @@ export function ScoreHeader({ score, contentEarned, deliveryEarned }: ScoreHeade
         <span className="numeric text-muted text-lg">/ 100</span>
       </div>
 
+      <div aria-hidden="true" className="bg-score-track h-2 w-full overflow-hidden rounded-full">
+        <div
+          className="from-score-fill-start to-score-fill-end animate-score-fill h-full origin-left rounded-full bg-linear-to-r"
+          style={fillStyle}
+        />
+      </div>
+
       <p className="text-muted text-base">
         <span className="numeric">{contentEarned}</span> for what you said,{' '}
         <span className="numeric">{deliveryEarned}</span> for how you sounded
       </p>
-
-      <div aria-hidden="true" className="bg-surface-sunken h-1 w-full overflow-hidden rounded-full">
-        <div
-          className="bg-accent animate-score-fill h-full origin-left rounded-full"
-          style={{ '--fill': fill, transform: `scaleX(${fill})` } as CSSProperties}
-        />
-      </div>
     </section>
   )
 }

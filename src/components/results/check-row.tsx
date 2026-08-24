@@ -46,7 +46,7 @@ export function CheckRow({
   const failing = !notChecked && !finding.passed && !disputed
 
   return (
-    <li className="border-border flex flex-col gap-3 border-t px-6 py-4 first:border-t-0">
+    <li className="border-border flex flex-col gap-3 border-t py-4 first:border-t-0 first:pt-0 last:pb-0">
       <div className="flex items-center justify-between gap-4">
         <span className="flex items-center gap-2">
           <span className="text-foreground text-sm font-medium">{label}</span>
@@ -74,9 +74,6 @@ export function CheckRow({
         </div>
       ) : null}
 
-      {disputed && !finding.passed ? (
-        <p className="text-muted text-xs">You kept this. The points are back.</p>
-      ) : null}
     </li>
   )
 }

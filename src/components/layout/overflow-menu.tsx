@@ -111,15 +111,18 @@ export function OverflowMenu() {
             onClick={toggleTheme}
             className={ITEM_CLASS}
           >
-            Dark mode
-            <span aria-hidden="true" className="text-accent">
-              {theme === 'dark' ? (
-                <svg viewBox="0 0 20 20" className="size-4" fill="currentColor">
-                  <path d="M7.6 13.4 4.2 10l-1.2 1.2 4.6 4.6 9.4-9.4-1.2-1.2z" />
-                </svg>
-              ) : (
-                <span className="block size-4" />
-              )}
+            {theme === 'dark' ? 'Dark mode' : 'Light mode'}
+            <span
+              aria-hidden="true"
+              className={`flex h-6 w-12 items-center rounded-full p-1 transition duration-150 ease-out ${
+                theme === 'dark' ? 'bg-accent' : 'bg-surface-sunken'
+              }`}
+            >
+              <span
+                className={`bg-surface block size-4 rounded-full transition duration-150 ease-out ${
+                  theme === 'dark' ? 'translate-x-6' : 'translate-x-0'
+                }`}
+              />
             </span>
           </button>
 

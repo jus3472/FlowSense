@@ -10,7 +10,12 @@ interface DisclosureProps {
 }
 
 /** Collapsed by default, keyboard reachable, with a visible focus ring. */
-export function Disclosure({ summary, hint, children, defaultOpen = false }: DisclosureProps) {
+export function Disclosure({
+  summary,
+  hint,
+  children,
+  defaultOpen = false,
+}: DisclosureProps) {
   const [open, setOpen] = useState(defaultOpen)
   const id = useId()
 
@@ -21,7 +26,7 @@ export function Disclosure({ summary, hint, children, defaultOpen = false }: Dis
         aria-expanded={open}
         aria-controls={id}
         onClick={() => setOpen((value) => !value)}
-        className="rounded-card flex min-h-14 items-center justify-between gap-4 px-6 text-left"
+        className="rounded-card flex items-center justify-between gap-4 px-6 pt-6 pb-4 text-left"
       >
         <span className="flex flex-col gap-1">
           <span className="text-foreground text-sm font-medium">{summary}</span>
@@ -37,7 +42,7 @@ export function Disclosure({ summary, hint, children, defaultOpen = false }: Dis
         </svg>
       </button>
       {open ? (
-        <div id={id} className="flex flex-col gap-4 px-6 pb-6">
+        <div id={id} className="flex flex-col gap-4 px-6 pt-3 pb-6">
           {children}
         </div>
       ) : null}

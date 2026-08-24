@@ -97,7 +97,7 @@ export function ResultsView({
   }
 
   return (
-    <div className="flex flex-col gap-12 pb-12">
+    <div className="flex flex-col gap-8 pb-12">
       <p className="prompt-display text-muted text-lg">{attempt.promptText}</p>
 
       <ScoreHeader
@@ -139,14 +139,16 @@ export function ResultsView({
         max={adjusted.section_scores.delivery.max}
       />
 
-      {adjusted.content_result.tightened ? (
-        <TighterVersion
-          original={attempt.transcript}
-          tightened={adjusted.content_result.tightened}
-        />
-      ) : null}
+      <div className="flex flex-col gap-6">
+        {adjusted.content_result.tightened ? (
+          <TighterVersion
+            original={attempt.transcript}
+            tightened={adjusted.content_result.tightened}
+          />
+        ) : null}
 
-      <StatisticsSection statistics={attempt.statistics} />
+        <StatisticsSection statistics={attempt.statistics} />
+      </div>
 
       {attempt.audioUrl ? (
         <AudioPlayer src={attempt.audioUrl} durationMs={attempt.durationMs} />

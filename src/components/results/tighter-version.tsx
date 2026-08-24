@@ -25,7 +25,8 @@ export function TighterVersion({ original, tightened }: TighterVersionProps) {
 
   return (
     <Disclosure
-      summary={`A tighter version, ${countWords(original)} to ${countWords(tightened)} words`}
+      summary="A tighter version"
+      hint={`${countWords(original)} to ${countWords(tightened)} words`}
     >
       <p className="text-foreground text-base">{tightened}</p>
       <div>

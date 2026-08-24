@@ -67,7 +67,6 @@ export function TranscriptPanel({ segments }: { segments: readonly Segment[] }) 
           })}
         </p>
       </div>
-      <p className="text-muted text-xs">Anything marked cost points. Hover to see which check.</p>
     </section>
   )
 }

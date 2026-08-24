@@ -28,7 +28,7 @@ export function DeliverySection({
   max,
 }: DeliverySectionProps) {
   return (
-    <section className="flex flex-col gap-6">
+    <section className="bg-surface rounded-card flex flex-col gap-6 p-6">
       <div className="flex items-baseline justify-between gap-4">
         <h2 className="prompt-display text-foreground text-xl">How you sounded</h2>
         <p className="numeric text-muted text-sm">
@@ -36,13 +36,15 @@ export function DeliverySection({
         </p>
       </div>
 
-      <ul className="bg-surface rounded-card flex flex-col">
+      <ul className="flex flex-col">
         {ORDER.map((name, index) => {
           const metric = metrics[name]
           return (
             <li
               key={name}
-              className={`flex items-start justify-between gap-4 px-6 py-4 ${index > 0 ? 'border-border border-t' : ''}`}
+              className={`flex items-start justify-between gap-4 py-4 ${
+                index === 0 ? 'pt-0' : 'border-border border-t'
+              } ${index === ORDER.length - 1 ? 'pb-0' : ''}`}
             >
               <span className="flex flex-col gap-1">
                 <span className="text-foreground text-sm font-medium">{METRIC_LABEL[name]}</span>

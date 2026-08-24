@@ -36,7 +36,7 @@ export function ContentSection({
   const spans = listedSpans(content.extra_spans, content.checks.word_choice)
 
   return (
-    <section className="flex flex-col gap-6">
+    <section className="bg-surface rounded-card flex flex-col gap-6 p-6">
       <div className="flex items-baseline justify-between gap-4">
         <h2 className="prompt-display text-foreground text-xl">What you said</h2>
         <p className="numeric text-muted text-sm">
@@ -50,7 +50,7 @@ export function ContentSection({
         </p>
       ) : null}
 
-      <ul className="bg-surface rounded-card flex flex-col">
+      <ul className="flex flex-col">
         {CHECK_NAMES.map((name) => (
           <CheckRow
             key={name}
@@ -70,7 +70,7 @@ export function ContentSection({
           when every span is already shown as a quote there is no list at all.
         */}
         {!notChecked && spans.length > 0 ? (
-          <li className="border-border flex flex-col gap-3 border-t px-6 py-4">
+          <li className="border-border flex flex-col gap-3 border-t py-4">
             <p className="text-muted text-xs">Spans that read the same with them removed:</p>
             <ul className="flex flex-col gap-3">
               {spans.map((span) => {
