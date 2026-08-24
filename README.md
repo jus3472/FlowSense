@@ -1,60 +1,29 @@
 # FlowSense
 
-A speaking trainer for people who sound sharper on paper than they do out loud. A prompt appears,
-you answer out loud, and FlowSense shows you where your point landed and where it went soft.
+FlowSense is a speaking trainer for people who sound sharper on paper than they do out loud. A
+prompt appears, the user answers aloud for up to 60 seconds, and the result measures Clarity out of
+100.
 
-This repository is the foundation: landing page, auth, onboarding, and an empty home screen.
-Recording, transcription, and scoring arrive in later prompts.
+The product measures rather than judges. It does not assess accent, grammar, vocabulary level, or
+confidence. A speech span can cost points under only one check or metric.
 
-## Running locally
+## Documentation
+
+- [PROJECT.md](PROJECT.md) covers product context, architecture, scoring, data, and operational
+  risks.
+- [AGENTS.md](AGENTS.md) contains instructions for coding agents working in this repository.
+
+## Run locally
 
 ```bash
 npm install
-```
-
-```bash
 cp .env.example .env.local
-```
-
-Fill in the Supabase and provider keys, then:
-
-```bash
 npm run dev
 ```
 
-The app runs at http://localhost:3000.
+Set the required values in `.env.local`. The app runs at `http://localhost:3000`.
 
-Other commands:
-
-| Command             | What it does                                         |
-| ------------------- | ---------------------------------------------------- |
-| `npm run build`     | Production build                                     |
-| `npm run test`      | Vitest suite                                         |
-| `npm run lint`      | ESLint                                               |
-| `npm run typecheck` | TypeScript in strict mode                            |
-| `npm run verify`    | Typecheck, lint, and tests together                  |
-| `npm run db:push`   | Applies `supabase/migrations` to the hosted database |
-
-## Database
-
-Schema lives in `supabase/migrations` and is applied in filename order. To apply it, set a
-connection string that is only used for migrations and never read by the app:
-
-```bash
-SUPABASE_DB_URL='postgresql://postgres:PASSWORD@db.PROJECT_REF.supabase.co:5432/postgres' npm run db:push
-```
-
-The connection string is in the Supabase dashboard under Project Settings, Database, Connection
-string, URI. You can also paste each migration file into the dashboard SQL editor in filename
-order, which needs no connection string at all.
-
-Applied versions are recorded in `supabase_migrations.schema_migrations`, the same table the
-Supabase CLI uses, so `supabase db push` and this script can be mixed.
-
-## Deploying to Vercel
-
-Import the repository, keep the default Next.js settings, and set these environment variables for
-Production, Preview, and Development:
+Required application variables:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
@@ -62,21 +31,40 @@ Production, Preview, and Development:
 - `DEEPGRAM_API_KEY`
 - `DEEPSEEK_API_KEY`
 
-The last three are server only. `src/lib/env/server.ts` is the one module allowed to read them, it
-imports `server-only` so a client component that reaches it fails the build, and an ESLint rule
-plus a unit test block every other access path.
+`SUPABASE_DB_URL` is local-only and required only for database migrations and inspection scripts.
+`DEEPGRAM_DEBUG=true` logs raw transcription responses for debugging and should remain disabled by
+default.
 
-Add the deployment URL to the Supabase dashboard under Authentication, URL Configuration.
+## Commands
 
-## Design system
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the local development server |
+| `npm run build` | Create a production build |
+| `npm run lint` | Run ESLint |
+| `npm run typecheck` | Run strict TypeScript checking |
+| `npm run test` | Run the Vitest suite |
+| `npm run verify` | Run typecheck, lint, and tests |
+| `npm run db:push` | Apply migrations in `supabase/migrations` |
+| `npm run inspect:attempts` | Inspect stored capture timelines |
+| `npm run inspect:scores` | Inspect scored attempt breakdowns |
+| `npm run inspect:rewrites` | Audit stored tightened rewrites |
 
-Every color, size, radius, and motion value is declared in `src/app/globals.css`. Tailwind's own
-palettes and scales are cleared there, so a class like `bg-blue-500` or `rounded-md` does not
-exist. Components consume semantic tokens only, and changing one variable repaints both themes.
+`npm run inspect:rewrites -- --write` updates stored rewrites and can call the content provider
+when a retry is necessary. Run it deliberately.
 
-The theme is applied through `data-theme` on `<html>`, set by an inline script in the document head
-before first paint, and stored in `localStorage`. The system preference is consulted only on a
-first visit.
+## Database and deployment
 
-`tests/design-system.test.ts`, `tests/contrast.test.ts`, and `tests/copy.test.ts` enforce these
-rules, including a 4.5:1 contrast floor on every text and surface pair in both themes.
+Migrations in `supabase/migrations` run in filename order. `npm run db:push` reads
+`SUPABASE_DB_URL` from the environment or `.env.local`; the application does not read that value.
+Applied migration names are recorded in `supabase_migrations.schema_migrations`, which keeps this
+script compatible with the Supabase CLI.
+
+For Vercel, set the five required application variables for Production, Preview, and Development.
+Add each deployment URL to Supabase Authentication URL Configuration. The three secret variables are
+read only in `src/lib/env/server.ts`; do not expose them to client components.
+
+## Validation
+
+Run `npm run verify` before merging behavior changes. The suite enforces strict types, scoring edge
+cases, user-facing copy rules, semantic design tokens, contrast, and literal score-bar behavior.
