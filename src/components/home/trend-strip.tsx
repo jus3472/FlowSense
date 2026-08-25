@@ -4,13 +4,20 @@ import { EmptyState } from '@/components/ui/empty-state'
 
 /** A compact, literal view of recent scores. Oldest is on the left. */
 export function TrendStrip({ scores }: { scores: number[] }) {
-  if (scores.length < 2) {
+  if (scores.length === 0) return null
+
+  if (scores.length === 1) {
+    const latest = scores[0]
+
     return (
-      <Card className="flex flex-col gap-6 p-8">
-        <h2 className="section-label text-muted">Trend</h2>
+      <Card className="flex flex-col gap-4 p-6">
+        <div className="flex items-baseline justify-between gap-4">
+          <h2 className="section-label text-muted">Recent scores</h2>
+          <p className="numeric text-muted text-xs">latest {latest}</p>
+        </div>
         <EmptyState
-          title="Not enough responses yet"
-          description="Your trend appears after 2 scored responses."
+          title="Your first score is ready"
+          description="Record one more response to see your trend."
         />
       </Card>
     )
