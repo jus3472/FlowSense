@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { TrendChart } from '@/components/history/trend-chart'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -49,10 +49,38 @@ export function HistoryList({
   const [confirming, setConfirming] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement>())
+  const focusAfterDismissRef = useRef<string | null>(null)
 
   const visible = applyFilter(entries, filter)
   const groups = groupByDay(visible)
   const scores = [...entries].reverse().map((entry) => entry.score)
+
+  const dismissConfirmation = useCallback((id: string, returnFocus: boolean) => {
+    if (returnFocus) focusAfterDismissRef.current = id
+    setConfirming(null)
+  }, [])
+
+  useEffect(() => {
+    if (!focusAfterDismissRef.current || confirming !== null) return
+
+    deleteButtonRefs.current.get(focusAfterDismissRef.current)?.focus()
+    focusAfterDismissRef.current = null
+  }, [confirming])
+
+  useEffect(() => {
+    if (!confirming || busy === confirming) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+
+      event.preventDefault()
+      dismissConfirmation(confirming, true)
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [busy, confirming, dismissConfirmation])
 
   const remove = async (id: string) => {
     setBusy(id)
@@ -155,7 +183,7 @@ export function HistoryList({
                         aria-label="Cancel delete"
                         title="Cancel"
                         disabled={busy === entry.id}
-                        onClick={() => setConfirming(null)}
+                        onClick={() => dismissConfirmation(entry.id, false)}
                         className={ICON_BUTTON}
                       >
                         <CloseIcon />
@@ -164,6 +192,13 @@ export function HistoryList({
                   </div>
                 ) : (
                   <button
+                    ref={(node) => {
+                      if (node) {
+                        deleteButtonRefs.current.set(entry.id, node)
+                      } else {
+                        deleteButtonRefs.current.delete(entry.id)
+                      }
+                    }}
                     type="button"
                     aria-label="Delete response"
                     title="Delete response"
