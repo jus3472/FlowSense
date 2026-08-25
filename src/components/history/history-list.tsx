@@ -11,6 +11,7 @@ import {
   applyFilter,
   averageScore,
   groupByDay,
+  timeLabel,
   type HistoryEntry,
   type HistoryFilter,
 } from '@/lib/results/history'
@@ -158,9 +159,15 @@ export function HistoryList({
                   href={`/attempts/${entry.id}`}
                   className="bg-surface rounded-card hover:bg-surface-sunken focus:ring-accent-soft flex min-h-20 cursor-pointer items-start justify-between gap-4 p-6 pr-16 transition duration-150 ease-out focus:ring-2"
                 >
-                  <p className="text-foreground min-w-0 text-sm font-medium">
-                    {entry.promptText}
-                  </p>
+                  <div className="min-w-0">
+                    <p className="text-foreground text-sm font-medium">{entry.promptText}</p>
+                    <time
+                      dateTime={entry.createdAt}
+                      className="numeric text-muted mt-1 block text-xs"
+                    >
+                      {timeLabel(entry.createdAt)}
+                    </time>
+                  </div>
                   <span className="numeric text-foreground shrink-0 text-lg">{entry.score}</span>
                 </Link>
 

@@ -5,6 +5,7 @@ import {
   averageScore,
   dayLabel,
   groupByDay,
+  timeLabel,
   type HistoryEntry,
 } from '@/lib/results/history'
 import {
@@ -285,6 +286,10 @@ describe('history grouping', () => {
     expect(dayLabel(entry('a', 0, 80).createdAt, now)).toBe('Today')
     expect(dayLabel(entry('b', 1, 80).createdAt, now)).toBe('Yesterday')
     expect(dayLabel(entry('c', 5, 80).createdAt, now)).toMatch(/August/)
+  })
+
+  it('formats the row time without seconds', () => {
+    expect(timeLabel(entry('a', 0, 80).createdAt).replace(/\s/g, ' ')).toBe('9:00 AM')
   })
 
   it('groups newest first', () => {

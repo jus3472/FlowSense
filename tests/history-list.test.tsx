@@ -27,13 +27,19 @@ vi.mock('@/lib/results/api', () => ({
 const entries: HistoryEntry[] = [
   {
     id: 'attempt-1',
-    createdAt: '2026-08-25T12:00:00.000Z',
+    createdAt: new Date(2026, 7, 25, 9, 5).toISOString(),
     promptText: 'Describe a place you know well.',
     score: 82,
   },
 ]
 
 describe('HistoryList', () => {
+  it('shows the response time in each history row', () => {
+    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+
+    expect(screen.getByText(/9:05\sAM/)).toBeInTheDocument()
+  })
+
   it('dismisses delete confirmation on Escape and restores focus to delete', async () => {
     render(<HistoryList entries={entries} focusPhrase="with less filler" />)
 
