@@ -56,4 +56,29 @@ describe('HistoryList', () => {
       expect(screen.getByRole('button', { name: 'Delete response' })).toHaveFocus()
     })
   })
+
+  it('keeps long prompts and 3-digit scores stable in the mobile row layout', () => {
+    const longPrompt =
+      'When a community plan changes at the last minute, describe how you decide what to keep, what to adjust, and what you would say first.'
+
+    render(
+      <HistoryList
+        entries={[
+          {
+            id: 'attempt-100',
+            createdAt: '2026-08-25T12:00:00.000Z',
+            promptText: longPrompt,
+            score: 100,
+          },
+        ]}
+        focusPhrase="with less filler"
+      />,
+    )
+
+    expect(screen.getByRole('group', { name: 'Filter responses' })).toHaveClass('flex-wrap')
+    expect(screen.getByRole('button', { name: 'High scores' })).toHaveClass('whitespace-nowrap')
+    expect(screen.getByText(longPrompt)).toHaveClass('min-w-0', 'break-words')
+    expect(screen.getByText(longPrompt).parentElement).toHaveClass('min-w-0', 'flex-1')
+    expect(screen.getByText('100')).toHaveClass('w-12', 'shrink-0', 'text-right')
+  })
 })

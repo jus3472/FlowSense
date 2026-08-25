@@ -13,7 +13,7 @@ export function TrendStrip({ scores }: { scores: number[] }) {
       <Card className="flex flex-col gap-4 p-6">
         <div className="flex items-baseline justify-between gap-4">
           <h2 className="section-label text-muted">Recent scores</h2>
-          <p className="numeric text-muted text-xs">latest {latest}</p>
+          <p className="numeric text-muted text-xs whitespace-nowrap">latest {latest}</p>
         </div>
         <EmptyState
           title="Your first score is ready"
@@ -39,7 +39,7 @@ export function TrendStrip({ scores }: { scores: number[] }) {
     >
       <div className="flex items-baseline justify-between gap-4">
         <h2 className="section-label text-muted">Recent scores</h2>
-        <p className="numeric text-muted text-xs">latest {latest}</p>
+        <p className="numeric text-muted text-xs whitespace-nowrap">latest {latest}</p>
       </div>
 
       <svg
@@ -69,9 +69,11 @@ export function TrendStrip({ scores }: { scores: number[] }) {
         ))}
       </svg>
 
-      <div className="numeric text-muted flex justify-between gap-2 text-xs">
+      <div className="numeric text-muted flex justify-between gap-1 text-xs">
         {recent.map((score, index) => (
-          <span key={`${score}-${index}`}>{score}</span>
+          <span key={`${score}-${index}`} className="min-w-6 text-center">
+            {score}
+          </span>
         ))}
       </div>
 
