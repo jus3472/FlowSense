@@ -19,6 +19,11 @@ const DATE_FORMAT = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
 })
 
+const TIME_FORMAT = new Intl.DateTimeFormat('en-US', {
+  hour: 'numeric',
+  minute: '2-digit',
+})
+
 export function dayLabel(iso: string, now: Date = new Date()): string {
   const date = new Date(iso)
   const today = dayKey(now)
@@ -28,6 +33,10 @@ export function dayLabel(iso: string, now: Date = new Date()): string {
   if (key === today) return 'Today'
   if (key === yesterday) return 'Yesterday'
   return DATE_FORMAT.format(date)
+}
+
+export function timeLabel(iso: string): string {
+  return TIME_FORMAT.format(new Date(iso))
 }
 
 /** Newest first, grouped into days. */
