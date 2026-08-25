@@ -20,7 +20,13 @@ const FILTERS: HistoryFilter[] = ['all', 'high', 'low']
 
 function TrashIcon() {
   return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" className="size-4" fill="none" stroke="currentColor">
+    <svg
+      viewBox="0 0 20 20"
+      aria-hidden="true"
+      className="size-4"
+      fill="none"
+      stroke="currentColor"
+    >
       <path d="M4.5 6.5h11M8 3.5h4m-6.5 3 1 10h7l1-10M8.5 9v4.5m3-4.5v4.5" strokeWidth="1.5" />
     </svg>
   )
@@ -28,7 +34,13 @@ function TrashIcon() {
 
 function CloseIcon() {
   return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" className="size-4" fill="none" stroke="currentColor">
+    <svg
+      viewBox="0 0 20 20"
+      aria-hidden="true"
+      className="size-4"
+      fill="none"
+      stroke="currentColor"
+    >
       <path d="m6 6 8 8m0-8-8 8" strokeWidth="1.5" />
     </svg>
   )
@@ -111,7 +123,7 @@ export function HistoryList({
     <div className="flex flex-col gap-6">
       <TrendChart scores={scores} average={averageScore(entries)} />
 
-      <div role="group" aria-label="Filter responses" className="flex gap-2">
+      <div role="group" aria-label="Filter responses" className="flex flex-wrap gap-2">
         {FILTERS.map((value) => (
           <button
             key={value}
@@ -119,7 +131,7 @@ export function HistoryList({
             aria-pressed={filter === value}
             onClick={() => setFilter(value)}
             className={cn(
-              'min-h-11 rounded-full px-4 text-sm font-medium transition duration-150 ease-out',
+              'min-h-11 rounded-full px-4 text-sm font-medium whitespace-nowrap transition duration-150 ease-out',
               filter === value
                 ? 'bg-accent-soft text-foreground ring-accent ring-2 ring-inset'
                 : 'bg-surface-sunken text-foreground hover:bg-accent-soft',
@@ -158,10 +170,12 @@ export function HistoryList({
                   href={`/attempts/${entry.id}`}
                   className="bg-surface rounded-card hover:bg-surface-sunken focus:ring-accent-soft flex min-h-20 cursor-pointer items-start justify-between gap-4 p-6 pr-16 transition duration-150 ease-out focus:ring-2"
                 >
-                  <p className="text-foreground min-w-0 text-sm font-medium">
+                  <p className="text-foreground min-w-0 flex-1 text-sm font-medium break-words">
                     {entry.promptText}
                   </p>
-                  <span className="numeric text-foreground shrink-0 text-lg">{entry.score}</span>
+                  <span className="numeric text-foreground w-12 shrink-0 text-right text-lg">
+                    {entry.score}
+                  </span>
                 </Link>
 
                 {confirming === entry.id ? (
