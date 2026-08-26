@@ -14,22 +14,21 @@ export interface ProgressAttemptInput {
 export interface ProgressCohort {
   scoreVersion: string
   rubricVersion: string
-  mode: PracticeMode
-  categoryMaxPoints: Readonly<Record<SkillCategory, number>>
 }
 
 export interface ProgressPoint {
   attemptId: string
   createdAt: string
-  earnedPoints: number
-  maxPoints: number
+  /** Normalized stored-result value, always from 0 through 100. */
+  value: number
+  valueOutOf: 100
 }
 
 export interface ProgressSeries {
   points: readonly ProgressPoint[]
   valueCount: number
   state: 'ready' | 'insufficient_data'
-  averagePoints: number | null
+  averageValue: number | null
 }
 
 export interface ProgressWindow {
@@ -79,24 +78,15 @@ function cohortFor(payload: V2ScorePayload): ProgressCohort {
   return {
     scoreVersion: payload.version,
     rubricVersion: payload.rubric_version,
-    mode: payload.mode,
-    categoryMaxPoints: Object.fromEntries(
-      SKILL_CATEGORIES.map((category) => [category, payload.categories[category].max_points]),
-    ) as Record<SkillCategory, number>,
   }
 }
 
 function cohortKey(cohort: ProgressCohort): string {
-  return JSON.stringify([
-    cohort.scoreVersion,
-    cohort.rubricVersion,
-    cohort.mode,
-    ...SKILL_CATEGORIES.map((category) => cohort.categoryMaxPoints[category]),
-  ])
+  return JSON.stringify([cohort.scoreVersion, cohort.rubricVersion])
 }
 
 function emptySeries(): ProgressSeries {
-  return { points: [], valueCount: 0, state: 'insufficient_data', averagePoints: null }
+  return { points: [], valueCount: 0, state: 'insufficient_data', averageValue: null }
 }
 
 function series(points: readonly ProgressPoint[]): ProgressSeries {
@@ -105,10 +95,8 @@ function series(points: readonly ProgressPoint[]): ProgressSeries {
     points,
     valueCount,
     state: valueCount >= MINIMUM_PROGRESS_OBSERVATIONS ? 'ready' : 'insufficient_data',
-    averagePoints:
-      valueCount === 0
-        ? null
-        : points.reduce((sum, point) => sum + point.earnedPoints, 0) / valueCount,
+    averageValue:
+      valueCount === 0 ? null : points.reduce((sum, point) => sum + point.value, 0) / valueCount,
   }
 }
 
@@ -129,15 +117,11 @@ function windowFor(attempts: readonly AcceptedAttempt[]): ProgressWindow {
       const point = value(attempt)
       return point ? [point] : []
     })
-  const pointFor = (
-    attempt: AcceptedAttempt,
-    earnedPoints: number,
-    maxPoints: number,
-  ): ProgressPoint => ({
+  const pointFor = (attempt: AcceptedAttempt, value: number): ProgressPoint => ({
     attemptId: attempt.id,
     createdAt: attempt.createdAt,
-    earnedPoints,
-    maxPoints,
+    value,
+    valueOutOf: 100,
   })
 
   return {
@@ -146,11 +130,7 @@ function windowFor(attempts: readonly AcceptedAttempt[]): ProgressWindow {
       points((attempt) =>
         attempt.payload.total_earned_points === null
           ? null
-          : pointFor(
-              attempt,
-              attempt.payload.total_earned_points,
-              attempt.payload.total_max_points,
-            ),
+          : pointFor(attempt, attempt.payload.total_earned_points),
       ),
     ),
     categories: Object.fromEntries(
@@ -158,7 +138,12 @@ function windowFor(attempts: readonly AcceptedAttempt[]): ProgressWindow {
         const categoryPoints = points((attempt) => {
           const result = attempt.payload.categories[category]
           return result.status === 'scored' && result.earned_points !== null
-            ? pointFor(attempt, result.earned_points, result.max_points)
+            ? pointFor(
+                attempt,
+                result.component !== null
+                  ? result.component * 100
+                  : (result.earned_points / result.max_points) * 100,
+              )
             : null
         })
         return [category, series(categoryPoints)]
@@ -172,9 +157,9 @@ function exactCohort(left: ProgressCohort, right: ProgressCohort): boolean {
 }
 
 /**
- * Aggregates only one exact stored v2 cohort. Without an explicit cohort, the
- * newest accepted attempt chooses the cohort deterministically; other modes,
- * versions, rubrics, and weight sets are excluded rather than normalized.
+ * Aggregates only one exact stored score-version and rubric-version cohort.
+ * Modes remain an optional filter. Category values are normalized to 0 through 100
+ * from their stored component (or earned/max fallback), never raw weights.
  */
 export function aggregateV2Progress(
   input: readonly ProgressAttemptInput[],

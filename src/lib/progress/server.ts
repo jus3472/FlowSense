@@ -1,3 +1,5 @@
+import 'server-only'
+
 import {
   aggregateV2Progress,
   type ProgressAggregation,

@@ -96,17 +96,21 @@ describe('v2 progress aggregation', () => {
     }
   })
 
-  it('filters by stored snapshot mode and selects one exact cohort', () => {
+  it('includes compatible modes by default and narrows only when mode is filtered', () => {
     const practice = score('practice', 'practice', '2026-08-24T12:00:00.000Z')
     const interview = score('interview', 'interview', '2026-08-25T12:00:00.000Z')
 
     const filtered = aggregateV2Progress([practice, interview], { now: NOW, mode: 'practice' })
     const defaulted = aggregateV2Progress([practice, interview], { now: NOW })
 
-    expect(filtered.cohort?.mode).toBe('practice')
+    expect(filtered.cohort).toEqual({ scoreVersion: V2_SCORE_PAYLOAD_VERSION, rubricVersion: 'v2' })
     expect(filtered.windows.all.attemptCount).toBe(1)
-    expect(defaulted.cohort?.mode).toBe('interview')
-    expect(defaulted.counts.excludedIncompatible).toBe(1)
+    expect(defaulted.windows.all.attemptCount).toBe(2)
+    expect(defaulted.windows.all.overall.points.map((point) => point.attemptId)).toEqual([
+      'practice',
+      'interview',
+    ])
+    expect(defaulted.counts.excludedIncompatible).toBe(0)
   })
 
   it('uses deterministic recent and longer-history boundaries from caller time', () => {
@@ -142,6 +146,17 @@ describe('v2 progress aggregation', () => {
     expect(result.windows.all.categories.grammar.state).toBe('insufficient_data')
   })
 
+  it('normalizes category history to 0–100 across mode-specific weights', () => {
+    const practice = score('practice', 'practice', '2026-08-24T12:00:00.000Z', 0.6)
+    const interview = score('interview', 'interview', '2026-08-25T12:00:00.000Z', 0.6)
+    const result = aggregateV2Progress([practice, interview], { now: NOW })
+    const fluency = result.windows.all.categories.fluency.points
+
+    expect(fluency.map((point) => point.value)).toEqual([60, 60])
+    expect(fluency.map((point) => point.valueOutOf)).toEqual([100, 100])
+    expect(result.windows.all.categories.fluency.averageValue).toBe(60)
+  })
+
   it('reports explicit insufficient-data states and empty cohort data', () => {
     const result = aggregateV2Progress([], { now: NOW })
 
@@ -149,7 +164,7 @@ describe('v2 progress aggregation', () => {
     expect(result.windows.all.attemptCount).toBe(0)
     expect(result.windows.all.overall).toMatchObject({
       state: 'insufficient_data',
-      averagePoints: null,
+      averageValue: null,
     })
     expect(result.windows.recent.categories.fluency.state).toBe('insufficient_data')
   })
@@ -178,15 +193,15 @@ describe('v2 progress aggregation', () => {
     expect(result.windows.all.overall.state).toBe('insufficient_data')
   })
 
-  it('honors an explicit exact cohort instead of mixing another compatible-looking mode', () => {
+  it('honors an explicit incompatible cohort instead of mixing versions', () => {
     const practice = score('practice', 'practice', '2026-08-24T12:00:00.000Z')
     const interview = score('interview', 'interview', '2026-08-25T12:00:00.000Z')
-    const cohort = aggregateV2Progress([practice], { now: NOW }).cohort
-    if (!cohort) throw new Error('Test fixture did not create a cohort.')
-    const result = aggregateV2Progress([practice, interview], { now: NOW, cohort })
+    const result = aggregateV2Progress([practice, interview], {
+      now: NOW,
+      cohort: { scoreVersion: 'v2.score.2', rubricVersion: 'v2' },
+    })
 
-    expect(result.cohort?.mode).toBe('practice')
-    expect(result.windows.all.overall.points.map((point) => point.attemptId)).toEqual(['practice'])
-    expect(result.counts.excludedIncompatible).toBe(1)
+    expect(result.windows.all.overall.points).toEqual([])
+    expect(result.counts.excludedIncompatible).toBe(2)
   })
 })
