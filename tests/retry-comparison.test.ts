@@ -1,4 +1,8 @@
-import { compareRetryResults, retryAncestorIds } from '@/lib/results/retry-comparison'
+import {
+  compareRetryResults,
+  loadRetryAncestorChain,
+  RETRY_COMPARISON_NOISE_POINTS,
+} from '@/lib/results/retry-comparison'
 import { V2_SCORE_PAYLOAD_VERSION, type V2ScorePayload } from '@/lib/scoring/v2/assemble'
 import { describe, expect, it } from 'vitest'
 
@@ -40,7 +44,7 @@ function score(overrides: Partial<V2ScorePayload> = {}): V2ScorePayload {
 }
 
 describe('retry comparison', () => {
-  it('returns numeric direct-parent rows beyond a conservative noise threshold', () => {
+  it('returns overall and every mutually scored category with neutral numeric metadata', () => {
     const current = score()
     const previous = score({
       categories: {
@@ -49,13 +53,26 @@ describe('retry comparison', () => {
       },
       total_earned_points: 93,
     })
-    expect(compareRetryResults('current', 'previous', current, previous)).toMatchObject({
-      previousAttemptId: 'previous',
-      rows: [{ category: 'fluency', currentPoints: 22, previousPoints: 15, deltaPoints: 7 }],
+    const comparison = compareRetryResults(current, previous)
+    expect(comparison?.rows).toHaveLength(7)
+    expect(comparison?.rows[0]).toMatchObject({
+      category: 'overall',
+      label: 'Overall',
+      previousPoints: 93,
+      currentPoints: 100,
+      withinNoise: false,
     })
+    expect(comparison?.rows).toContainEqual(
+      expect.objectContaining({
+        category: 'fluency',
+        label: 'Fluency',
+        previousPoints: 15,
+        currentPoints: 22,
+      }),
+    )
   })
 
-  it('omits small differences and partial categories without making a claim', () => {
+  it('keeps zero and small deltas while omitting only categories not scored on both attempts', () => {
     const current = score()
     const previous = score({
       categories: {
@@ -70,24 +87,27 @@ describe('retry comparison', () => {
       },
       total_earned_points: null,
     })
-    expect(compareRetryResults('current', 'previous', current, previous)?.rows).toEqual([])
+    const rows = compareRetryResults(current, previous)?.rows ?? []
+    expect(rows.find((row) => row.category === 'overall')).toBeUndefined()
+    expect(rows.find((row) => row.category === 'grammar')).toBeUndefined()
+    expect(rows.find((row) => row.category === 'fluency')).toMatchObject({
+      deltaPoints: 2,
+      withinNoise: true,
+    })
+    expect(RETRY_COMPARISON_NOISE_POINTS).toBe(2)
   })
 
   it('rejects incompatible mode, rubric, and category maxima', () => {
     const current = score()
+    expect(compareRetryResults(current, score({ mode: 'interview' }))).toBeNull()
     expect(
-      compareRetryResults('current', 'previous', current, score({ mode: 'interview' })),
-    ).toBeNull()
-    expect(
-      compareRetryResults('current', 'previous', current, {
+      compareRetryResults(current, {
         ...score(),
         rubric_version: 'other' as 'v2',
       }),
     ).toBeNull()
     expect(
       compareRetryResults(
-        'current',
-        'previous',
         current,
         score({
           categories: {
@@ -99,25 +119,29 @@ describe('retry comparison', () => {
     ).toBeNull()
   })
 
-  it('bounds chain traversal and rejects missing or cyclic parents', () => {
-    expect(
-      retryAncestorIds('a', [
-        { id: 'a', retryOfAttemptId: 'b' },
-        { id: 'b', retryOfAttemptId: null },
-      ]),
-    ).toEqual(['b'])
-    expect(retryAncestorIds('a', [{ id: 'a', retryOfAttemptId: 'missing' }])).toBeNull()
-    expect(
-      retryAncestorIds('a', [
-        { id: 'a', retryOfAttemptId: 'b' },
-        { id: 'b', retryOfAttemptId: 'a' },
-      ]),
-    ).toBeNull()
-    expect(retryAncestorIds('a', [{ id: 'a', retryOfAttemptId: 42 as never }])).toBeNull()
+  it('bounds the exact loaded chain and rejects missing, malformed, or cyclic parents', async () => {
+    const loader = async (id: string) =>
+      ({ a: { id: 'a', retryOfAttemptId: 'b' }, b: { id: 'b', retryOfAttemptId: null } })[id] ??
+      null
+    await expect(loadRetryAncestorChain('a', loader)).resolves.toEqual([
+      { id: 'b', retryOfAttemptId: null },
+    ])
+    await expect(loadRetryAncestorChain('a', async () => null)).resolves.toBeNull()
+    await expect(
+      loadRetryAncestorChain('a', async (id) => ({ id, retryOfAttemptId: id === 'a' ? 'b' : 'a' })),
+    ).resolves.toBeNull()
+    await expect(
+      loadRetryAncestorChain('a', async () => ({ id: 'a', retryOfAttemptId: 42 as never })),
+    ).resolves.toBeNull()
     const longChain = Array.from({ length: 10 }, (_, index) => ({
       id: `node-${index}`,
       retryOfAttemptId: index === 9 ? null : `node-${index + 1}`,
     }))
-    expect(retryAncestorIds('node-0', longChain)).toBeNull()
+    await expect(
+      loadRetryAncestorChain(
+        'node-0',
+        async (id) => longChain.find((node) => node.id === id) ?? null,
+      ),
+    ).resolves.toBeNull()
   })
 })

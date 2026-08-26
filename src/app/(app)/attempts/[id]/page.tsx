@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { readAttemptResult } from '@/lib/results/attempt-result'
-import { compareRetryResults, MAX_RETRY_CHAIN_LENGTH } from '@/lib/results/retry-comparison'
+import { compareRetryResults, loadRetryAncestorChain } from '@/lib/results/retry-comparison'
 import { createClient } from '@/lib/supabase/server'
 import type { AttemptRow } from '@/lib/types/database'
 
@@ -17,6 +17,20 @@ export const metadata: Metadata = {
 }
 
 const SIGNED_URL_SECONDS = 60 * 60
+type RetryAttemptRow = Pick<
+  AttemptRow,
+  | 'id'
+  | 'prompt_text'
+  | 'transcript'
+  | 'duration_ms'
+  | 'created_at'
+  | 'score'
+  | 'section_scores'
+  | 'metrics'
+  | 'content_result'
+  | 'retry_of_attempt_id'
+>
+type RetryAttempt = RetryAttemptRow & { retryOfAttemptId: string | null }
 
 export default async function AttemptPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -79,34 +93,28 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
   }
 
   if (result.kind === 'v2') {
-    // The parent is always read through the signed-in user's RLS scope. A
-    // missing or non-v2 parent simply has no comparison; stored results are
-    // never recalculated for a retry view.
+    // Every ancestor read is user-scoped. A missing, cyclic, or overlong chain
+    // suppresses the link and comparison rather than reconstructing history.
     let comparison = null
+    let previousAttemptId: string | null = null
     if (attempt.retry_of_attempt_id) {
-      type RetryAttempt = Pick<
-        AttemptRow,
-        | 'id'
-        | 'prompt_text'
-        | 'transcript'
-        | 'duration_ms'
-        | 'created_at'
-        | 'score'
-        | 'section_scores'
-        | 'metrics'
-        | 'content_result'
-        | 'retry_of_attempt_id'
-      >
-      let parent: RetryAttempt | null = null
-      let ancestorId: string | null = attempt.retry_of_attempt_id
-      const seen = new Set<string>([attempt.id])
-      for (let depth = 0; ancestorId && depth < MAX_RETRY_CHAIN_LENGTH; depth += 1) {
-        if (seen.has(ancestorId)) {
-          parent = null
-          break
+      const chain = await loadRetryAncestorChain<RetryAttempt>(attempt.id, async (ancestorId) => {
+        if (ancestorId === attempt.id) {
+          return {
+            id: attempt.id,
+            prompt_text: attempt.prompt_text,
+            transcript: attempt.transcript,
+            duration_ms: attempt.duration_ms,
+            created_at: attempt.created_at,
+            score: attempt.score,
+            section_scores: attempt.section_scores,
+            metrics: attempt.metrics,
+            content_result: attempt.content_result,
+            retry_of_attempt_id: attempt.retry_of_attempt_id,
+            retryOfAttemptId: attempt.retry_of_attempt_id,
+          }
         }
-        seen.add(ancestorId)
-        const ancestorResponse: { data: RetryAttempt | null } = await supabase
+        const response: { data: RetryAttemptRow | null } = await supabase
           .from('attempts')
           .select(
             'id, prompt_text, transcript, duration_ms, audio_path, created_at, score, section_scores, metrics, content_result, retry_of_attempt_id',
@@ -114,17 +122,13 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
           .eq('id', ancestorId)
           .eq('user_id', user.id)
           .maybeSingle()
-        const ancestor = ancestorResponse.data
-        if (!ancestor) {
-          parent = null
-          break
-        }
-        if (depth === 0) parent = ancestor
-        ancestorId = ancestor.retry_of_attempt_id
-        if (!ancestorId) break
-        if (depth === MAX_RETRY_CHAIN_LENGTH - 1) parent = null
-      }
+        return response.data
+          ? { ...response.data, retryOfAttemptId: response.data.retry_of_attempt_id }
+          : null
+      })
+      const parent = chain?.[0] ?? null
       if (parent) {
+        previousAttemptId = parent.id
         const parentResult = readAttemptResult({
           id: parent.id,
           promptText: parent.prompt_text,
@@ -138,8 +142,6 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
           contentResult: parent.content_result,
         })
         comparison = compareRetryResults(
-          attempt.id,
-          attempt.retry_of_attempt_id,
           result.payload,
           parentResult.kind === 'v2' ? parentResult.payload : null,
         )
@@ -164,6 +166,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         audioUrl={audioUrl}
         payload={result.payload}
         comparison={comparison}
+        previousAttemptId={previousAttemptId}
       />
     )
   }

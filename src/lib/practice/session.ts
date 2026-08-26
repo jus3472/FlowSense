@@ -131,3 +131,22 @@ export function retrySessionFromAttempt(value: unknown): PracticeSessionDescript
         : undefined,
   })
 }
+
+/** Ensures a retry request reuses only the protected stored session fields. */
+export function matchesRetrySession(
+  requested: PracticeSessionDescriptor,
+  sourceAttempt: unknown,
+): boolean {
+  const canonical = retrySessionFromAttempt(sourceAttempt)
+  return (
+    canonical !== null &&
+    requested.retryOfAttemptId === canonical.retryOfAttemptId &&
+    requested.promptText === canonical.promptText &&
+    requested.promptId === canonical.promptId &&
+    requested.mode === canonical.mode &&
+    requested.difficulty === canonical.difficulty &&
+    requested.source === canonical.source &&
+    requested.targetDurationSeconds === canonical.targetDurationSeconds &&
+    requested.additionalContext === canonical.additionalContext
+  )
+}

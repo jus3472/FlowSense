@@ -87,31 +87,47 @@ describe('V2ResultsView', () => {
     expect(screen.queryByText('100')).not.toBeInTheDocument()
   })
 
-  it('renders neutral numeric comparison rows and a previous-response link', () => {
+  it('renders neutral previous-to-current rows and a separate previous-response link', () => {
     render(
       <V2ResultsView
         {...props}
         payload={payload()}
         comparison={{
-          previousAttemptId: 'attempt-0',
           rows: [
             {
               category: 'fluency',
+              label: 'Fluency',
               currentPoints: 20,
               previousPoints: 15,
               maxPoints: 22,
               deltaPoints: 5,
+              withinNoise: false,
             },
           ],
         }}
+        previousAttemptId="attempt-0"
       />,
     )
-    expect(screen.getByText('Compared with your previous response')).toBeInTheDocument()
-    expect(screen.getByText('fluency: 20 / 22 (previously 15, +5)')).toBeInTheDocument()
+    expect(screen.getByText('Previous response')).toBeInTheDocument()
+    expect(screen.getByText('Fluency 15 → 20')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'View previous response' })).toHaveAttribute(
       'href',
       '/attempts/attempt-0',
     )
     expect(screen.queryByText(/improv|worse|better/i)).not.toBeInTheDocument()
+  })
+
+  it('keeps a previous-response link when the parent cannot be compared', () => {
+    render(<V2ResultsView {...props} payload={payload()} previousAttemptId="attempt-0" />)
+    expect(screen.getByText('Open the previous response to review it.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View previous response' })).toHaveAttribute(
+      'href',
+      '/attempts/attempt-0',
+    )
+  })
+
+  it('shows no comparison navigation when no valid parent exists', () => {
+    render(<V2ResultsView {...props} payload={payload()} />)
+    expect(screen.queryByRole('link', { name: 'View previous response' })).not.toBeInTheDocument()
   })
 })

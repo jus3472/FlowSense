@@ -24,6 +24,7 @@ interface V2ResultsViewProps {
   audioUrl: string | null
   payload: V2ScorePayload
   comparison?: RetryComparison | null
+  previousAttemptId?: string | null
 }
 
 export function V2ResultsView({
@@ -35,6 +36,7 @@ export function V2ResultsView({
   audioUrl,
   payload,
   comparison = null,
+  previousAttemptId = null,
 }: V2ResultsViewProps) {
   const strongest = strongestV2Category(payload)
   const priority = priorityV2Category(payload)
@@ -129,27 +131,25 @@ export function V2ResultsView({
         )}
       </Card>
 
-      {comparison ? (
+      {comparison || previousAttemptId ? (
         <Card className="flex flex-col gap-3" aria-label="Previous response comparison">
-          <p className="text-foreground font-medium">Compared with your previous response</p>
-          {comparison.rows.length > 0 ? (
+          {comparison ? <p className="text-foreground font-medium">Previous response</p> : null}
+          {comparison ? (
             <ul className="text-muted flex flex-col gap-2 text-sm">
               {comparison.rows.map((row) => (
                 <li key={row.category}>
-                  {row.category}: {row.currentPoints} / {row.maxPoints} (previously{' '}
-                  {row.previousPoints}, {row.deltaPoints > 0 ? '+' : ''}
-                  {row.deltaPoints})
+                  {row.label} {row.previousPoints} → {row.currentPoints}
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-muted text-sm">
-              No category difference exceeded the comparison threshold.
-            </p>
+            <p className="text-muted text-sm">Open the previous response to review it.</p>
           )}
-          <ButtonLink href={`/attempts/${comparison.previousAttemptId}`} variant="secondary">
-            View previous response
-          </ButtonLink>
+          {previousAttemptId ? (
+            <ButtonLink href={`/attempts/${previousAttemptId}`} variant="secondary">
+              View previous response
+            </ButtonLink>
+          ) : null}
         </Card>
       ) : null}
 
