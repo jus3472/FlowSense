@@ -11,7 +11,10 @@ function capture(durationMs: number, amplitude: ReturnType<typeof amplitudeTimel
 function evaluated(transcript: string, durationMs = 10_000) {
   const words = wordsFrom(transcript)
   return evaluateFluency({
-    capture: capture(durationMs, amplitudeTimeline(durationMs, [{ from_ms: 0, to_ms: durationMs, rms: 0.2 }])),
+    capture: capture(
+      durationMs,
+      amplitudeTimeline(durationMs, [{ from_ms: 0, to_ms: durationMs, rms: 0.2 }]),
+    ),
     words,
     transcript,
   })
@@ -21,14 +24,28 @@ describe('v2 fluency evaluator', () => {
   it('returns a bounded, evidence-backed fluency component without points', () => {
     const result = evaluated('I went to the park and explained why I enjoyed it.')
 
-    expect(result).toMatchObject({ category: 'fluency', availability: 'available', status: 'scored' })
+    expect(result).toMatchObject({
+      category: 'fluency',
+      availability: 'available',
+      status: 'scored',
+    })
     if (result.availability === 'unavailable') throw new Error('Expected scoreable fluency.')
     expect(result.component).toBeGreaterThanOrEqual(0)
     expect(result.component).toBeLessThanOrEqual(1)
     expect(result).not.toHaveProperty('earned_points')
     expect(result.measurements.speaking_ms).toBeGreaterThan(0)
+    expect(Number.isFinite(result.measurements.continuity_ratio)).toBe(true)
+    expect(result.measurements.continuity_ratio).toBeGreaterThanOrEqual(0)
+    expect(result.measurements.continuity_ratio).toBeLessThanOrEqual(1)
+    for (const deduction of result.deductions) {
+      expect(Number.isFinite(deduction.component)).toBe(true)
+      expect(deduction.component).toBeGreaterThanOrEqual(0)
+      expect(deduction.component).toBeLessThanOrEqual(1)
+    }
     expect(result.evidence).toEqual(
-      expect.arrayContaining([expect.objectContaining({ source: 'transcript_and_audio_timeline' })]),
+      expect.arrayContaining([
+        expect.objectContaining({ source: 'transcript_and_audio_timeline' }),
+      ]),
     )
   })
 
@@ -37,7 +54,9 @@ describe('v2 fluency evaluator', () => {
     if (result.availability === 'unavailable') throw new Error('Expected scoreable fluency.')
 
     expect(result.measurements.filler_count).toBe(0)
-    expect(result.evidence.filter((entry) => entry.detail === 'Filler detected in the transcript.')).toEqual([])
+    expect(
+      result.evidence.filter((entry) => entry.detail === 'Filler detected in the transcript.'),
+    ).toEqual([])
   })
 
   it('reports corrections without counting them as fillers or deductions', () => {
@@ -143,6 +162,90 @@ describe('v2 fluency evaluator', () => {
     ).toMatchObject({ availability: 'unavailable', status: 'unavailable' })
   })
 
+  it.each([
+    [
+      'non-finite RMS',
+      [
+        { t_ms: 0, rms: Number.NaN },
+        { t_ms: 5_000, rms: 0.2 },
+        { t_ms: 10_000, rms: 0.2 },
+      ],
+    ],
+    [
+      'negative RMS',
+      [
+        { t_ms: 0, rms: -0.1 },
+        { t_ms: 5_000, rms: 0.2 },
+        { t_ms: 10_000, rms: 0.2 },
+      ],
+    ],
+    [
+      'nonmonotonic timestamps',
+      [
+        { t_ms: 0, rms: 0.2 },
+        { t_ms: 7_000, rms: 0.2 },
+        { t_ms: 6_000, rms: 0.2 },
+      ],
+    ],
+    [
+      'out-of-range timestamps',
+      [
+        { t_ms: 0, rms: 0.2 },
+        { t_ms: 5_000, rms: 0.2 },
+        { t_ms: 10_001, rms: 0.2 },
+      ],
+    ],
+  ])('is unavailable for %s amplitude evidence', (_name, amplitude) => {
+    const result = evaluateFluency({
+      capture: capture(10_000, amplitude),
+      words: wordsFrom('one two three four'),
+      transcript: 'one two three four',
+    })
+
+    expect(result).toMatchObject({
+      availability: 'unavailable',
+      status: 'unavailable',
+      component: null,
+    })
+  })
+
+  it('is unavailable when a throttled timeline is too sparse for pause analysis', () => {
+    const result = evaluateFluency({
+      capture: capture(10_000, [
+        { t_ms: 0, rms: 0.2 },
+        { t_ms: 1_000, rms: 0.2 },
+        { t_ms: 9_000, rms: 0.2 },
+      ]),
+      words: wordsFrom('one two three four'),
+      transcript: 'one two three four',
+    })
+
+    expect(result).toMatchObject({
+      availability: 'unavailable',
+      status: 'unavailable',
+      component: null,
+    })
+    expect(result.warnings.join(' ')).toMatch(/too sparse/)
+  })
+
+  it('is unavailable when timed words fall outside the measured recording', () => {
+    const result = evaluateFluency({
+      capture: capture(2_000, amplitudeTimeline(2_000, [{ from_ms: 0, to_ms: 2_000, rms: 0.2 }])),
+      words: [
+        { word: 'one', start: 0, end: 0.3 },
+        { word: 'two', start: 0.3, end: 0.6 },
+        { word: 'three', start: 2, end: 2.2 },
+      ],
+      transcript: 'one two three',
+    })
+
+    expect(result).toMatchObject({
+      availability: 'unavailable',
+      status: 'unavailable',
+      component: null,
+    })
+  })
+
   it('propagates capture warnings rather than silently scoring around them', () => {
     const words = Array.from({ length: 90 }, (_value, index) => ({
       word: 'word',
@@ -150,7 +253,10 @@ describe('v2 fluency evaluator', () => {
       end: index * 0.333 + 0.3,
     }))
     const result = evaluateFluency({
-      capture: capture(30_000, amplitudeTimeline(30_000, [{ from_ms: 0, to_ms: 30_000, rms: 0.2 }])),
+      capture: capture(
+        30_000,
+        amplitudeTimeline(30_000, [{ from_ms: 0, to_ms: 30_000, rms: 0.2 }]),
+      ),
       words,
       transcript: words.map((word) => word.word).join(' '),
     })

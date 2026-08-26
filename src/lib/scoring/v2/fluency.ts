@@ -10,6 +10,9 @@ import type { CaptureMetrics } from '@/lib/types/metrics'
 import type { ScoreEvidence, ScoreStatus } from '@/lib/scoring/v2/contracts'
 
 const MINIMUM_WORDS = 3
+const MINIMUM_TIMELINE_SAMPLES = 3
+const MINIMUM_TIMELINE_COVERAGE = 0.8
+const MAXIMUM_TIMELINE_GAP_MS = 1_000
 
 export interface FluencyEvaluationInput {
   capture: Pick<CaptureMetrics, 'duration_ms' | 'amplitude'> | null | undefined
@@ -78,20 +81,64 @@ function unavailable(...warnings: string[]): UnavailableFluencyEvaluation {
   }
 }
 
-function validWords(words: readonly TranscriptWord[]): boolean {
-  return words.every(
-    (word) =>
+function captureEvidenceWarning(
+  capture: Pick<CaptureMetrics, 'duration_ms' | 'amplitude'>,
+): string | null {
+  const { amplitude, duration_ms: durationMs } = capture
+  if (amplitude.length < MINIMUM_TIMELINE_SAMPLES) {
+    return `Fluency needs at least ${MINIMUM_TIMELINE_SAMPLES} amplitude samples to measure pauses.`
+  }
+
+  let previousTimestamp = -1
+  let largestGap = 0
+  for (const sample of amplitude) {
+    if (!Number.isFinite(sample.t_ms) || sample.t_ms < 0 || sample.t_ms > durationMs) {
+      return 'Fluency could not be measured because amplitude timestamps were outside the recording.'
+    }
+    if (!Number.isFinite(sample.rms) || sample.rms < 0) {
+      return 'Fluency could not be measured because the amplitude timeline contained an invalid RMS value.'
+    }
+    if (sample.t_ms <= previousTimestamp) {
+      return 'Fluency could not be measured because amplitude timestamps were not strictly increasing.'
+    }
+    if (previousTimestamp >= 0) largestGap = Math.max(largestGap, sample.t_ms - previousTimestamp)
+    previousTimestamp = sample.t_ms
+  }
+
+  const firstTimestamp = amplitude[0]?.t_ms ?? 0
+  const coverage = previousTimestamp - firstTimestamp
+  if (coverage < durationMs * MINIMUM_TIMELINE_COVERAGE || largestGap > MAXIMUM_TIMELINE_GAP_MS) {
+    return 'Fluency could not be measured because the amplitude timeline was too sparse for pause analysis.'
+  }
+  return null
+}
+
+function validWords(words: readonly TranscriptWord[], durationMs: number): boolean {
+  let previousStart = -1
+  let previousEnd = -1
+  return words.every((word) => {
+    const valid =
       typeof word.word === 'string' &&
       word.word.trim().length > 0 &&
       Number.isFinite(word.start) &&
       Number.isFinite(word.end) &&
       word.start >= 0 &&
-      word.end >= word.start,
-  )
+      word.end >= word.start &&
+      word.end * 1000 <= durationMs &&
+      word.start >= previousStart &&
+      word.end >= previousEnd
+    previousStart = word.start
+    previousEnd = word.end
+    return valid
+  })
 }
 
 function average(components: readonly number[]): number {
   return components.reduce((sum, component) => sum + component, 0) / components.length
+}
+
+function finiteUnitInterval(value: number): boolean {
+  return Number.isFinite(value) && value >= 0 && value <= 1
 }
 
 function transcriptEvidence(
@@ -111,12 +158,22 @@ function transcriptEvidence(
 export function evaluateFluency(input: FluencyEvaluationInput): FluencyEvaluation {
   const { capture, words, transcript } = input
   if (!capture || !Number.isFinite(capture.duration_ms) || capture.duration_ms <= 0) {
-    return unavailable('Fluency could not be measured because capture duration was missing or invalid.')
+    return unavailable(
+      'Fluency could not be measured because capture duration was missing or invalid.',
+    )
   }
   if (!Array.isArray(capture.amplitude) || capture.amplitude.length === 0) {
-    return unavailable('Fluency could not be measured because the amplitude timeline was unavailable.')
+    return unavailable(
+      'Fluency could not be measured because the amplitude timeline was unavailable.',
+    )
   }
-  if (transcript.trim().length === 0 || words.length < MINIMUM_WORDS || !validWords(words)) {
+  const captureWarning = captureEvidenceWarning(capture)
+  if (captureWarning) return unavailable(captureWarning)
+  if (
+    transcript.trim().length === 0 ||
+    words.length < MINIMUM_WORDS ||
+    !validWords(words, capture.duration_ms)
+  ) {
     return unavailable(
       `Fluency needs a valid transcript with at least ${MINIMUM_WORDS} timed words to be measured.`,
     )
@@ -141,10 +198,33 @@ export function evaluateFluency(input: FluencyEvaluationInput): FluencyEvaluatio
   const pauseBurdenPerMinute = pauseBurden(pauses.mid_sentence, capture.duration_ms)
   const pauseComponent = ramp(pauseBurdenPerMinute, 0.4, 3.4)
   const components = [fillerComponent, pauseComponent, pace.component, firstWord.component]
+  const component = average(components)
+  const continuityRatio = pace.speaking_ms / capture.duration_ms
+  if (
+    !components.every(finiteUnitInterval) ||
+    !finiteUnitInterval(component) ||
+    !finiteUnitInterval(continuityRatio) ||
+    ![
+      fillerRate,
+      pauseBurdenPerMinute,
+      pauses.total_silence_ms,
+      pauses.leading_silence_ms,
+      pauses.trailing_silence_ms,
+      pace.speaking_ms,
+      pace.words_per_minute,
+      firstWord.seconds,
+    ].every(Number.isFinite)
+  ) {
+    return unavailable(
+      'Fluency could not be measured because its evidence produced invalid measurements.',
+    )
+  }
 
   const evidence: ScoreEvidence[] = []
   for (const hit of fillers.hits.filter((hit) => hit.category === 'filler')) {
-    evidence.push(transcriptEvidence(hit.start, hit.end, hit.text, 'Filler detected in the transcript.'))
+    evidence.push(
+      transcriptEvidence(hit.start, hit.end, hit.text, 'Filler detected in the transcript.'),
+    )
   }
   for (const pause of pauses.mid_sentence) {
     evidence.push({
@@ -174,13 +254,21 @@ export function evaluateFluency(input: FluencyEvaluationInput): FluencyEvaluatio
   const addDeduction = (id: FluencyDeduction['id'], component: number, detail: string) => {
     if (component < 1) deductions.push({ id, component, detail })
   }
-  addDeduction('filler_rate', fillerComponent, `${fillers.filler_tokens} filler tokens per 100 words.`)
+  addDeduction(
+    'filler_rate',
+    fillerComponent,
+    `${fillers.filler_tokens} filler tokens per 100 words.`,
+  )
   addDeduction(
     'mid_sentence_pauses',
     pauseComponent,
     `${pauses.mid_sentence.length} mid-sentence pauses with ${pauseBurdenPerMinute.toFixed(2)} burden per minute.`,
   )
-  addDeduction('articulation_pace', pace.component, `${Math.round(pace.words_per_minute)} words per minute.`)
+  addDeduction(
+    'articulation_pace',
+    pace.component,
+    `${Math.round(pace.words_per_minute)} words per minute.`,
+  )
   addDeduction(
     'time_to_first_word',
     firstWord.component,
@@ -204,7 +292,7 @@ export function evaluateFluency(input: FluencyEvaluationInput): FluencyEvaluatio
     category: 'fluency',
     availability: 'available',
     status: 'scored',
-    component: average(components),
+    component,
     measurements: {
       word_count: tokens.length,
       filler_rate_per_100_words: fillerRate,
@@ -215,7 +303,7 @@ export function evaluateFluency(input: FluencyEvaluationInput): FluencyEvaluatio
       leading_silence_ms: pauses.leading_silence_ms,
       trailing_silence_ms: pauses.trailing_silence_ms,
       speaking_ms: pace.speaking_ms,
-      continuity_ratio: pace.speaking_ms / capture.duration_ms,
+      continuity_ratio: continuityRatio,
       words_per_minute: pace.words_per_minute,
       time_to_first_word_seconds: firstWord.seconds,
       restart_count: fillers.false_start_tokens,
