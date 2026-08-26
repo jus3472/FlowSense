@@ -31,6 +31,9 @@ const entries: HistoryEntry[] = [
     createdAt: new Date(2026, 7, 25, 9, 5).toISOString(),
     promptText: 'Describe a place you know well.',
     score: 82,
+    practiceMode: null,
+    promptSource: null,
+    retryOfAttemptId: null,
   },
 ]
 
@@ -43,6 +46,7 @@ describe('HistoryList', () => {
     render(<HistoryList entries={entries} focusPhrase="with less filler" />)
 
     expect(screen.getByText(/9:05\sAM/)).toBeInTheDocument()
+    expect(screen.getByText('General')).toBeInTheDocument()
   })
 
   it('moves focus to confirm delete when confirmation opens', async () => {
@@ -119,5 +123,66 @@ describe('HistoryList', () => {
     expect(screen.getByText(longPrompt)).toHaveClass('min-w-0', 'break-words')
     expect(screen.getByText(longPrompt).parentElement).toHaveClass('min-w-0', 'flex-1')
     expect(screen.getByText('100')).toHaveClass('w-12', 'shrink-0', 'text-right')
+  })
+
+  it('shows every mode and compact custom or retry context', () => {
+    const modeEntries: HistoryEntry[] = [
+      { ...entries[0]!, id: 'general', practiceMode: 'practice', promptSource: 'library' },
+      {
+        ...entries[0]!,
+        id: 'interview',
+        practiceMode: 'interview',
+        promptText: 'Interview prompt',
+      },
+      {
+        ...entries[0]!,
+        id: 'presentation',
+        practiceMode: 'presentation',
+        promptText: 'Presentation prompt',
+      },
+      {
+        ...entries[0]!,
+        id: 'conversation',
+        practiceMode: 'conversation',
+        promptText: 'Conversation prompt',
+        promptSource: 'custom',
+        retryOfAttemptId: 'prior',
+      },
+    ]
+    render(<HistoryList entries={modeEntries} focusPhrase="with less filler" />)
+
+    expect(screen.getByText('General Practice · Library prompt')).toBeInTheDocument()
+    expect(screen.getByText('Interview')).toBeInTheDocument()
+    expect(screen.getByText('Presentation')).toBeInTheDocument()
+    expect(screen.getByText('Conversation · Custom prompt · Retry')).toBeInTheDocument()
+  })
+
+  it('combines the metadata selector with score filters and explains an empty filter', () => {
+    const filtered: HistoryEntry[] = [
+      { ...entries[0]!, id: 'interview-high', practiceMode: 'interview', score: 90 },
+      {
+        ...entries[0]!,
+        id: 'interview-low',
+        practiceMode: 'interview',
+        score: 40,
+        promptText: 'Low interview',
+      },
+      {
+        ...entries[0]!,
+        id: 'conversation',
+        practiceMode: 'conversation',
+        score: 70,
+        promptText: 'Conversation',
+      },
+    ]
+    render(<HistoryList entries={filtered} focusPhrase="with less filler" />)
+
+    fireEvent.change(screen.getByLabelText('Show responses'), { target: { value: 'interview' } })
+    fireEvent.click(screen.getByRole('button', { name: 'High scores' }))
+    expect(screen.getByText('Describe a place you know well.')).toBeInTheDocument()
+    expect(screen.queryByText('Low interview')).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Show responses'), { target: { value: 'custom' } })
+    expect(screen.getByText('Nothing in this filter')).toBeInTheDocument()
   })
 })

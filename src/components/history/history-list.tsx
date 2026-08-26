@@ -8,16 +8,28 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { deleteAttempt } from '@/lib/results/api'
 import {
   FILTER_LABEL,
-  applyFilter,
+  METADATA_FILTER_LABEL,
+  applyHistoryFilters,
   averageScore,
   groupByDay,
+  historyContext,
   timeLabel,
   type HistoryEntry,
   type HistoryFilter,
+  type HistoryMetadataFilter,
 } from '@/lib/results/history'
 import { cn } from '@/lib/utils'
 
 const FILTERS: HistoryFilter[] = ['all', 'high', 'low']
+const METADATA_FILTERS: HistoryMetadataFilter[] = [
+  'all',
+  'general',
+  'interview',
+  'presentation',
+  'conversation',
+  'custom',
+  'retry',
+]
 
 function TrashIcon() {
   return (
@@ -59,6 +71,7 @@ export function HistoryList({
 }) {
   const [entries, setEntries] = useState(initial)
   const [filter, setFilter] = useState<HistoryFilter>('all')
+  const [metadataFilter, setMetadataFilter] = useState<HistoryMetadataFilter>('all')
   const [confirming, setConfirming] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -66,7 +79,7 @@ export function HistoryList({
   const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null)
   const focusAfterDismissRef = useRef<string | null>(null)
 
-  const visible = applyFilter(entries, filter)
+  const visible = applyHistoryFilters(entries, metadataFilter, filter)
   const groups = groupByDay(visible)
   const scores = [...entries].reverse().map((entry) => entry.score)
 
@@ -130,23 +143,40 @@ export function HistoryList({
     <div className="flex flex-col gap-6">
       <TrendChart scores={scores} average={averageScore(entries)} />
 
-      <div role="group" aria-label="Filter responses" className="flex flex-wrap gap-2">
-        {FILTERS.map((value) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={filter === value}
-            onClick={() => setFilter(value)}
-            className={cn(
-              'min-h-11 rounded-full px-4 text-sm font-medium whitespace-nowrap transition duration-150 ease-out',
-              filter === value
-                ? 'bg-accent-soft text-foreground ring-accent ring-2 ring-inset'
-                : 'bg-surface-sunken text-foreground hover:bg-accent-soft',
-            )}
+      <div className="flex flex-col gap-3">
+        <label className="text-muted flex flex-col gap-1 text-sm" htmlFor="history-metadata-filter">
+          Show responses
+          <select
+            id="history-metadata-filter"
+            value={metadataFilter}
+            onChange={(event) => setMetadataFilter(event.target.value as HistoryMetadataFilter)}
+            className="bg-surface text-foreground rounded-input min-h-11 px-3 text-sm"
           >
-            {FILTER_LABEL[value]}
-          </button>
-        ))}
+            {METADATA_FILTERS.map((value) => (
+              <option key={value} value={value}>
+                {METADATA_FILTER_LABEL[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div role="group" aria-label="Filter responses" className="flex flex-wrap gap-2">
+          {FILTERS.map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={filter === value}
+              onClick={() => setFilter(value)}
+              className={cn(
+                'min-h-11 rounded-full px-4 text-sm font-medium whitespace-nowrap transition duration-150 ease-out',
+                filter === value
+                  ? 'bg-accent-soft text-foreground ring-accent ring-2 ring-inset'
+                  : 'bg-surface-sunken text-foreground hover:bg-accent-soft',
+              )}
+            >
+              {FILTER_LABEL[value]}
+            </button>
+          ))}
+        </div>
       </div>
 
       {error ? (
@@ -159,7 +189,7 @@ export function HistoryList({
         <Card>
           <EmptyState
             title="Nothing in this filter"
-            description="Switch back to all to see every response."
+            description="Choose another filter to see other responses."
           />
         </Card>
       ) : null}
@@ -181,9 +211,7 @@ export function HistoryList({
                     <p className="text-foreground min-w-0 text-sm font-medium break-words">
                       {entry.promptText}
                     </p>
-                    {entry.promptSource === 'custom' ? (
-                      <p className="text-muted mt-1 text-xs">Custom prompt</p>
-                    ) : null}
+                    <p className="text-muted mt-1 text-xs">{historyContext(entry).join(' · ')}</p>
                     <time
                       dateTime={entry.createdAt}
                       className="numeric text-muted mt-1 block text-xs"
