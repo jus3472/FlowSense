@@ -155,7 +155,7 @@ export function ResultsView({
       ) : null}
 
       <ButtonLink href={`/record?retry=${attempt.id}`} size="lg" fullWidth>
-        {"Start today's response"}
+        Try this prompt again
       </ButtonLink>
     </div>
   )

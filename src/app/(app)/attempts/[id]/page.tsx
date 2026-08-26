@@ -61,7 +61,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
           />
         </Card>
         <ButtonLink href={`/record?retry=${attempt.id}`} size="lg" fullWidth>
-          {"Start today's response"}
+          Try this prompt again
         </ButtonLink>
       </div>
     )
