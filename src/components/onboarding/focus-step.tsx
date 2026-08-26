@@ -22,10 +22,10 @@ export function FocusStep({ initialSelected, saveFailed }: FocusStepProps) {
   }
 
   return (
-    <StepFrame step={2} title="What do you want to get better at?">
+    <StepFrame step={2} title="What do you want to practice?">
       <div className="flex flex-col gap-6">
         <p className="text-muted text-base">
-          Pick as many as you want. This shapes what your home screen shows you.
+          Pick as many as you want. This shapes your practice suggestions.
         </p>
 
         <div className="flex flex-wrap gap-2">

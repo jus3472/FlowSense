@@ -36,7 +36,7 @@ export function SettingsForm({ displayName, focusAreas }: SettingsFormProps) {
       />
 
       <fieldset className="flex flex-col gap-4">
-        <legend className="text-foreground text-sm font-medium">Focus areas</legend>
+        <legend className="text-foreground text-sm font-medium">What you want to practice</legend>
         <div className="flex flex-wrap gap-2">
           {FOCUS_AREAS.map((area) => (
             <Chip

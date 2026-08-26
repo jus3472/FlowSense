@@ -1,9 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { FOCUS_AREAS, focusPhrase, isFocusAreaId, sanitizeFocusAreas } from '@/lib/focus-areas'
+import { readFileSync } from 'node:fs'
+import {
+  defaultPracticeMode,
+  FOCUS_AREAS,
+  isFocusAreaId,
+  practiceModePriority,
+  sanitizeFocusAreas,
+} from '@/lib/focus-areas'
 
-describe('focus areas', () => {
-  it('offers the 7 areas onboarding shows', () => {
-    expect(FOCUS_AREAS).toHaveLength(7)
+describe('practice goals', () => {
+  it('offers the six canonical goals onboarding shows', () => {
+    expect(FOCUS_AREAS).toHaveLength(6)
+    expect(FOCUS_AREAS.map((area) => area.label)).toEqual([
+      'Interviews',
+      'Presentations',
+      'Meetings and conversations',
+      'Difficult conversations',
+      'Speaking on the spot',
+      'General speaking ability',
+    ])
   })
 
   it('recognises a known id', () => {
@@ -16,14 +31,40 @@ describe('focus areas', () => {
   })
 
   it('returns areas in a stable order regardless of input order', () => {
-    expect(sanitizeFocusAreas(['confidence', 'interviews'])).toEqual(['interviews', 'confidence'])
+    expect(
+      sanitizeFocusAreas([
+        'class',
+        'confidence',
+        'meetings',
+        'interviews',
+        'speaking-english',
+        'difficult-conversations',
+        'presentations',
+        'unknown',
+        'meetings',
+      ]),
+    ).toEqual([
+      'interviews',
+      'presentations',
+      'meetings-conversations',
+      'difficult-conversations',
+      'speaking-on-the-spot',
+      'general-speaking',
+    ])
   })
 
-  it('builds empty state copy from the first selected area', () => {
-    expect(focusPhrase(['meetings'])).toBe('in meetings')
+  it('derives deterministic default and prompt priorities with a neutral fallback', () => {
+    expect(defaultPracticeMode(['presentations', 'interviews'])).toBe('interview')
+    expect(defaultPracticeMode([])).toBe('practice')
+    expect(practiceModePriority(['meetings', 'presentations'])).toEqual([
+      'presentation',
+      'conversation',
+      'practice',
+    ])
   })
-
-  it('falls back when nothing is selected', () => {
-    expect(focusPhrase([])).toBe('under pressure')
+  it('keeps practice preferences out of scoring modules', () => {
+    for (const file of ['src/lib/scoring/assemble.ts', 'src/lib/scoring/v2/assemble.ts']) {
+      expect(readFileSync(file, 'utf8')).not.toContain('focus-areas')
+    }
   })
 })

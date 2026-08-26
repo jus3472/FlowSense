@@ -6,7 +6,7 @@ import { TrendStrip } from '@/components/home/trend-strip'
 import { RetryButton } from '@/components/system/retry-button'
 import { ButtonLink } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
-import { focusPhrase, sanitizeFocusAreas } from '@/lib/focus-areas'
+import { defaultPracticeMode, focusPhrase, sanitizeFocusAreas } from '@/lib/focus-areas'
 import { legacyAttemptForHome } from '@/lib/results/attempt-result'
 import { largestDeduction, summariseAttempt } from '@/lib/results/summary'
 import { CONTENT_POINTS } from '@/lib/scoring/content'
@@ -38,6 +38,7 @@ export default async function HomePage() {
 
   const areas = sanitizeFocusAreas(profileResult.data?.focus_areas ?? [])
   const phrase = focusPhrase(areas)
+  const recommendedMode = defaultPracticeMode(areas)
 
   const historyFailed = Boolean(attemptsResult.error)
   const attempts = attemptsResult.data ?? []
@@ -74,7 +75,7 @@ export default async function HomePage() {
     <div className="flex flex-col gap-12 pt-4 pb-12">
       {historyFailed ? null : <StreakDisplay streak={streak} />}
 
-      <ButtonLink href="/record" size="lg" fullWidth>
+      <ButtonLink href={`/record?mode=${recommendedMode}`} size="lg" fullWidth>
         Start a response
       </ButtonLink>
       <ButtonLink href="/practice" variant="secondary" fullWidth>
