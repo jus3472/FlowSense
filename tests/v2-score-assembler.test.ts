@@ -3,6 +3,7 @@ import {
   assembleV2Score,
   hasStoredScorePayload,
   isV2ScorePayload,
+  shouldReuseStoredV2Score,
   V2_SCORE_PAYLOAD_VERSION,
 } from '@/lib/scoring/v2/assemble'
 import type { ClarityResult } from '@/lib/scoring/v2/clarity'
@@ -223,14 +224,54 @@ describe('v2 score assembler', () => {
     expect(result.total_earned_points).toBeNull()
   })
 
-  it('uses the saved payload discriminator for idempotency and historical boundaries', () => {
+  it('keeps legacy results retryable while valid v2 payloads are idempotent', () => {
     const v2 = assemble('practice')
     const legacy = { content: { earned: 50, max: 50 }, delivery: { earned: 50, max: 50 } }
+    const partial = assembleV2Score({
+      mode: 'practice',
+      fluency: fluency(),
+      clarity: clarity(),
+      delivery: delivery(),
+      content: {
+        ...content(),
+        status: 'not_checked',
+        categories: {
+          ...content().categories,
+          grammar: {
+            category: 'grammar',
+            status: 'not_checked',
+            component: null,
+            findings: [],
+            measurements: {},
+            warnings: ['Provider failed.'],
+          },
+        },
+      },
+    })
 
     expect(v2.version).toBe(V2_SCORE_PAYLOAD_VERSION)
     expect(isV2ScorePayload(v2)).toBe(true)
     expect(hasStoredScorePayload(v2)).toBe(true)
+    expect(shouldReuseStoredV2Score(v2)).toBe(true)
+    expect(partial.total_earned_points).toBeNull()
+    expect(isV2ScorePayload(partial)).toBe(true)
+    expect(shouldReuseStoredV2Score(partial)).toBe(true)
     expect(hasStoredScorePayload(legacy)).toBe(true)
+    expect(shouldReuseStoredV2Score(legacy)).toBe(false)
     expect(hasStoredScorePayload({ rubric_version: 'v2' })).toBe(false)
+  })
+
+  it('does not treat marker-only or malformed v2 JSONB as authoritative', () => {
+    const v2 = assemble('interview')
+    const malformed = {
+      ...v2,
+      categories: { ...v2.categories, fluency: { ...v2.categories.fluency, max_points: 99 } },
+    }
+
+    expect(isV2ScorePayload({ version: V2_SCORE_PAYLOAD_VERSION, rubric_version: 'v2' })).toBe(
+      false,
+    )
+    expect(isV2ScorePayload(malformed)).toBe(false)
+    expect(shouldReuseStoredV2Score(malformed)).toBe(false)
   })
 })

@@ -1,4 +1,9 @@
-import { PRACTICE_MODES, type PracticeMode, type SkillCategory } from '@/lib/practice/contracts'
+import {
+  PRACTICE_MODES,
+  SKILL_CATEGORIES,
+  type PracticeMode,
+  type SkillCategory,
+} from '@/lib/practice/contracts'
 import type { ClarityResult } from '@/lib/scoring/v2/clarity'
 import type { V2CategoryResult, V2ContentEvaluation } from '@/lib/scoring/v2/content/contracts'
 import type { DeliveryEvaluation } from '@/lib/scoring/v2/delivery'
@@ -201,15 +206,82 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** Only this payload marker identifies a v2 stored result. */
-export function isV2ScorePayload(value: unknown): value is V2ScorePayload {
+function validStoredCategory(value: unknown, category: SkillCategory, mode: PracticeMode): boolean {
+  if (!isRecord(value)) return false
+  const maxPoints = rubricFor(mode).categories[category].weight
+  const component = value.component
+  const earnedPoints = value.earned_points
+  const pointsAreValid =
+    (earnedPoints === null ||
+      (typeof earnedPoints === 'number' &&
+        Number.isInteger(earnedPoints) &&
+        earnedPoints >= 0 &&
+        earnedPoints <= maxPoints)) &&
+    (component === null || inUnitInterval(component))
+  if (!pointsAreValid || value.category !== category || value.max_points !== maxPoints) return false
+
+  if (value.status === 'scored') {
+    return (
+      value.availability === 'available' &&
+      inUnitInterval(component) &&
+      typeof earnedPoints === 'number' &&
+      earnedPoints === Math.round(component * maxPoints)
+    )
+  }
+  if (value.status === 'not_checked') {
+    return value.availability === 'available' && component === null && earnedPoints === null
+  }
   return (
-    isRecord(value) &&
-    value.version === V2_SCORE_PAYLOAD_VERSION &&
-    value.rubric_version === RUBRIC_VERSION &&
-    typeof value.mode === 'string' &&
-    isRecord(value.categories) &&
-    value.total_max_points === 100
+    value.status === 'unavailable' &&
+    value.availability === 'unavailable' &&
+    component === null &&
+    earnedPoints === null
+  )
+}
+
+/**
+ * Only a structurally complete v2 snapshot is idempotent. This deliberately
+ * rejects metadata-shaped or malformed JSONB so a corrupt partial write does
+ * not become authoritative.
+ */
+export function isV2ScorePayload(value: unknown): value is V2ScorePayload {
+  if (!isRecord(value)) return false
+  const mode = value.mode
+  const categoryValues = value.categories
+  if (
+    value.version !== V2_SCORE_PAYLOAD_VERSION ||
+    value.rubric_version !== RUBRIC_VERSION ||
+    !isPracticeMode(mode) ||
+    value.total_max_points !== 100 ||
+    !isRecord(categoryValues)
+  ) {
+    return false
+  }
+  const categoryNames = Object.keys(categoryValues)
+  if (
+    categoryNames.length !== SKILL_CATEGORIES.length ||
+    !SKILL_CATEGORIES.every((category) =>
+      validStoredCategory(categoryValues[category], category, mode),
+    )
+  ) {
+    return false
+  }
+  const categories = Object.values(categoryValues)
+  const allScored = categories.every(
+    (category) => isRecord(category) && category.status === 'scored',
+  )
+  const total = value.total_earned_points
+  if (!allScored) return total === null
+  return (
+    typeof total === 'number' &&
+    Number.isInteger(total) &&
+    total >= 0 &&
+    total <= 100 &&
+    total ===
+      categories.reduce<number>(
+        (sum, category) => sum + (isRecord(category) ? Number(category.earned_points) : 0),
+        0,
+      )
   )
 }
 
@@ -217,6 +289,11 @@ export function isV2ScorePayload(value: unknown): value is V2ScorePayload {
 export function hasStoredScorePayload(value: unknown): boolean {
   if (!isRecord(value)) return false
   return isV2ScorePayload(value) || (isRecord(value.content) && isRecord(value.delivery))
+}
+
+/** Legacy snapshots keep their existing retry behavior; only v2 snapshots lock scoring. */
+export function shouldReuseStoredV2Score(value: unknown): boolean {
+  return isV2ScorePayload(value)
 }
 
 export function isPracticeMode(value: unknown): value is PracticeMode {

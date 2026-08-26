@@ -15,7 +15,11 @@ import { computeMechanical } from '@/lib/scoring/mechanical'
 import { surfacesToDelete } from '@/lib/scoring/tighten'
 import { analyseFillers } from '@/lib/scoring/fillers'
 import { buildTokens } from '@/lib/scoring/tokens'
-import { assembleV2Score, hasStoredScorePayload, isPracticeMode } from '@/lib/scoring/v2/assemble'
+import {
+  assembleV2Score,
+  isPracticeMode,
+  shouldReuseStoredV2Score,
+} from '@/lib/scoring/v2/assemble'
 import { analyseClarity } from '@/lib/scoring/v2/clarity'
 import { contentDetectorFromModel } from '@/lib/scoring/v2/content/adapter'
 import type { V2ContentDetectorProvider } from '@/lib/scoring/v2/content/contracts'
@@ -94,10 +98,10 @@ export async function POST(request: Request) {
   if (readError) return apiError(readError.message, 500)
   if (!attempt) return apiError('That attempt does not exist.', 404)
 
-  // Historical snapshots are authoritative. In particular, an early v2
-  // attempt can carry v2 metadata with a legacy payload, so metadata alone is
-  // never used to reinterpret an already saved result.
-  if (attempt.score !== null || hasStoredScorePayload(attempt.section_scores)) {
+  // A structurally valid v2 snapshot is immutable. Legacy snapshots remain on
+  // the existing path so an explicit "Run the checks" retry can call its
+  // content provider again after a prior not_checked result.
+  if (shouldReuseStoredV2Score(attempt.section_scores)) {
     return NextResponse.json({
       score: attempt.score,
       section_scores: attempt.section_scores,
