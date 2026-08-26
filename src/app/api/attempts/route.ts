@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { apiError } from '@/lib/api/responses'
 import { extensionForMimeType } from '@/lib/recording/mime'
 import { parseCreateAttemptPayload } from '@/lib/recording/attempt-payload'
+import { matchesRetrySession } from '@/lib/practice/session'
 import { createClient } from '@/lib/supabase/server'
 
 /**
@@ -26,6 +27,20 @@ export async function POST(request: Request) {
   const payload = parseCreateAttemptPayload(body)
   if (!payload.ok) return apiError(payload.error, 400)
 
+  if (payload.value.retryOfAttemptId) {
+    const { data: parent } = await supabase
+      .from('attempts')
+      .select(
+        'id, prompt_id, prompt_text, practice_mode, prompt_source, prompt_difficulty, metrics',
+      )
+      .eq('id', payload.value.retryOfAttemptId)
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (!parent || !matchesRetrySession(payload.value, parent)) {
+      return apiError('That retry session is no longer available.', 400)
+    }
+  }
+
   const { data, error } = await supabase
     .from('attempts')
     .insert({
@@ -38,9 +53,17 @@ export async function POST(request: Request) {
       prompt_difficulty: payload.value.difficulty,
       rubric_version: payload.value.rubricVersion,
       retry_of_attempt_id: payload.value.retryOfAttemptId,
-      metrics: payload.value.additionalContext
-        ? { practice: { additional_context: payload.value.additionalContext } }
-        : null,
+      // This is session metadata, not scoring evidence. Attempts intentionally
+      // keep it in private JSONB so a retry can restore the original target
+      // without adding a column to the historical attempt shape.
+      metrics: {
+        practice: {
+          target_duration_seconds: payload.value.targetDurationSeconds,
+          ...(payload.value.additionalContext
+            ? { additional_context: payload.value.additionalContext }
+            : {}),
+        },
+      },
     })
     .select('id')
     .single()

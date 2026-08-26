@@ -2,7 +2,9 @@ import {
   MAX_TARGET_DURATION_SECONDS,
   MIN_TARGET_DURATION_SECONDS,
   parsePracticeSessionDescriptor,
+  matchesRetrySession,
   retrySessionFromAttempt,
+  type PracticeSessionDescriptor,
 } from '@/lib/practice/session'
 import { describe, expect, it } from 'vitest'
 
@@ -50,13 +52,17 @@ describe('practice session descriptor', () => {
         practice_mode: 'interview',
         prompt_source: 'library',
         prompt_difficulty: 'advanced',
+        metrics: {
+          practice: { target_duration_seconds: 45, additional_context: 'Keep it concise.' },
+        },
       }),
     ).toEqual({
       ...LIBRARY_SESSION,
       mode: 'interview',
       difficulty: 'advanced',
-      targetDurationSeconds: 60,
+      targetDurationSeconds: 45,
       retryOfAttemptId: ATTEMPT_ID,
+      additionalContext: 'Keep it concise.',
     })
   })
 
@@ -70,5 +76,49 @@ describe('practice session descriptor', () => {
         prompt_source: 'library',
       }),
     ).toBeNull()
+  })
+
+  it('matches only the canonical protected fields for a stored retry session', () => {
+    const source = {
+      id: ATTEMPT_ID,
+      prompt_id: PROMPT_ID,
+      prompt_text: LIBRARY_SESSION.promptText,
+      practice_mode: 'practice',
+      prompt_source: 'library',
+      prompt_difficulty: 'beginner',
+      metrics: { practice: { target_duration_seconds: 30, additional_context: 'Stay concrete.' } },
+    }
+    const requested: PracticeSessionDescriptor = {
+      promptText: LIBRARY_SESSION.promptText,
+      promptId: PROMPT_ID,
+      mode: 'practice',
+      difficulty: 'beginner',
+      source: 'library',
+      targetDurationSeconds: 30,
+      retryOfAttemptId: ATTEMPT_ID,
+      additionalContext: 'Stay concrete.',
+    }
+    expect(matchesRetrySession(requested, source)).toBe(true)
+    expect(matchesRetrySession({ ...requested, mode: 'interview' }, source)).toBe(false)
+    expect(matchesRetrySession({ ...requested, targetDurationSeconds: 45 }, source)).toBe(false)
+    expect(matchesRetrySession(requested, null)).toBe(false)
+  })
+
+  it('uses legacy defaults when checking an older retry parent', () => {
+    const source = { id: ATTEMPT_ID, prompt_id: PROMPT_ID, prompt_text: LIBRARY_SESSION.promptText }
+    expect(
+      matchesRetrySession(
+        {
+          promptText: LIBRARY_SESSION.promptText,
+          promptId: PROMPT_ID,
+          mode: 'practice',
+          difficulty: 'beginner',
+          source: 'library',
+          targetDurationSeconds: 60,
+          retryOfAttemptId: ATTEMPT_ID,
+        },
+        source,
+      ),
+    ).toBe(true)
   })
 })

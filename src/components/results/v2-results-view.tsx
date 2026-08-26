@@ -13,6 +13,7 @@ import {
   v2TranscriptSegments,
 } from '@/lib/results/v2'
 import type { V2ScorePayload } from '@/lib/scoring/v2/assemble'
+import type { RetryComparison } from '@/lib/results/retry-comparison'
 
 interface V2ResultsViewProps {
   attemptId: string
@@ -22,6 +23,8 @@ interface V2ResultsViewProps {
   durationMs: number
   audioUrl: string | null
   payload: V2ScorePayload
+  comparison?: RetryComparison | null
+  previousAttemptId?: string | null
 }
 
 export function V2ResultsView({
@@ -32,6 +35,8 @@ export function V2ResultsView({
   durationMs,
   audioUrl,
   payload,
+  comparison = null,
+  previousAttemptId = null,
 }: V2ResultsViewProps) {
   const strongest = strongestV2Category(payload)
   const priority = priorityV2Category(payload)
@@ -122,9 +127,31 @@ export function V2ResultsView({
         {priority ? (
           <p className="text-muted text-sm">Focus next on {priority.label.toLowerCase()}.</p>
         ) : (
-          <p className="text-muted text-sm">No scored improvement area is available.</p>
+          <p className="text-muted text-sm">No scored focus area is available.</p>
         )}
       </Card>
+
+      {comparison || previousAttemptId ? (
+        <Card className="flex flex-col gap-3" aria-label="Previous response comparison">
+          {comparison ? <p className="text-foreground font-medium">Previous response</p> : null}
+          {comparison ? (
+            <ul className="text-muted flex flex-col gap-2 text-sm">
+              {comparison.rows.map((row) => (
+                <li key={row.category}>
+                  {row.label} {row.previousPoints} → {row.currentPoints}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted text-sm">Open the previous response to review it.</p>
+          )}
+          {previousAttemptId ? (
+            <ButtonLink href={`/attempts/${previousAttemptId}`} variant="secondary">
+              View previous response
+            </ButtonLink>
+          ) : null}
+        </Card>
+      ) : null}
 
       {transcript ? <TranscriptPanel segments={segments} /> : null}
       {audioUrl ? <AudioPlayer src={audioUrl} durationMs={durationMs} /> : null}

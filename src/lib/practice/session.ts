@@ -117,7 +117,11 @@ export function retrySessionFromAttempt(value: unknown): PracticeSessionDescript
     // Attempts before session descriptors did not snapshot this value.
     targetDurationSeconds: isTargetDuration(value.target_duration_seconds)
       ? value.target_duration_seconds
-      : 60,
+      : isRecord(value.metrics) &&
+          isRecord(value.metrics.practice) &&
+          isTargetDuration(value.metrics.practice.target_duration_seconds)
+        ? value.metrics.practice.target_duration_seconds
+        : 60,
     retryOfAttemptId: value.id,
     additionalContext:
       isRecord(value.metrics) &&
@@ -126,4 +130,23 @@ export function retrySessionFromAttempt(value: unknown): PracticeSessionDescript
         ? value.metrics.practice.additional_context
         : undefined,
   })
+}
+
+/** Ensures a retry request reuses only the protected stored session fields. */
+export function matchesRetrySession(
+  requested: PracticeSessionDescriptor,
+  sourceAttempt: unknown,
+): boolean {
+  const canonical = retrySessionFromAttempt(sourceAttempt)
+  return (
+    canonical !== null &&
+    requested.retryOfAttemptId === canonical.retryOfAttemptId &&
+    requested.promptText === canonical.promptText &&
+    requested.promptId === canonical.promptId &&
+    requested.mode === canonical.mode &&
+    requested.difficulty === canonical.difficulty &&
+    requested.source === canonical.source &&
+    requested.targetDurationSeconds === canonical.targetDurationSeconds &&
+    requested.additionalContext === canonical.additionalContext
+  )
 }
