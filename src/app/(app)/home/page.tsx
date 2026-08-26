@@ -29,7 +29,7 @@ export default async function HomePage() {
     supabase
       .from('attempts')
       .select(
-        'id, prompt_text, transcript, duration_ms, created_at, score, section_scores, metrics, content_result, rubric_version',
+        'id, prompt_text, transcript, duration_ms, created_at, score, section_scores, metrics, content_result',
       )
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
@@ -61,7 +61,6 @@ export default async function HomePage() {
       sectionScores: latest.section_scores,
       metrics: latest.metrics,
       contentResult: latest.content_result,
-      rubricVersion: latest.rubric_version,
     })
     if (legacy) {
       summary = summariseAttempt(

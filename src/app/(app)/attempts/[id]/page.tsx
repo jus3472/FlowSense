@@ -27,7 +27,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
   const { data: attempt } = await supabase
     .from('attempts')
     .select(
-      'id, prompt_text, transcript, duration_ms, audio_path, created_at, score, section_scores, metrics, content_result, rubric_version',
+      'id, prompt_text, transcript, duration_ms, audio_path, created_at, score, section_scores, metrics, content_result',
     )
     .eq('id', id)
     .maybeSingle()
@@ -54,7 +54,6 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     sectionScores: attempt.section_scores,
     metrics: attempt.metrics,
     contentResult: attempt.content_result,
-    rubricVersion: attempt.rubric_version,
   })
 
   // A recording that never finished scoring still shows what it does have.

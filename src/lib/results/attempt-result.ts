@@ -20,7 +20,6 @@ export interface StoredAttemptResultInput {
   sectionScores: unknown
   metrics: unknown
   contentResult: unknown
-  rubricVersion: string | null
 }
 
 export type ReadAttemptResult =
@@ -79,7 +78,17 @@ function isLegacyContent(value: unknown): value is StoredContentResult {
     (typeof value.error !== 'string' && value.error !== null) ||
     !Array.isArray(value.extra_spans) ||
     !Array.isArray(value.dropped) ||
+    !value.extra_spans.every(
+      (span) =>
+        isRecord(span) &&
+        typeof span.text === 'string' &&
+        typeof span.category === 'string' &&
+        ['padding', 'preamble', 'qualifier', 'hedge', 'imprecise'].includes(span.category),
+    ) ||
+    !value.dropped.every((item) => typeof item === 'string') ||
     (typeof value.tightened !== 'string' && value.tightened !== null) ||
+    (value.tightened_outcome !== undefined &&
+      !['none', 'clean', 'retried', 'stripped'].includes(String(value.tightened_outcome))) ||
     !finiteNumber(value.disputes_applied) ||
     !exactKeys(checks, CHECK_NAMES) ||
     !exactKeys(points, CHECK_NAMES)
@@ -100,6 +109,76 @@ function isLegacyContent(value: unknown): value is StoredContentResult {
   })
 }
 
+function isLegacyPause(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    finiteNumber(value.start_ms) &&
+    finiteNumber(value.end_ms) &&
+    finiteNumber(value.duration_ms) &&
+    (value.kind === 'mid_sentence' || value.kind === 'clean') &&
+    typeof value.preceding_word === 'string' &&
+    typeof value.after_filler === 'boolean'
+  )
+}
+
+function isLegacyFiller(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    ['filler', 'false_start', 'closer'].includes(String(value.category)) &&
+    typeof value.subtype === 'string' &&
+    typeof value.text === 'string' &&
+    Array.isArray(value.token_indices) &&
+    value.token_indices.every((index) => Number.isInteger(index) && index >= 0) &&
+    finiteNumber(value.start) &&
+    finiteNumber(value.end)
+  )
+}
+
+function isLegacyStatistics(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  const numeric = [
+    'word_count',
+    'recording_ms',
+    'speaking_ms',
+    'clean_pause_count',
+    'mid_sentence_pause_count',
+    'total_silence_ms',
+    'leading_silence_ms',
+    'trailing_silence_ms',
+    'silence_ratio',
+    'longest_pause_ms',
+    'pace_variance',
+    'backtrack_count',
+    'noise_floor',
+    'speech_level',
+    'speech_threshold',
+  ]
+  return (
+    numeric.every((key) => finiteNumber(value[key])) &&
+    (typeof value.backtrack_note === 'string' || value.backtrack_note === null) &&
+    Array.isArray(value.counted_items) &&
+    value.counted_items.every(isLegacyFiller) &&
+    Array.isArray(value.repeated_phrases) &&
+    value.repeated_phrases.every(
+      (phrase) =>
+        isRecord(phrase) && typeof phrase.phrase === 'string' && finiteNumber(phrase.count),
+    )
+  )
+}
+
+function isTranscriptWords(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (word) =>
+        isRecord(word) &&
+        typeof word.word === 'string' &&
+        finiteNumber(word.start) &&
+        finiteNumber(word.end),
+    )
+  )
+}
+
 function isLegacyMetrics(value: unknown): value is AttemptMetrics {
   if (!isRecord(value) || !isRecord(value.delivery)) return false
   const delivery = value.delivery
@@ -113,8 +192,11 @@ function isLegacyMetrics(value: unknown): value is AttemptMetrics {
   return (
     exactKeys(delivery.metrics, Object.keys(DELIVERY_POINTS)) &&
     Object.values(delivery.metrics).every(isLegacyMetric) &&
-    Array.isArray(delivery.statistics.counted_items) &&
-    Array.isArray(delivery.statistics.repeated_phrases)
+    isLegacyStatistics(delivery.statistics) &&
+    delivery.pauses.every(isLegacyPause) &&
+    (value.transcript === undefined ||
+      !isRecord(value.transcript) ||
+      isTranscriptWords(value.transcript.words))
   )
 }
 
@@ -159,8 +241,11 @@ export function readAttemptResult(input: StoredAttemptResultInput): ReadAttemptR
   const legacy = legacyAttempt(input)
   if (legacy) return { kind: 'legacy', attempt: legacy }
 
+  if (input.score === null && input.sectionScores === null && input.contentResult === null) {
+    return { kind: 'incomplete' }
+  }
   const hasStoredResult =
-    input.sectionScores !== null || input.contentResult !== null || input.metrics !== null
+    input.sectionScores !== null || input.contentResult !== null || input.score !== null
   return { kind: hasStoredResult ? 'unsupported' : 'incomplete' }
 }
 

@@ -44,6 +44,27 @@ const legacyContent = {
   disputes_applied: 0,
 }
 
+const statistics = {
+  word_count: 4,
+  recording_ms: 12_000,
+  speaking_ms: 10_000,
+  clean_pause_count: 0,
+  mid_sentence_pause_count: 0,
+  total_silence_ms: 2_000,
+  leading_silence_ms: 0,
+  trailing_silence_ms: 0,
+  silence_ratio: 0.1,
+  longest_pause_ms: 500,
+  pace_variance: 0,
+  backtrack_count: 0,
+  backtrack_note: null,
+  counted_items: [],
+  repeated_phrases: [],
+  noise_floor: 0.01,
+  speech_level: 0.1,
+  speech_threshold: 0.02,
+}
+
 function legacyInput(overrides: Record<string, unknown> = {}) {
   return {
     id: 'attempt-1',
@@ -55,10 +76,9 @@ function legacyInput(overrides: Record<string, unknown> = {}) {
     score: 100,
     sectionScores: legacySections,
     metrics: {
-      delivery: { metrics, statistics: { counted_items: [], repeated_phrases: [] }, pauses: [] },
+      delivery: { metrics, statistics, pauses: [] },
     },
     contentResult: legacyContent,
-    rubricVersion: null,
     ...overrides,
   }
 }
@@ -145,5 +165,34 @@ describe('attempt result reader', () => {
         legacyInput({ score: null, sectionScores: null, metrics: null, contentResult: null }),
       ).kind,
     ).toBe('incomplete')
+  })
+
+  it.each([
+    { capture: { duration_ms: 1 } },
+    { transcript: { words: [] } },
+    { practice: { additional_context: 'context' } },
+  ])('keeps raw pre-score metrics incomplete', (metrics) => {
+    expect(
+      readAttemptResult(
+        legacyInput({ score: null, sectionScores: null, contentResult: null, metrics }),
+      ).kind,
+    ).toBe('incomplete')
+  })
+
+  it('rejects malformed nested legacy renderer data', () => {
+    expect(
+      readAttemptResult(
+        legacyInput({
+          metrics: {
+            delivery: { metrics, statistics: { ...statistics, word_count: 'four' }, pauses: [] },
+          },
+        }),
+      ).kind,
+    ).toBe('unsupported')
+    expect(
+      readAttemptResult(
+        legacyInput({ contentResult: { ...legacyContent, extra_spans: [{ text: 1 }] } }),
+      ).kind,
+    ).toBe('unsupported')
   })
 })
