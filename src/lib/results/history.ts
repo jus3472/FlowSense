@@ -5,6 +5,7 @@ export interface HistoryEntry {
   createdAt: string
   promptText: string
   score: number
+  promptSource?: 'library' | 'custom' | null
 }
 
 export interface HistoryGroup {

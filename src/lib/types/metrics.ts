@@ -47,4 +47,5 @@ export interface AttemptMetrics {
   capture?: CaptureMetrics
   transcript?: TranscriptMetrics
   delivery?: DeliveryBlock
+  practice?: { additional_context?: string }
 }

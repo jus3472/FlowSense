@@ -38,6 +38,9 @@ export async function POST(request: Request) {
       prompt_difficulty: payload.value.difficulty,
       rubric_version: payload.value.rubricVersion,
       retry_of_attempt_id: payload.value.retryOfAttemptId,
+      metrics: payload.value.additionalContext
+        ? { practice: { additional_context: payload.value.additionalContext } }
+        : null,
     })
     .select('id')
     .single()

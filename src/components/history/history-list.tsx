@@ -181,6 +181,7 @@ export function HistoryList({
                     <p className="text-foreground min-w-0 text-sm font-medium break-words">
                       {entry.promptText}
                     </p>
+                    {entry.promptSource === 'custom' ? <p className="text-muted mt-1 text-xs">Custom prompt</p> : null}
                     <time
                       dateTime={entry.createdAt}
                       className="numeric text-muted mt-1 block text-xs"

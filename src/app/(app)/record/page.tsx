@@ -11,6 +11,8 @@ import {
   type PracticeSessionDescriptor,
 } from '@/lib/practice/session'
 import { createClient } from '@/lib/supabase/server'
+import { cookies } from 'next/headers'
+import { CUSTOM_SESSION_COOKIE, parseCustomPracticeCookie } from '@/lib/practice/custom'
 
 export const metadata: Metadata = {
   title: 'Record',
@@ -35,11 +37,18 @@ export default async function RecordPage({
   if (typeof retry === 'string' && isUuid(retry)) {
     const { data: sourceAttempt } = await supabase
       .from('attempts')
-      .select('id, prompt_id, prompt_text, practice_mode, prompt_source, prompt_difficulty')
+      .select('id, prompt_id, prompt_text, practice_mode, prompt_source, prompt_difficulty, metrics')
       .eq('id', retry)
       .eq('user_id', user.id)
       .maybeSingle()
     session = retrySessionFromAttempt(sourceAttempt)
+  }
+
+  if (!session) {
+    const custom = parseCustomPracticeCookie((await cookies()).get(CUSTOM_SESSION_COOKIE)?.value)
+    session = custom
+      ? parsePracticeSessionDescriptor({ ...custom, promptId: null, difficulty: 'beginner', source: 'custom', retryOfAttemptId: null })
+      : null
   }
 
   if (!session) {

@@ -21,6 +21,7 @@ export interface PracticeSessionDescriptor {
   source: PromptSource
   targetDurationSeconds: number
   retryOfAttemptId: string | null
+  additionalContext?: string
 }
 
 export function isUuid(value: unknown): value is string {
@@ -57,6 +58,12 @@ export function parsePracticeSessionDescriptor(value: unknown): PracticeSessionD
       : isUuid(value.retryOfAttemptId)
         ? value.retryOfAttemptId
         : undefined
+  const additionalContext =
+    typeof value.additionalContext === 'string' &&
+    value.additionalContext.trim().length > 0 &&
+    value.additionalContext.trim().length <= 1_000
+      ? value.additionalContext.trim()
+      : undefined
 
   if (
     promptText.length === 0 ||
@@ -84,6 +91,7 @@ export function parsePracticeSessionDescriptor(value: unknown): PracticeSessionD
     source: value.source,
     targetDurationSeconds: value.targetDurationSeconds,
     retryOfAttemptId,
+    ...(additionalContext ? { additionalContext } : {}),
   }
 }
 
@@ -111,5 +119,10 @@ export function retrySessionFromAttempt(value: unknown): PracticeSessionDescript
       ? value.target_duration_seconds
       : 60,
     retryOfAttemptId: value.id,
+    additionalContext:
+      isRecord(value.metrics) && isRecord(value.metrics.practice) &&
+      typeof value.metrics.practice.additional_context === 'string'
+        ? value.metrics.practice.additional_context
+        : undefined,
   })
 }
