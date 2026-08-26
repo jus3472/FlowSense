@@ -2,7 +2,7 @@ import type { TranscriptWord } from '@/lib/deepgram/parse'
 import { analyseFillers } from '@/lib/scoring/fillers'
 import { FILLER_FREE_RATE, pauseBurden } from '@/lib/scoring/mechanical'
 import { analysePace } from '@/lib/scoring/pace'
-import { analysePauses } from '@/lib/scoring/pauses'
+import { analysePauses, MIN_PAUSE_MS } from '@/lib/scoring/pauses'
 import { ramp } from '@/lib/scoring/scale'
 import { analyseTimeToFirstWord } from '@/lib/scoring/time-to-first-word'
 import { buildTokens } from '@/lib/scoring/tokens'
@@ -12,10 +12,14 @@ import type { ScoreEvidence, ScoreStatus } from '@/lib/scoring/v2/contracts'
 const MINIMUM_WORDS = 3
 const MINIMUM_TIMELINE_SAMPLES = 3
 const MINIMUM_TIMELINE_COVERAGE = 0.8
-const MAXIMUM_TIMELINE_GAP_MS = 1_000
+const MAXIMUM_SAMPLE_INTERVAL_MS = MIN_PAUSE_MS / 2
+const FRAME_DENSITY_FRACTION = 0.7
+const TIMELINE_GAP_MULTIPLIER = 3
+const MAXIMUM_EDGE_GAP_MS = 500
 
 export interface FluencyEvaluationInput {
-  capture: Pick<CaptureMetrics, 'duration_ms' | 'amplitude'> | null | undefined
+  capture:
+    Pick<CaptureMetrics, 'duration_ms' | 'sample_interval_ms' | 'amplitude'> | null | undefined
   words: readonly TranscriptWord[]
   transcript: string
 }
@@ -82,9 +86,12 @@ function unavailable(...warnings: string[]): UnavailableFluencyEvaluation {
 }
 
 function captureEvidenceWarning(
-  capture: Pick<CaptureMetrics, 'duration_ms' | 'amplitude'>,
+  capture: Pick<CaptureMetrics, 'duration_ms' | 'sample_interval_ms' | 'amplitude'>,
 ): string | null {
-  const { amplitude, duration_ms: durationMs } = capture
+  const { amplitude, duration_ms: durationMs, sample_interval_ms: intervalMs } = capture
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0 || intervalMs > MAXIMUM_SAMPLE_INTERVAL_MS) {
+    return `Fluency could not be measured because the ${MIN_PAUSE_MS}ms pause detector needs a valid amplitude cadence of ${MAXIMUM_SAMPLE_INTERVAL_MS}ms or faster.`
+  }
   if (amplitude.length < MINIMUM_TIMELINE_SAMPLES) {
     return `Fluency needs at least ${MINIMUM_TIMELINE_SAMPLES} amplitude samples to measure pauses.`
   }
@@ -107,7 +114,16 @@ function captureEvidenceWarning(
 
   const firstTimestamp = amplitude[0]?.t_ms ?? 0
   const coverage = previousTimestamp - firstTimestamp
-  if (coverage < durationMs * MINIMUM_TIMELINE_COVERAGE || largestGap > MAXIMUM_TIMELINE_GAP_MS) {
+  const minimumFrames = Math.floor(durationMs / intervalMs) * FRAME_DENSITY_FRACTION
+  const maximumGap = intervalMs * TIMELINE_GAP_MULTIPLIER
+  const maximumEdgeGap = Math.max(intervalMs * TIMELINE_GAP_MULTIPLIER, MAXIMUM_EDGE_GAP_MS)
+  if (
+    coverage < durationMs * MINIMUM_TIMELINE_COVERAGE ||
+    amplitude.length < minimumFrames ||
+    largestGap > maximumGap ||
+    firstTimestamp > maximumEdgeGap ||
+    durationMs - previousTimestamp > maximumEdgeGap
+  ) {
     return 'Fluency could not be measured because the amplitude timeline was too sparse for pause analysis.'
   }
   return null

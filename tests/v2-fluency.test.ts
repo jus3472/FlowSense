@@ -4,8 +4,12 @@ import { analysePace } from '@/lib/scoring/pace'
 import { evaluateFluency } from '@/lib/scoring/v2/fluency'
 import { amplitudeTimeline, wordsFrom } from './helpers/transcript'
 
-function capture(durationMs: number, amplitude: ReturnType<typeof amplitudeTimeline>) {
-  return { duration_ms: durationMs, amplitude }
+function capture(
+  durationMs: number,
+  amplitude: ReturnType<typeof amplitudeTimeline>,
+  sampleIntervalMs = 50,
+) {
+  return { duration_ms: durationMs, sample_interval_ms: sampleIntervalMs, amplitude }
 }
 
 function evaluated(transcript: string, durationMs = 10_000) {
@@ -227,6 +231,73 @@ describe('v2 fluency evaluator', () => {
     })
     expect(result.warnings.join(' ')).toMatch(/too sparse/)
   })
+
+  it('is unavailable for an evenly sparse one hertz timeline', () => {
+    const result = evaluateFluency({
+      capture: capture(
+        10_000,
+        Array.from({ length: 10 }, (_value, index) => ({ t_ms: index * 1_000, rms: 0.2 })),
+        1_000,
+      ),
+      words: wordsFrom('one two three four'),
+      transcript: 'one two three four',
+    })
+
+    expect(result).toMatchObject({
+      availability: 'unavailable',
+      status: 'unavailable',
+      component: null,
+    })
+    expect(result.warnings.join(' ')).toMatch(/cadence/)
+  })
+
+  it.each([
+    [
+      'head',
+      amplitudeTimeline(10_000, [{ from_ms: 0, to_ms: 10_000, rms: 0.2 }]).filter(
+        (sample) => sample.t_ms >= 1_000,
+      ),
+    ],
+    [
+      'tail',
+      amplitudeTimeline(10_000, [{ from_ms: 0, to_ms: 10_000, rms: 0.2 }]).filter(
+        (sample) => sample.t_ms < 8_000,
+      ),
+    ],
+  ])('is unavailable with missing %s timeline coverage', (_edge, amplitude) => {
+    const result = evaluateFluency({
+      capture: capture(10_000, amplitude),
+      words: wordsFrom('one two three four'),
+      transcript: 'one two three four',
+    })
+
+    expect(result).toMatchObject({
+      availability: 'unavailable',
+      status: 'unavailable',
+      component: null,
+    })
+  })
+
+  it.each([0, Number.NaN, Number.POSITIVE_INFINITY])(
+    'is unavailable for an invalid sample interval of %s',
+    (sampleIntervalMs) => {
+      const result = evaluateFluency({
+        capture: capture(
+          10_000,
+          amplitudeTimeline(10_000, [{ from_ms: 0, to_ms: 10_000, rms: 0.2 }]),
+          sampleIntervalMs,
+        ),
+        words: wordsFrom('one two three four'),
+        transcript: 'one two three four',
+      })
+
+      expect(result).toMatchObject({
+        availability: 'unavailable',
+        status: 'unavailable',
+        component: null,
+      })
+    },
+  )
 
   it('is unavailable when timed words fall outside the measured recording', () => {
     const result = evaluateFluency({
