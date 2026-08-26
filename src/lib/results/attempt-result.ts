@@ -169,13 +169,20 @@ function isLegacyStatistics(value: unknown): boolean {
 function isTranscriptWords(value: unknown): boolean {
   return (
     Array.isArray(value) &&
-    value.every(
-      (word) =>
-        isRecord(word) &&
-        typeof word.word === 'string' &&
-        finiteNumber(word.start) &&
-        finiteNumber(word.end),
-    )
+    value.every((word) => {
+      if (
+        !isRecord(word) ||
+        typeof word.word !== 'string' ||
+        !finiteNumber(word.start) ||
+        !finiteNumber(word.end)
+      ) {
+        return false
+      }
+      return (
+        !('confidence' in word) ||
+        (finiteNumber(word.confidence) && word.confidence >= 0 && word.confidence <= 1)
+      )
+    })
   )
 }
 
@@ -195,8 +202,7 @@ function isLegacyMetrics(value: unknown): value is AttemptMetrics {
     isLegacyStatistics(delivery.statistics) &&
     delivery.pauses.every(isLegacyPause) &&
     (value.transcript === undefined ||
-      !isRecord(value.transcript) ||
-      isTranscriptWords(value.transcript.words))
+      (isRecord(value.transcript) && isTranscriptWords(value.transcript.words)))
   )
 }
 

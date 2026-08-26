@@ -195,4 +195,36 @@ describe('attempt result reader', () => {
       ).kind,
     ).toBe('unsupported')
   })
+
+  it.each([42, null])('rejects a present non-object transcript block', (transcript) => {
+    expect(
+      readAttemptResult(
+        legacyInput({ metrics: { delivery: { metrics, statistics, pauses: [] }, transcript } }),
+      ).kind,
+    ).toBe('unsupported')
+  })
+
+  it('accepts valid transcript words but rejects bad timings and confidence', () => {
+    const withWords = (words: unknown[]) => ({
+      delivery: { metrics, statistics, pauses: [] },
+      transcript: { words },
+    })
+    expect(
+      readAttemptResult(
+        legacyInput({
+          metrics: withWords([{ word: 'hello', start: 0, end: 0.4, confidence: 0.9 }]),
+        }),
+      ).kind,
+    ).toBe('legacy')
+    expect(
+      readAttemptResult(
+        legacyInput({ metrics: withWords([{ word: 'hello', start: 'now', end: 0.4 }]) }),
+      ).kind,
+    ).toBe('unsupported')
+    expect(
+      readAttemptResult(
+        legacyInput({ metrics: withWords([{ word: 'hello', start: 0, end: 0.4, confidence: 2 }]) }),
+      ).kind,
+    ).toBe('unsupported')
+  })
 })
