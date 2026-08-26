@@ -4,6 +4,7 @@ import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import {
   formatV2Measurements,
+  formatV2Feedback,
   priorityV2Category,
   strongestV2Category,
   v2CategoryViews,
@@ -52,7 +53,7 @@ export function V2ResultsView({
         {complete ? (
           <div>
             <p className="text-muted text-sm">Overall result</p>
-            <p className="numeric text-foreground text-5xl font-semibold">
+            <p className="numeric text-foreground text-3xl font-semibold sm:text-4xl">
               {payload.total_earned_points}
               <span className="text-muted text-xl"> / 100</span>
             </p>
@@ -70,6 +71,7 @@ export function V2ResultsView({
       <section className="flex flex-col gap-3" aria-label="Category results">
         {v2CategoryViews(payload).map(({ category, label, result }) => {
           const measurements = formatV2Measurements(result.measurements)
+          const feedback = formatV2Feedback(result)
           const status =
             result.status === 'scored'
               ? `${result.earned_points} / ${result.max_points}`
@@ -96,6 +98,13 @@ export function V2ResultsView({
                   ) : (
                     <p className="text-muted text-sm">No concrete measurement is available.</p>
                   )}
+                  {feedback.length > 0 ? (
+                    <ul className="text-muted flex flex-col gap-2 text-sm">
+                      {feedback.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </div>
               </details>
             </Card>

@@ -2,6 +2,20 @@ import type { Segment } from '@/lib/results/highlights'
 import type { PracticeMode, SkillCategory } from '@/lib/practice/contracts'
 import type { V2PersistedCategoryScore, V2ScorePayload } from '@/lib/scoring/v2/assemble'
 
+interface TranscriptCandidate {
+  quote: string
+  label: string
+  detail: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
 export const V2_CATEGORY_ORDER = [
   'fluency',
   'clarity',
@@ -80,18 +94,59 @@ export function formatV2Measurements(value: unknown): string[] {
     })
 }
 
-function deductionEvidence(payload: V2ScorePayload) {
-  return v2CategoryViews(payload).flatMap(({ label, result }) => {
+function hasDeduction(result: V2PersistedCategoryScore, id: string, field = 'id'): boolean {
+  return result.deductions.some((deduction) => isRecord(deduction) && deduction[field] === id)
+}
+
+function contentCandidates(label: string, result: V2PersistedCategoryScore): TranscriptCandidate[] {
+  return result.deductions.flatMap((deduction) => {
     if (
-      result.status !== 'scored' ||
-      result.earned_points === null ||
-      result.earned_points >= result.max_points
+      !isRecord(deduction) ||
+      typeof deduction.deduction !== 'number' ||
+      deduction.deduction <= 0
     ) {
       return []
     }
-    return result.evidence
-      .filter((evidence) => evidence.source === 'transcript' && typeof evidence.quote === 'string')
-      .map((evidence) => ({ label, quote: evidence.quote!.trim(), detail: evidence.detail }))
+    const quote = nonEmptyString(deduction.quote)
+    const detail = nonEmptyString(deduction.observation)
+    const hasValidatedEvidence =
+      Array.isArray(deduction.evidence) &&
+      deduction.evidence.some(
+        (evidence) =>
+          isRecord(evidence) &&
+          typeof evidence.start === 'number' &&
+          typeof evidence.end === 'number' &&
+          evidence.end > evidence.start,
+      )
+    return quote && detail && hasValidatedEvidence ? [{ quote, detail, label }] : []
+  })
+}
+
+function deductionEvidence(payload: V2ScorePayload): TranscriptCandidate[] {
+  return v2CategoryViews(payload).flatMap(({ category, label, result }) => {
+    if (result.status !== 'scored') return []
+    if (category === 'grammar' || category === 'vocabulary' || category === 'structure') {
+      return contentCandidates(label, result)
+    }
+    if (category === 'fluency' && hasDeduction(result, 'filler_rate')) {
+      return result.evidence.flatMap((evidence) => {
+        const quote = nonEmptyString(evidence.quote)
+        return evidence.source === 'transcript' &&
+          quote &&
+          evidence.detail === 'Filler detected in the transcript.'
+          ? [{ quote, detail: evidence.detail, label }]
+          : []
+      })
+    }
+    if (category === 'clarity' && hasDeduction(result, 'recognition_uncertainty')) {
+      return result.evidence.flatMap((evidence) => {
+        const quote = nonEmptyString(evidence.quote)
+        return evidence.source === 'deepgram_word_confidence' && quote
+          ? [{ quote, detail: evidence.detail, label }]
+          : []
+      })
+    }
+    return []
   })
 }
 
@@ -102,23 +157,46 @@ export function v2EvidenceTakeaway(payload: V2ScorePayload): string | null {
   )
 }
 
+/** Formats known persisted feedback fields without rendering untrusted JSON. */
+export function formatV2Feedback(result: V2PersistedCategoryScore): string[] {
+  const lines: string[] = []
+  for (const deduction of result.deductions) {
+    if (!isRecord(deduction)) continue
+    const detail = nonEmptyString(deduction.detail) ?? nonEmptyString(deduction.observation)
+    if (detail) lines.push(detail)
+    const suggestion = nonEmptyString(deduction.suggestion)
+    if (suggestion) lines.push(`Try: ${suggestion}`)
+  }
+  for (const evidence of result.evidence) {
+    const detail = nonEmptyString(evidence.detail)
+    if (detail) lines.push(detail)
+  }
+  return [...new Set(lines)]
+}
+
 /**
  * V2 evidence offsets come from multiple providers and units. Match quoted
  * transcript evidence instead, claiming each occurrence once in stored order.
  */
 export function v2TranscriptSegments(transcript: string, payload: V2ScorePayload): Segment[] {
   const ranges: Array<{ from: number; to: number; label: string }> = []
-  let searchFrom = 0
+  const occupied: Array<{ from: number; to: number }> = []
   for (const evidence of deductionEvidence(payload)) {
-    if (!evidence.quote) continue
-    const from = transcript
-      .toLocaleLowerCase()
-      .indexOf(evidence.quote.toLocaleLowerCase(), searchFrom)
-    if (from === -1) continue
-    const to = from + evidence.quote.length
-    ranges.push({ from, to, label: `${evidence.label}: ${evidence.detail}` })
-    searchFrom = to
+    const lowerTranscript = transcript.toLocaleLowerCase()
+    const lowerQuote = evidence.quote.toLocaleLowerCase()
+    let from = lowerTranscript.indexOf(lowerQuote)
+    while (from !== -1) {
+      const to = from + evidence.quote.length
+      if (!occupied.some((range) => from < range.to && to > range.from)) {
+        occupied.push({ from, to })
+        ranges.push({ from, to, label: `${evidence.label}: ${evidence.detail}` })
+        break
+      }
+      from = lowerTranscript.indexOf(lowerQuote, from + 1)
+    }
   }
+
+  ranges.sort((left, right) => left.from - right.from || left.to - right.to)
 
   const segments: Segment[] = []
   let cursor = 0

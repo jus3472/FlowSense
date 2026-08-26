@@ -93,6 +93,13 @@ describe('design system', () => {
     }
     expect(violations).toEqual([])
   })
+
+  it('uses defined responsive score type tokens on the v2 result screen', () => {
+    const v2Results = files.find((file) => file.path.endsWith('results/v2-results-view.tsx'))
+    expect(v2Results?.contents).toContain('text-3xl')
+    expect(v2Results?.contents).toContain('sm:text-4xl')
+    expect(v2Results?.contents).not.toMatch(/text-5xl|text-6xl/)
+  })
 })
 
 describe('server only keys', () => {

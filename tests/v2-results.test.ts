@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import {
   V2_CATEGORY_LABELS,
+  formatV2Feedback,
   formatV2Measurements,
   priorityV2Category,
   strongestV2Category,
@@ -100,6 +101,15 @@ describe('v2 result helpers', () => {
           },
           { source: 'audio', start: 1, end: 2, quote: 'response', detail: 'Ignore timing.' },
         ],
+        deductions: [
+          {
+            quote: 'clear',
+            observation: 'Use a complete sentence.',
+            suggestion: 'Name the action first.',
+            deduction: 0.5,
+            evidence: [{ start: 2, end: 7 }],
+          },
+        ],
       },
     }
     const segments = v2TranscriptSegments('A clear response is clear.', { ...score, categories })
@@ -125,6 +135,105 @@ describe('v2 result helpers', () => {
       ),
     ).toBe(true)
   })
+
+  it('uses the stored deduction semantics instead of generic category evidence', () => {
+    const score = payload()
+    const categories = {
+      ...score.categories,
+      fluency: {
+        ...score.categories.fluency,
+        component: 0.7,
+        earned_points: 15,
+        deductions: [{ id: 'articulation_pace', detail: 'Pace was fast.' }],
+        evidence: [
+          { source: 'transcript', start: 0, end: 5, quote: 'First', detail: 'First word.' },
+        ],
+      },
+      clarity: {
+        ...score.categories.clarity,
+        component: 0.8,
+        earned_points: 16,
+        deductions: [{ id: 'recognition_uncertainty', detail: 'Lower recognition.' }],
+        evidence: [
+          {
+            source: 'deepgram_word_confidence',
+            start: 8,
+            end: 9,
+            quote: 'B',
+            detail: 'Recognition confidence for this word was 0.50.',
+          },
+          { source: 'audio_timeline', start: 0, end: 2, quote: 'First', detail: 'Audio only.' },
+        ],
+      },
+    }
+    const highlights = v2TranscriptSegments('First B.', { ...score, categories }).filter(
+      (segment) => segment.type === 'highlight',
+    )
+    expect(highlights.map((segment) => segment.text)).toEqual(['B'])
+  })
+
+  it('maps filler and content quotes in transcript order without reusing occurrences', () => {
+    const score = payload()
+    const categories = {
+      ...score.categories,
+      fluency: {
+        ...score.categories.fluency,
+        component: 0.7,
+        earned_points: 15,
+        deductions: [{ id: 'filler_rate', detail: 'Fillers reduced fluency.' }],
+        evidence: [
+          {
+            source: 'transcript',
+            start: 20,
+            end: 22,
+            quote: 'um',
+            detail: 'Filler detected in the transcript.',
+          },
+          {
+            source: 'transcript',
+            start: 2,
+            end: 4,
+            quote: 'um',
+            detail: 'Filler detected in the transcript.',
+          },
+          {
+            source: 'transcript',
+            start: 0,
+            end: 1,
+            quote: 'missing',
+            detail: 'Filler detected in the transcript.',
+          },
+        ],
+      },
+      vocabulary: {
+        ...score.categories.vocabulary,
+        component: 0.5,
+        earned_points: 6,
+        deductions: [
+          {
+            quote: 'vague',
+            observation: 'Choose a specific word.',
+            suggestion: null,
+            deduction: 0.5,
+            evidence: [{ start: 3, end: 8 }],
+          },
+        ],
+      },
+    }
+    const highlights = v2TranscriptSegments('um vague um', { ...score, categories }).filter(
+      (segment) => segment.type === 'highlight',
+    )
+    expect(highlights.map((segment) => segment.text)).toEqual(['um', 'vague', 'um'])
+  })
+
+  it('formats stored feedback safely without serializing malformed deductions', () => {
+    expect(
+      formatV2Feedback({
+        ...payload().categories.grammar,
+        deductions: [{ observation: 'Be specific.', suggestion: 'Name the item.' }, 42],
+      }),
+    ).toEqual(['Be specific.', 'Try: Name the item.'])
+  })
 })
 
 describe('v2 attempt route', () => {
@@ -136,5 +245,7 @@ describe('v2 attempt route', () => {
     expect(page).toContain('<ResultsView')
     expect(legacy).toContain('Try this prompt again')
     expect(v2).toContain('Try Again')
+    expect(v2).toContain('text-3xl')
+    expect(v2).not.toContain('text-5xl')
   })
 })
