@@ -15,6 +15,7 @@ import { CountdownStep } from '@/components/record/countdown-step'
 import { ProcessingStep } from '@/components/record/processing-step'
 import { ReadyStep } from '@/components/record/ready-step'
 import { RecordingStep } from '@/components/record/recording-step'
+import { useActiveRecordingExitGuard } from '@/components/record/use-active-recording-exit-guard'
 import { Button, ButtonLink } from '@/components/ui/button'
 import {
   createAttempt,
@@ -76,6 +77,8 @@ export function RecordFlow({ promptId, promptText }: RecordFlowProps) {
   const [processing, setProcessing] = useState<ProcessingState>(INITIAL_PROCESSING_STATE)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [recording, setRecording] = useState<AttemptRecording | null>(null)
+
+  useActiveRecordingExitGuard(phase.name === 'recording' || phase.name === 'processing')
 
   // Everything below survives re-renders without driving them, and gives the
   // retry path a way to skip work that already succeeded.
