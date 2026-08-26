@@ -8,8 +8,8 @@ import {
   priorityV2Category,
   strongestV2Category,
   v2CategoryViews,
-  v2EvidenceTakeaway,
   v2ModeFeedback,
+  v2OverallTakeaway,
   v2TranscriptSegments,
 } from '@/lib/results/v2'
 import type { V2ScorePayload } from '@/lib/scoring/v2/assemble'
@@ -37,7 +37,7 @@ export function V2ResultsView({
   const priority = priorityV2Category(payload)
   const complete = payload.total_earned_points !== null
   const segments = v2TranscriptSegments(transcript, payload)
-  const takeaway = v2EvidenceTakeaway(payload)
+  const takeaway = v2OverallTakeaway(payload)
 
   return (
     <div className="flex flex-col gap-8 pb-12">
@@ -65,7 +65,7 @@ export function V2ResultsView({
           </div>
         )}
         <p className="text-muted text-sm">{v2ModeFeedback(payload.mode)}</p>
-        {takeaway ? <p className="text-muted text-sm">{takeaway}</p> : null}
+        <p className="text-muted text-sm">{takeaway}</p>
       </Card>
 
       <section className="flex flex-col gap-3" aria-label="Category results">

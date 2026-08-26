@@ -6,8 +6,8 @@ import {
   priorityV2Category,
   strongestV2Category,
   v2CategoryViews,
-  v2EvidenceTakeaway,
   v2ModeFeedback,
+  v2OverallTakeaway,
   v2TranscriptSegments,
 } from '@/lib/results/v2'
 import { V2_SCORE_PAYLOAD_VERSION, type V2ScorePayload } from '@/lib/scoring/v2/assemble'
@@ -113,7 +113,7 @@ describe('v2 result helpers', () => {
       },
     }
     const segments = v2TranscriptSegments('A clear response is clear.', { ...score, categories })
-    expect(v2EvidenceTakeaway({ ...score, categories })).toBe('Use a complete sentence.')
+    expect(v2OverallTakeaway({ ...score, categories })).toBe('Use a complete sentence.')
     expect(segments.filter((segment) => segment.type === 'highlight')).toHaveLength(1)
     expect(segments.filter((segment) => segment.type === 'highlight')[0]?.text).toBe('clear')
   })
@@ -233,6 +233,34 @@ describe('v2 result helpers', () => {
         deductions: [{ observation: 'Be specific.', suggestion: 'Name the item.' }, 42],
       }),
     ).toEqual(['Be specific.', 'Try: Name the item.'])
+  })
+
+  it('always gives a factual takeaway for mechanical-only, full, and partial results', () => {
+    const score = payload()
+    const mechanical = {
+      ...score,
+      total_earned_points: 93,
+      categories: {
+        ...score.categories,
+        fluency: {
+          ...score.categories.fluency,
+          component: 0.7,
+          earned_points: 15,
+          deductions: [{ id: 'articulation_pace', detail: '165 words per minute.' }],
+        },
+      },
+    }
+    expect(v2OverallTakeaway(mechanical)).toBe('165 words per minute.')
+    expect(v2OverallTakeaway(score)).toBe('No category lost points in this response.')
+    expect(v2OverallTakeaway({ ...score, total_earned_points: null })).toBe(
+      'Some categories were not checked, so the overall result is unavailable.',
+    )
+  })
+
+  it('drops non-finite evolving measurements', () => {
+    expect(formatV2Measurements({ valid: 1, invalid: Number.NaN, infinite: Infinity })).toEqual([
+      'valid: 1',
+    ])
   })
 })
 

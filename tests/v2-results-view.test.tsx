@@ -72,6 +72,7 @@ describe('V2ResultsView', () => {
       expect(screen.getByText(label)).toBeInTheDocument()
     }
     expect(screen.getByText('100')).toBeInTheDocument()
+    expect(screen.getByText('No category lost points in this response.')).toBeInTheDocument()
     expect(screen.getByLabelText('Play Your answer')).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'Try Again' })).toHaveLength(1)
   })
@@ -80,6 +81,9 @@ describe('V2ResultsView', () => {
     render(<V2ResultsView {...props} audioUrl={null} payload={payload(true)} />)
     expect(screen.getByText('Some checks are not available')).toBeInTheDocument()
     expect(screen.getByText('Not checked')).toBeInTheDocument()
+    expect(
+      screen.getByText('Some categories were not checked, so the overall result is unavailable.'),
+    ).toBeInTheDocument()
     expect(screen.queryByText('100')).not.toBeInTheDocument()
   })
 })

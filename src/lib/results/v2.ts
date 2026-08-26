@@ -85,7 +85,8 @@ export function formatV2Measurements(value: unknown): string[] {
   return Object.entries(value as Record<string, unknown>)
     .filter(
       (entry): entry is [string, number | boolean] =>
-        typeof entry[1] === 'number' || typeof entry[1] === 'boolean',
+        (typeof entry[1] === 'number' && Number.isFinite(entry[1])) ||
+        typeof entry[1] === 'boolean',
     )
     .map(([key, measurement]) => {
       const label = key.replaceAll('_', ' ')
@@ -150,11 +151,33 @@ function deductionEvidence(payload: V2ScorePayload): TranscriptCandidate[] {
   })
 }
 
-/** A stored deduction observation is the only source for the compact takeaway. */
-export function v2EvidenceTakeaway(payload: V2ScorePayload): string | null {
-  return (
-    deductionEvidence(payload).find((evidence) => evidence.detail.trim().length > 0)?.detail ?? null
-  )
+function storedDeductionDetail(payload: V2ScorePayload): string | null {
+  for (const { result } of v2CategoryViews(payload)) {
+    for (const deduction of result.deductions) {
+      if (!isRecord(deduction)) continue
+      const detail = nonEmptyString(deduction.detail) ?? nonEmptyString(deduction.observation)
+      if (detail) return detail
+    }
+  }
+  return null
+}
+
+/**
+ * A compact, deterministic explanation for every v2 snapshot. It stays
+ * factual and derives only from persisted deductions and category results.
+ */
+export function v2OverallTakeaway(payload: V2ScorePayload): string {
+  if (payload.total_earned_points === null) {
+    return 'Some categories were not checked, so the overall result is unavailable.'
+  }
+  const deduction = storedDeductionDetail(payload)
+  if (deduction) return deduction
+
+  const lowest = priorityV2Category(payload)
+  if (lowest && lowest.result.earned_points !== null) {
+    return `${lowest.label} has ${lowest.result.earned_points} of ${lowest.result.max_points} points in this response.`
+  }
+  return 'No category lost points in this response.'
 }
 
 /** Formats known persisted feedback fields without rendering untrusted JSON. */
