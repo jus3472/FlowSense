@@ -70,7 +70,12 @@ export function parseDeepgramResponse(payload: unknown): ParsedTranscript {
     const end = numberOrNull(entry.end)
     if (word === null || start === null || end === null) continue
     const confidence = numberOrNull(entry.confidence)
-    words.push({ word, start, end, ...(confidence !== null && confidence >= 0 && confidence <= 1 ? { confidence } : {}) })
+    words.push({
+      word,
+      start,
+      end,
+      ...(confidence !== null && confidence >= 0 && confidence <= 1 ? { confidence } : {}),
+    })
   }
 
   const metadata = isRecord(payload.metadata) ? payload.metadata : null

@@ -85,6 +85,37 @@ describe('parseDeepgramResponse', () => {
     expect(parsed.words).toEqual([{ word: 'one', start: 0, end: 0.2 }])
   })
 
+  it('keeps only finite word confidence values from zero through one', () => {
+    const parsed = parseDeepgramResponse({
+      results: {
+        channels: [
+          {
+            alternatives: [
+              {
+                transcript: 'one two three four five',
+                words: [
+                  { word: 'one', start: 0, end: 0.2, confidence: -0.1 },
+                  { word: 'two', start: 0.2, end: 0.4, confidence: 2 },
+                  { word: 'three', start: 0.4, end: 0.6, confidence: Number.NaN },
+                  { word: 'four', start: 0.6, end: 0.8, confidence: '0.8' },
+                  { word: 'five', start: 0.8, end: 1, confidence: 0.8 },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    })
+
+    expect(parsed.words).toEqual([
+      { word: 'one', start: 0, end: 0.2 },
+      { word: 'two', start: 0.2, end: 0.4 },
+      { word: 'three', start: 0.4, end: 0.6 },
+      { word: 'four', start: 0.6, end: 0.8 },
+      { word: 'five', start: 0.8, end: 1, confidence: 0.8 },
+    ])
+  })
+
   it.each([
     ['a string', 'nope'],
     ['no results', {}],
