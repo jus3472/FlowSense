@@ -51,7 +51,14 @@ export function isPromptId(value: string): boolean {
 export function parseLibraryPrompt(value: unknown): LibraryPrompt | null {
   if (!isRecord(value)) return null
 
-  const { id, text, mode, difficulty, target_duration_seconds: duration, collection_id: collectionId } = value
+  const {
+    id,
+    text,
+    mode,
+    difficulty,
+    target_duration_seconds: duration,
+    collection_id: collectionId,
+  } = value
   if (
     typeof id !== 'string' ||
     !isPromptId(id) ||
@@ -136,4 +143,20 @@ export function choosePrompt(
     ? Math.min(candidates.length - 1, Math.max(0, Math.floor(value * candidates.length)))
     : 0
   return candidates[index] ?? null
+}
+
+/** Chooses from the first preferred mode that has a valid prompt. */
+export function choosePromptByModePriority(
+  candidates: readonly LibraryPrompt[],
+  modes: readonly PracticeMode[],
+  random: RandomSource = Math.random,
+): LibraryPrompt | null {
+  for (const mode of [...new Set<PracticeMode>([...modes, 'practice'])]) {
+    const prompt = choosePrompt(
+      candidates.filter((candidate) => candidate.mode === mode),
+      random,
+    )
+    if (prompt) return prompt
+  }
+  return null
 }

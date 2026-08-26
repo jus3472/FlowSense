@@ -3,6 +3,7 @@ import 'server-only'
 import type { PracticeMode, PromptDifficulty } from '@/lib/practice/contracts'
 import {
   choosePrompt,
+  choosePromptByModePriority,
   derivePromptCollections,
   filterPromptLibrary,
   isPromptId,
@@ -56,7 +57,9 @@ export async function getPromptById(id: string): Promise<LibraryPrompt | null> {
   return parseLibraryPrompt(data)
 }
 
-export async function getPromptLibrary(filters: PromptLibraryFilters = {}): Promise<LibraryPrompt[]> {
+export async function getPromptLibrary(
+  filters: PromptLibraryFilters = {},
+): Promise<LibraryPrompt[]> {
   const rows = await loadActivePromptRows(filters)
   return filterPromptLibrary(rows, filters)
 }
@@ -66,6 +69,14 @@ export async function pickPracticePrompt(
   random: RandomSource = Math.random,
 ): Promise<LibraryPrompt | null> {
   return choosePrompt(await getPromptLibrary(filters), random)
+}
+
+/** Selects the first available preferred mode, always ending at General Practice. */
+export async function pickPreferredPracticePrompt(
+  modes: readonly PracticeMode[],
+  random: RandomSource = Math.random,
+): Promise<LibraryPrompt | null> {
+  return choosePromptByModePriority(await getPromptLibrary(), modes, random)
 }
 
 export async function getPromptCollections(
