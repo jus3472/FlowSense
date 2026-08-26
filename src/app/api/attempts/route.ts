@@ -33,6 +33,11 @@ export async function POST(request: Request) {
       prompt_id: payload.value.promptId,
       prompt_text: payload.value.promptText,
       duration_ms: payload.value.durationMs,
+      practice_mode: payload.value.mode,
+      prompt_source: payload.value.source,
+      prompt_difficulty: payload.value.difficulty,
+      rubric_version: payload.value.rubricVersion,
+      retry_of_attempt_id: payload.value.retryOfAttemptId,
     })
     .select('id')
     .single()

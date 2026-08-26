@@ -3,6 +3,8 @@ import { fetchWithTimeout } from '@/lib/net/fetch-with-timeout'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { createClient } from '@/lib/supabase/client'
 import type { CaptureMetrics } from '@/lib/types/metrics'
+import type { PracticeSessionDescriptor } from '@/lib/practice/session'
+import { RUBRIC_VERSION, type RubricVersion } from '@/lib/scoring/v2/contracts'
 
 /**
  * Browser side calls for the recording pipeline. Each one is a single network
@@ -38,11 +40,10 @@ async function accessToken(): Promise<string> {
   return session.access_token
 }
 
-export interface CreateAttemptInput {
-  promptId: string | null
-  promptText: string
+export interface CreateAttemptInput extends PracticeSessionDescriptor {
   durationMs: number
   mimeType: string
+  rubricVersion: RubricVersion
 }
 
 export interface CreatedAttempt {
@@ -72,6 +73,13 @@ export async function createAttempt(input: CreateAttemptInput): Promise<CreatedA
     throw new Error('The server did not return an attempt to save into.')
   }
   return { attemptId: body.attemptId, storagePath: body.storagePath }
+}
+
+export function createAttemptForSession(
+  session: PracticeSessionDescriptor,
+  input: Pick<CreateAttemptInput, 'durationMs' | 'mimeType'>,
+): CreateAttemptInput {
+  return { ...session, ...input, rubricVersion: RUBRIC_VERSION }
 }
 
 /** Straight from the browser to the private bucket, under the user's own prefix. */

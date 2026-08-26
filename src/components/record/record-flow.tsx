@@ -19,6 +19,7 @@ import { useActiveRecordingExitGuard } from '@/components/record/use-active-reco
 import { Button, ButtonLink } from '@/components/ui/button'
 import {
   createAttempt,
+  createAttemptForSession,
   saveRecording,
   scoreAttempt,
   transcribeAttempt,
@@ -49,10 +50,10 @@ import {
   subscribeToMediaSupport,
 } from '@/lib/recording/support'
 import type { CaptureMetrics } from '@/lib/types/metrics'
+import type { PracticeSessionDescriptor } from '@/lib/practice/session'
 
 interface RecordFlowProps {
-  promptId: string
-  promptText: string
+  session: PracticeSessionDescriptor
 }
 
 type Phase =
@@ -65,7 +66,8 @@ type Phase =
   | { name: 'processing' }
   | { name: 'recorder-failed'; message: string }
 
-export function RecordFlow({ promptId, promptText }: RecordFlowProps) {
+export function RecordFlow({ session }: RecordFlowProps) {
+  const { promptText } = session
   const router = useRouter()
   const support = useSyncExternalStore(
     subscribeToMediaSupport,
@@ -128,12 +130,12 @@ export function RecordFlow({ promptId, promptText }: RecordFlowProps) {
         // Each part checks whether it already succeeded, so a retry resumes
         // instead of duplicating rows or re-uploading audio that is already there.
         upload: async () => {
-          attemptRef.current ??= await createAttempt({
-            promptId,
-            promptText,
-            durationMs: recording.durationMs,
-            mimeType: recording.mimeType,
-          })
+          attemptRef.current ??= await createAttempt(
+            createAttemptForSession(session, {
+              durationMs: recording.durationMs,
+              mimeType: recording.mimeType,
+            }),
+          )
           const attempt = attemptRef.current
 
           if (!uploadedRef.current) {
@@ -165,7 +167,7 @@ export function RecordFlow({ promptId, promptText }: RecordFlowProps) {
         router.replace(`/attempts/${attempt.attemptId}`)
       }
     },
-    [promptId, promptText, router],
+    [router, session],
   )
 
   const handleRecorded = useCallback(
