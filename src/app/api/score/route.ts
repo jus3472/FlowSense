@@ -13,7 +13,21 @@ import { notCheckedContent, type Dispute } from '@/lib/scoring/content'
 import { runContentCheck } from '@/lib/scoring/run-content'
 import { computeMechanical } from '@/lib/scoring/mechanical'
 import { surfacesToDelete } from '@/lib/scoring/tighten'
+import { analyseFillers } from '@/lib/scoring/fillers'
+import { buildTokens } from '@/lib/scoring/tokens'
+import {
+  assembleV2Score,
+  isPracticeMode,
+  shouldReuseStoredV2Score,
+} from '@/lib/scoring/v2/assemble'
+import { analyseClarity } from '@/lib/scoring/v2/clarity'
+import { contentDetectorFromModel } from '@/lib/scoring/v2/content/adapter'
+import type { V2ContentDetectorProvider } from '@/lib/scoring/v2/content/contracts'
+import { runV2ContentEvaluation } from '@/lib/scoring/v2/content/evaluate'
+import { evaluateDelivery } from '@/lib/scoring/v2/delivery'
+import { evaluateFluency } from '@/lib/scoring/v2/fluency'
 import { createClient } from '@/lib/supabase/server'
+import type { TranscriptWord } from '@/lib/deepgram/parse'
 import type { AttemptMetrics } from '@/lib/types/metrics'
 
 /** The model call is the slow half. Mechanical metrics take milliseconds. */
@@ -23,6 +37,37 @@ const MODEL_TIMEOUT_MS = 30_000
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function storedContentStatus(value: unknown): string | null {
+  return isRecord(value) && typeof value.status === 'string' ? value.status : null
+}
+
+function mechanicalSpans(transcript: string, words: readonly TranscriptWord[]) {
+  const tokens = buildTokens(words, transcript)
+  const fillers = analyseFillers(tokens, tokens.length)
+  return fillers.hits.flatMap((hit) => {
+    const selected = hit.token_indices.map((index) => tokens[index]).filter(Boolean)
+    const first = selected[0]
+    const last = selected.at(-1)
+    return first && last
+      ? [{ start: first.charStart, end: last.charEnd, text: hit.text, category: hit.category }]
+      : []
+  })
+}
+
+function unreliableSpans(transcript: string, words: readonly TranscriptWord[]) {
+  return buildTokens(words, transcript).flatMap((token, index) => {
+    const confidence = words[index]?.confidence
+    return typeof confidence === 'number' && confidence >= 0 && confidence < 0.75
+      ? [{ start: token.charStart, end: token.charEnd, confidence }]
+      : []
+  })
+}
+
+function unavailableProvider(error: unknown): V2ContentDetectorProvider {
+  const message = error instanceof Error ? error.message : 'Content provider failed.'
+  return { name: 'deepseek', complete: async () => Promise.reject(new Error(message)) }
 }
 
 export async function POST(request: Request) {
@@ -44,12 +89,25 @@ export async function POST(request: Request) {
 
   const { data: attempt, error: readError } = await supabase
     .from('attempts')
-    .select('id, prompt_text, transcript, duration_ms, metrics')
+    .select(
+      'id, prompt_text, transcript, duration_ms, metrics, score, section_scores, content_result, practice_mode, rubric_version',
+    )
     .eq('id', attemptId)
     .maybeSingle()
 
   if (readError) return apiError(readError.message, 500)
   if (!attempt) return apiError('That attempt does not exist.', 404)
+
+  // A structurally valid v2 snapshot is immutable. Legacy snapshots remain on
+  // the existing path so an explicit "Run the checks" retry can call its
+  // content provider again after a prior not_checked result.
+  if (shouldReuseStoredV2Score(attempt.section_scores)) {
+    return NextResponse.json({
+      score: attempt.score,
+      section_scores: attempt.section_scores,
+      content_status: storedContentStatus(attempt.content_result),
+    })
+  }
 
   const metrics = (attempt.metrics as AttemptMetrics | null) ?? {}
   const capture = metrics.capture
@@ -59,6 +117,55 @@ export async function POST(request: Request) {
   if (!capture) return apiError('This attempt has no capture data to score.', 400)
   if (transcript.trim().length === 0) {
     return apiError('This attempt has no transcript to score.', 400)
+  }
+
+  if (attempt.rubric_version === 'v2' && isPracticeMode(attempt.practice_mode)) {
+    let provider: V2ContentDetectorProvider
+    try {
+      provider = contentDetectorFromModel(createDeepSeekModel(deepseekApiKey()))
+    } catch (error) {
+      provider = unavailableProvider(error)
+    }
+    const content = await runV2ContentEvaluation({
+      provider,
+      mode: attempt.practice_mode,
+      prompt: attempt.prompt_text,
+      transcript,
+      mechanicallyCounted: mechanicalSpans(transcript, transcriptWords),
+      unreliableTranscriptSpans: unreliableSpans(transcript, transcriptWords),
+      timeoutMs: MODEL_TIMEOUT_MS,
+    })
+    const assembled = assembleV2Score({
+      mode: attempt.practice_mode,
+      fluency: evaluateFluency({ capture, words: transcriptWords, transcript }),
+      delivery: evaluateDelivery(capture),
+      clarity: analyseClarity(transcriptWords, capture),
+      content,
+    })
+    const nextMetrics = {
+      ...metrics,
+      v2: {
+        score: assembled,
+        content,
+        scored_at: new Date().toISOString(),
+      },
+    }
+    const { error: saveError } = await supabase
+      .from('attempts')
+      .update({
+        score: assembled.total_earned_points,
+        section_scores: JSON.parse(JSON.stringify(assembled)),
+        metrics: JSON.parse(JSON.stringify(nextMetrics)),
+        content_result: JSON.parse(JSON.stringify(content)),
+      })
+      .eq('id', attemptId)
+    if (saveError) return apiError(`The score could not be saved: ${saveError.message}`, 500)
+
+    return NextResponse.json({
+      score: assembled.total_earned_points,
+      section_scores: assembled,
+      content_status: content.status,
+    })
   }
 
   // Fast, local, and always available.
