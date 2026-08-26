@@ -60,8 +60,8 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
             description="This response was saved but never scored. Record another and it will be scored automatically."
           />
         </Card>
-        <ButtonLink href="/record" size="lg" fullWidth>
-          {"Start today's response"}
+        <ButtonLink href={`/record?retry=${attempt.id}`} size="lg" fullWidth>
+          Try this prompt again
         </ButtonLink>
       </div>
     )

@@ -154,8 +154,8 @@ export function ResultsView({
         <AudioPlayer src={attempt.audioUrl} durationMs={attempt.durationMs} />
       ) : null}
 
-      <ButtonLink href="/record" size="lg" fullWidth>
-        {"Start today's response"}
+      <ButtonLink href={`/record?retry=${attempt.id}`} size="lg" fullWidth>
+        Try this prompt again
       </ButtonLink>
     </div>
   )

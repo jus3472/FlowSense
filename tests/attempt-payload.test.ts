@@ -9,25 +9,33 @@ const VALID = {
   promptText: 'Describe your ideal weekend.',
   mimeType: 'audio/webm;codecs=opus',
   durationMs: 12_400.4,
+  mode: 'practice',
+  difficulty: 'beginner',
+  source: 'library',
+  targetDurationSeconds: 30,
+  retryOfAttemptId: null,
+  rubricVersion: 'v2',
 }
 
 describe('parseCreateAttemptPayload', () => {
-  it('trims prompt text and preserves current UUID and duration behavior', () => {
+  it('trims prompt text and preserves session metadata and duration behavior', () => {
     expect(parseCreateAttemptPayload({ ...VALID, promptText: ` ${VALID.promptText} ` })).toEqual({
       ok: true,
       value: { ...VALID, promptText: VALID.promptText, durationMs: 12_400 },
     })
   })
 
-  it('keeps an invalid or missing prompt UUID as null for client compatibility', () => {
+  it('rejects invalid UUIDs and source combinations instead of changing them', () => {
     expect(parseCreateAttemptPayload({ ...VALID, promptId: 'not-a-uuid' })).toMatchObject({
-      ok: true,
-      value: { promptId: null },
+      ok: false,
     })
-    expect(parseCreateAttemptPayload({ ...VALID, promptId: null })).toMatchObject({
-      ok: true,
-      value: { promptId: null },
-    })
+    expect(parseCreateAttemptPayload({ ...VALID, promptId: null })).toMatchObject({ ok: false })
+    expect(
+      parseCreateAttemptPayload({ ...VALID, source: 'custom', promptId: VALID.promptId }),
+    ).toMatchObject({ ok: false })
+    expect(parseCreateAttemptPayload({ ...VALID, source: 'custom', promptId: null })).toMatchObject(
+      { ok: true, value: { promptId: null, source: 'custom' } },
+    )
   })
 
   it.each([
@@ -38,14 +46,26 @@ describe('parseCreateAttemptPayload', () => {
       { ...VALID, promptText: 'a'.repeat(MAX_ATTEMPT_PROMPT_TEXT_LENGTH + 1) },
       'Your prompt is too long.',
     ],
-    ['an unsupported MIME type', { ...VALID, mimeType: 'audio/wav' }, 'The recording format was not supported.'],
+    [
+      'an unsupported MIME type',
+      { ...VALID, mimeType: 'audio/wav' },
+      'The recording format was not supported.',
+    ],
+    [
+      'a wrong rubric version',
+      { ...VALID, rubricVersion: 'v1' },
+      'The scoring version was not supported.',
+    ],
   ])('rejects %s', (_label, payload, error) => {
     expect(parseCreateAttemptPayload(payload)).toEqual({ ok: false, error })
   })
 
   it('accepts a prompt exactly at the length limit', () => {
     expect(
-      parseCreateAttemptPayload({ ...VALID, promptText: 'a'.repeat(MAX_ATTEMPT_PROMPT_TEXT_LENGTH) }),
+      parseCreateAttemptPayload({
+        ...VALID,
+        promptText: 'a'.repeat(MAX_ATTEMPT_PROMPT_TEXT_LENGTH),
+      }),
     ).toMatchObject({ ok: true })
   })
 })
