@@ -38,9 +38,17 @@ export async function POST(request: Request) {
       prompt_difficulty: payload.value.difficulty,
       rubric_version: payload.value.rubricVersion,
       retry_of_attempt_id: payload.value.retryOfAttemptId,
-      metrics: payload.value.additionalContext
-        ? { practice: { additional_context: payload.value.additionalContext } }
-        : null,
+      // This is session metadata, not scoring evidence. Attempts intentionally
+      // keep it in private JSONB so a retry can restore the original target
+      // without adding a column to the historical attempt shape.
+      metrics: {
+        practice: {
+          target_duration_seconds: payload.value.targetDurationSeconds,
+          ...(payload.value.additionalContext
+            ? { additional_context: payload.value.additionalContext }
+            : {}),
+        },
+      },
     })
     .select('id')
     .single()

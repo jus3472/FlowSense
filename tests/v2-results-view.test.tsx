@@ -86,4 +86,32 @@ describe('V2ResultsView', () => {
     ).toBeInTheDocument()
     expect(screen.queryByText('100')).not.toBeInTheDocument()
   })
+
+  it('renders neutral numeric comparison rows and a previous-response link', () => {
+    render(
+      <V2ResultsView
+        {...props}
+        payload={payload()}
+        comparison={{
+          previousAttemptId: 'attempt-0',
+          rows: [
+            {
+              category: 'fluency',
+              currentPoints: 20,
+              previousPoints: 15,
+              maxPoints: 22,
+              deltaPoints: 5,
+            },
+          ],
+        }}
+      />,
+    )
+    expect(screen.getByText('Compared with your previous response')).toBeInTheDocument()
+    expect(screen.getByText('fluency: 20 / 22 (previously 15, +5)')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View previous response' })).toHaveAttribute(
+      'href',
+      '/attempts/attempt-0',
+    )
+    expect(screen.queryByText(/improv|worse|better/i)).not.toBeInTheDocument()
+  })
 })

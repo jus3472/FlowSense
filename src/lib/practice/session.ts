@@ -117,7 +117,11 @@ export function retrySessionFromAttempt(value: unknown): PracticeSessionDescript
     // Attempts before session descriptors did not snapshot this value.
     targetDurationSeconds: isTargetDuration(value.target_duration_seconds)
       ? value.target_duration_seconds
-      : 60,
+      : isRecord(value.metrics) &&
+          isRecord(value.metrics.practice) &&
+          isTargetDuration(value.metrics.practice.target_duration_seconds)
+        ? value.metrics.practice.target_duration_seconds
+        : 60,
     retryOfAttemptId: value.id,
     additionalContext:
       isRecord(value.metrics) &&

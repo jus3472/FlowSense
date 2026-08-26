@@ -8,7 +8,9 @@ import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { readAttemptResult } from '@/lib/results/attempt-result'
+import { compareRetryResults, MAX_RETRY_CHAIN_LENGTH } from '@/lib/results/retry-comparison'
 import { createClient } from '@/lib/supabase/server'
+import type { AttemptRow } from '@/lib/types/database'
 
 export const metadata: Metadata = {
   title: 'Your answer',
@@ -28,7 +30,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
   const { data: attempt } = await supabase
     .from('attempts')
     .select(
-      'id, prompt_text, transcript, duration_ms, audio_path, created_at, score, section_scores, metrics, content_result',
+      'id, prompt_text, transcript, duration_ms, audio_path, created_at, score, section_scores, metrics, content_result, retry_of_attempt_id',
     )
     .eq('id', id)
     .maybeSingle()
@@ -77,6 +79,72 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
   }
 
   if (result.kind === 'v2') {
+    // The parent is always read through the signed-in user's RLS scope. A
+    // missing or non-v2 parent simply has no comparison; stored results are
+    // never recalculated for a retry view.
+    let comparison = null
+    if (attempt.retry_of_attempt_id) {
+      type RetryAttempt = Pick<
+        AttemptRow,
+        | 'id'
+        | 'prompt_text'
+        | 'transcript'
+        | 'duration_ms'
+        | 'created_at'
+        | 'score'
+        | 'section_scores'
+        | 'metrics'
+        | 'content_result'
+        | 'retry_of_attempt_id'
+      >
+      let parent: RetryAttempt | null = null
+      let ancestorId: string | null = attempt.retry_of_attempt_id
+      const seen = new Set<string>([attempt.id])
+      for (let depth = 0; ancestorId && depth < MAX_RETRY_CHAIN_LENGTH; depth += 1) {
+        if (seen.has(ancestorId)) {
+          parent = null
+          break
+        }
+        seen.add(ancestorId)
+        const ancestorResponse: { data: RetryAttempt | null } = await supabase
+          .from('attempts')
+          .select(
+            'id, prompt_text, transcript, duration_ms, audio_path, created_at, score, section_scores, metrics, content_result, retry_of_attempt_id',
+          )
+          .eq('id', ancestorId)
+          .eq('user_id', user.id)
+          .maybeSingle()
+        const ancestor = ancestorResponse.data
+        if (!ancestor) {
+          parent = null
+          break
+        }
+        if (depth === 0) parent = ancestor
+        ancestorId = ancestor.retry_of_attempt_id
+        if (!ancestorId) break
+        if (depth === MAX_RETRY_CHAIN_LENGTH - 1) parent = null
+      }
+      if (parent) {
+        const parentResult = readAttemptResult({
+          id: parent.id,
+          promptText: parent.prompt_text,
+          transcript: parent.transcript,
+          durationMs: parent.duration_ms,
+          createdAt: parent.created_at,
+          audioUrl: null,
+          score: parent.score,
+          sectionScores: parent.section_scores,
+          metrics: parent.metrics,
+          contentResult: parent.content_result,
+        })
+        comparison = compareRetryResults(
+          attempt.id,
+          attempt.retry_of_attempt_id,
+          result.payload,
+          parentResult.kind === 'v2' ? parentResult.payload : null,
+        )
+      }
+    }
     const additionalContext =
       typeof attempt.metrics === 'object' &&
       attempt.metrics !== null &&
@@ -95,6 +163,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         durationMs={durationMs}
         audioUrl={audioUrl}
         payload={result.payload}
+        comparison={comparison}
       />
     )
   }

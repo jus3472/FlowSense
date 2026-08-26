@@ -50,13 +50,17 @@ describe('practice session descriptor', () => {
         practice_mode: 'interview',
         prompt_source: 'library',
         prompt_difficulty: 'advanced',
+        metrics: {
+          practice: { target_duration_seconds: 45, additional_context: 'Keep it concise.' },
+        },
       }),
     ).toEqual({
       ...LIBRARY_SESSION,
       mode: 'interview',
       difficulty: 'advanced',
-      targetDurationSeconds: 60,
+      targetDurationSeconds: 45,
       retryOfAttemptId: ATTEMPT_ID,
+      additionalContext: 'Keep it concise.',
     })
   })
 
