@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { notFound, redirect } from 'next/navigation'
 import { AudioPlayer } from '@/components/record/audio-player'
 import { ResultsView } from '@/components/results/results-view'
+import { V2ResultsView } from '@/components/results/v2-results-view'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -72,6 +73,29 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
           Try this prompt again
         </ButtonLink>
       </div>
+    )
+  }
+
+  if (result.kind === 'v2') {
+    const additionalContext =
+      typeof attempt.metrics === 'object' &&
+      attempt.metrics !== null &&
+      !Array.isArray(attempt.metrics) &&
+      typeof (attempt.metrics as { practice?: { additional_context?: unknown } }).practice
+        ?.additional_context === 'string'
+        ? (attempt.metrics as { practice: { additional_context: string } }).practice
+            .additional_context
+        : null
+    return (
+      <V2ResultsView
+        attemptId={attempt.id}
+        promptText={attempt.prompt_text}
+        additionalContext={additionalContext}
+        transcript={attempt.transcript ?? ''}
+        durationMs={durationMs}
+        audioUrl={audioUrl}
+        payload={result.payload}
+      />
     )
   }
 
