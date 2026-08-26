@@ -39,6 +39,11 @@ export function parseCustomPracticeInput(value: unknown): CustomPracticeInput | 
 
 export const CUSTOM_SESSION_COOKIE = 'flowsense_custom_session'
 
+/** A custom session is only consumed after the action's explicit redirect. */
+export function isCustomPracticeMarker(value: unknown): boolean {
+  return value === '1'
+}
+
 export function serializeCustomPracticeInput(value: CustomPracticeInput): string {
   return encodeURIComponent(JSON.stringify(value))
 }

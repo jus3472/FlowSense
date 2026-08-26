@@ -13,5 +13,5 @@ export async function beginCustomPractice(formData: FormData) {
   const input = parseCustomPracticeInput({ promptText: formData.get('prompt'), mode: formData.get('mode'), additionalContext: formData.get('additional_context'), targetDurationSeconds: target })
   if (!input) redirect('/practice/custom?error=invalid')
   ;(await cookies()).set(CUSTOM_SESSION_COOKIE, serializeCustomPracticeInput(input), { httpOnly: true, sameSite: 'lax', secure: true, path: '/record', maxAge: 5 * 60 })
-  redirect('/record')
+  redirect('/record?custom=1')
 }

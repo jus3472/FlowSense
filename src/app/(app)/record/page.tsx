@@ -12,7 +12,11 @@ import {
 } from '@/lib/practice/session'
 import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
-import { CUSTOM_SESSION_COOKIE, parseCustomPracticeCookie } from '@/lib/practice/custom'
+import {
+  CUSTOM_SESSION_COOKIE,
+  isCustomPracticeMarker,
+  parseCustomPracticeCookie,
+} from '@/lib/practice/custom'
 
 export const metadata: Metadata = {
   title: 'Record',
@@ -24,7 +28,7 @@ export const dynamic = 'force-dynamic'
 export default async function RecordPage({
   searchParams,
 }: {
-  searchParams: Promise<{ retry?: string | string[] }>
+  searchParams: Promise<{ retry?: string | string[]; custom?: string | string[] }>
 }) {
   const supabase = await createClient()
   const {
@@ -32,7 +36,8 @@ export default async function RecordPage({
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const retry = (await searchParams).retry
+  const params = await searchParams
+  const retry = params.retry
   let session: PracticeSessionDescriptor | null = null
   if (typeof retry === 'string' && isUuid(retry)) {
     const { data: sourceAttempt } = await supabase
@@ -44,7 +49,7 @@ export default async function RecordPage({
     session = retrySessionFromAttempt(sourceAttempt)
   }
 
-  if (!session) {
+  if (!session && isCustomPracticeMarker(params.custom)) {
     const custom = parseCustomPracticeCookie((await cookies()).get(CUSTOM_SESSION_COOKIE)?.value)
     session = custom
       ? parsePracticeSessionDescriptor({ ...custom, promptId: null, difficulty: 'beginner', source: 'custom', retryOfAttemptId: null })

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { parseCustomPracticeCookie, parseCustomPracticeInput, serializeCustomPracticeInput } from '@/lib/practice/custom'
+import {
+  isCustomPracticeMarker,
+  parseCustomPracticeCookie,
+  parseCustomPracticeInput,
+  serializeCustomPracticeInput,
+} from '@/lib/practice/custom'
 
 const valid = {
   promptText: 'Explain a choice you made.',
@@ -25,6 +30,17 @@ describe('custom practice input', () => {
     expect(parseCustomPracticeInput(input)).toBeNull()
   })
   it('rejects malformed cookie data', () => expect(parseCustomPracticeCookie('%')).toBeNull())
+  it.each([undefined, '0', 'true', ['1'], ['1', '1'], 1])(
+    'does not activate a custom session for an invalid marker',
+    (marker) => expect(isCustomPracticeMarker(marker)).toBe(false),
+  )
+  it('activates a custom session only for the singular action marker', () => {
+    expect(isCustomPracticeMarker('1')).toBe(true)
+    expect(readFileSync('src/actions/custom-practice.ts', 'utf8')).toContain("redirect('/record?custom=1')")
+    expect(readFileSync('src/app/(app)/record/page.tsx', 'utf8')).toContain(
+      'if (!session && isCustomPracticeMarker(params.custom))',
+    )
+  })
   it('keeps custom prompt transport out of the public prompt library', () => {
     expect(readFileSync('src/actions/custom-practice.ts', 'utf8')).not.toContain(".from('prompts')")
   })
