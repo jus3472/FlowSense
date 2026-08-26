@@ -2,9 +2,21 @@
 
 ## Product
 
-FlowSense is a speaking trainer. A prompt appears, a countdown runs, and the user answers aloud for up to 60 seconds. The result is a 100-point Clarity score: 50 points for what was said and 50 for how it sounded.
+FlowSense is a speaking trainer for effective spoken communication. A built-in or custom prompt
+appears, a countdown runs, and the user answers aloud for up to 60 seconds. The result measures one
+response out of 100, never a permanent rating of the person.
 
-It is for people who can write clearly but stall, pad, or circle when speaking without preparation. Prompts are everyday topics. The interface must not assume a professional setting, a native speaker, or a particular age. It never comments on accent, grammar, vocabulary level, or confidence.
+The primary modes are General Practice (`practice`), Interviews (`interview`), Presentations
+(`presentation`), and Conversations (`conversation`). They share the same top-level skill
+categories: fluency, clarity, vocabulary, grammar, structure, and delivery. A mode can alter the
+weights and add mode-specific feedback or checks, but it cannot become an unrelated scoring system.
+
+It is for people who can write clearly but stall, pad, or circle when speaking. The interface must
+not assume a professional setting, a native speaker, or a particular age. It never judges accent or
+confidence. Grammar and vocabulary feedback is allowed only when it names a concrete,
+response-level choice that affects clarity or effectiveness. It is not vocabulary training, a
+vocabulary-level assessment, or a status judgment. Any future pronunciation feedback must measure
+intelligibility or phoneme accuracy, never whether someone sounds native.
 
 Two rules govern product and implementation work:
 
@@ -41,7 +53,8 @@ A single `getUserMedia` stream feeds `MediaRecorder`, RMS amplitude sampling eve
 
 Transcription uses Deepgram `nova-2` with punctuation and filler words enabled. Do not turn on smart formatting because the application needs the original disfluencies. `nova-3` must not replace it without checking filler behavior on real recordings.
 
-The score is 100 points:
+The following 50/50, ten-metric score is the current legacy v1 implementation retained during the
+v2 transition. It does not define the v2 category architecture:
 
 | Section | Check or metric | Points |
 | --- | --- | ---: |
@@ -56,9 +69,15 @@ The score is 100 points:
 | How you sounded | Pace | 6 |
 | How you sounded | Time to first word | 4 |
 
-Mechanical scores are pure functions over the stored capture timelines and Deepgram word array. Points use `round(max_points * component_score)`. Pace uses speaking time, not wall-clock duration, so silence is not charged under both Pace and Mid-sentence pauses. Energy uses median absolute deviation after octave correction. Time to first word remains unclamped so broken capture data is visible rather than hidden.
+The legacy v1 mechanical scores are pure functions over the stored capture timelines and Deepgram
+word array. Points use `round(max_points * component_score)`. Pace uses speaking time, not wall-clock
+duration, so silence is not charged under both Pace and Mid-sentence pauses. Energy uses median
+absolute deviation after octave correction. Time to first word remains unclamped so broken capture
+data is visible rather than hidden.
 
-The content route sends the prompt, punctuated transcript, word count, duration, and repeated phrases to DeepSeek. The model is a detector, not a critic. Failures award full content points and set content status to `not_checked`; the UI renders dashes for those checks.
+The legacy v1 content route sends the prompt, punctuated transcript, word count, duration, and
+repeated phrases to DeepSeek. The model is a detector, not a critic. Failures award full content
+points and set content status to `not_checked`; the UI renders dashes for those checks.
 
 Every model quote is validated against the transcript. Content spans overlapping mechanically counted speech are dropped before scoring. Tightened rewrites receive the filler surfaces that must be deleted. The application then validates the rewrite, retries once with exact violations, and finally strips remaining counted fillers or Word choice spans with punctuation repair. False starts are not part of the rewrite deletion list because the ordinary word must remain once.
 
@@ -67,11 +86,16 @@ Every model quote is validated against the transcript. Content spans overlapping
 Supabase owns authentication, Postgres, and private recording storage. The main tables are:
 
 - `profiles`: user name and focus areas. A signup trigger creates each row.
-- `prompts`: active everyday prompts, publicly readable.
+- `prompts`: active built-in prompts, publicly readable. An attempt can instead retain custom prompt text.
 - `attempts`: prompt snapshot, audio path, transcript, duration, score, sections, metrics, and content result. `prompt_text` is intentionally denormalized so later edits do not rewrite history.
 - `note_feedback`: disputes against content findings. Disputes are reapplied when results are read; they do not overwrite the stored model result.
 
-Scoring metrics and content results are JSONB by design. The model changes frequently and should not require a schema migration for every scoring adjustment. RLS applies to every user table and the private `recordings` bucket. Add explicit insert policies when adding a table or storage path.
+Scoring metrics and content results are JSONB by design. Every new v2-scored attempt must record
+its rubric and score version alongside its stored result snapshots. Legacy attempts may have null or
+legacy metadata; their stored snapshots remain authoritative. Later rubric, model, or mode changes
+must not overwrite or silently reinterpret a past result. New shapes must remain compatible with
+historical `attempts` data. RLS applies to every user table and the private `recordings` bucket. Add
+explicit insert policies when adding a table or storage path.
 
 Only `src/lib/env/server.ts` may read `SUPABASE_SECRET_KEY`, `DEEPGRAM_API_KEY`, or `DEEPSEEK_API_KEY`. The lint configuration and tests enforce this boundary. Never add secrets to a client component, a public environment variable, documentation examples, or committed local files.
 
@@ -110,4 +134,8 @@ Inspection scripts need the local database connection. `npm run inspect:rewrites
 
 ## Decisions Not to Reopen Casually
 
-Do not add vocabulary training, self-correction penalties, clause-level abandonment detection, relative personal baselines, weighted-average scoring, free-form rewrites, user comparisons, benchmarks, gauge-style score bars, pricing, plans, or usage limits. These directions conflict with the product's measurement-first model or were previously rejected after testing.
+Do not add vocabulary training, vocabulary-level or status judgments, accent judgments,
+self-correction penalties, clause-level abandonment detection, relative personal baselines,
+weighted-average scoring, free-form rewrites, user comparisons, benchmarks, gauge-style score bars,
+pricing, plans, or usage limits. These directions conflict with the product's measurement-first
+model or were previously rejected after testing.
