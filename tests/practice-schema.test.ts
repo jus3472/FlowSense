@@ -13,6 +13,7 @@ describe('practice schema migration', () => {
     expect(migration).toMatch(/difficulty in \('beginner', 'intermediate', 'advanced'\)/)
     expect(migration).toMatch(/target_duration_seconds between 15 and 600/)
     expect(migration).toMatch(/add column if not exists collection_id text/)
+    expect(migration).toContain("collection_id is null or collection_id ~ '^[a-z]+(?:_[a-z]+)*$'")
   })
 
   it('adds nullable snapshots so custom and legacy attempts remain valid', () => {

@@ -11,7 +11,7 @@ alter table public.prompts
     check (target_duration_seconds between 15 and 600),
   -- A stable slug for grouping library prompts without coupling them to display copy.
   add column if not exists collection_id text
-    check (collection_id is null or collection_id ~ '^[a-z0-9]+(?:-[a-z0-9]+)*$');
+    check (collection_id is null or collection_id ~ '^[a-z]+(?:_[a-z]+)*$');
 
 alter table public.attempts
   add column if not exists practice_mode text
