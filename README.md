@@ -16,8 +16,9 @@ that affects clarity or effectiveness. It is not vocabulary training, a vocabula
 or a status judgment. FlowSense never judges accent. Any future pronunciation feedback must measure
 intelligibility or phoneme accuracy, never whether someone sounds native.
 
-Every attempt stores a rubric and score version. Stored attempts retain their prompt, transcript,
-capture data, scoring results, and result snapshots so later rubric changes do not rewrite history.
+Every new v2-scored attempt must store a rubric and score version. Legacy attempts may have null or
+legacy metadata; their stored snapshots remain authoritative, including the prompt, transcript,
+capture data, and scoring results, and must not be rewritten by later rubric changes.
 
 ## Documentation
 

@@ -53,7 +53,8 @@ A single `getUserMedia` stream feeds `MediaRecorder`, RMS amplitude sampling eve
 
 Transcription uses Deepgram `nova-2` with punctuation and filler words enabled. Do not turn on smart formatting because the application needs the original disfluencies. `nova-3` must not replace it without checking filler behavior on real recordings.
 
-The score is 100 points:
+The following 50/50, ten-metric score is the current legacy v1 implementation retained during the
+v2 transition. It does not define the v2 category architecture:
 
 | Section | Check or metric | Points |
 | --- | --- | ---: |
@@ -68,9 +69,15 @@ The score is 100 points:
 | How you sounded | Pace | 6 |
 | How you sounded | Time to first word | 4 |
 
-Mechanical scores are pure functions over the stored capture timelines and Deepgram word array. Points use `round(max_points * component_score)`. Pace uses speaking time, not wall-clock duration, so silence is not charged under both Pace and Mid-sentence pauses. Energy uses median absolute deviation after octave correction. Time to first word remains unclamped so broken capture data is visible rather than hidden.
+The legacy v1 mechanical scores are pure functions over the stored capture timelines and Deepgram
+word array. Points use `round(max_points * component_score)`. Pace uses speaking time, not wall-clock
+duration, so silence is not charged under both Pace and Mid-sentence pauses. Energy uses median
+absolute deviation after octave correction. Time to first word remains unclamped so broken capture
+data is visible rather than hidden.
 
-The content route sends the prompt, punctuated transcript, word count, duration, and repeated phrases to DeepSeek. The model is a detector, not a critic. Failures award full content points and set content status to `not_checked`; the UI renders dashes for those checks.
+The legacy v1 content route sends the prompt, punctuated transcript, word count, duration, and
+repeated phrases to DeepSeek. The model is a detector, not a critic. Failures award full content
+points and set content status to `not_checked`; the UI renders dashes for those checks.
 
 Every model quote is validated against the transcript. Content spans overlapping mechanically counted speech are dropped before scoring. Tightened rewrites receive the filler surfaces that must be deleted. The application then validates the rewrite, retries once with exact violations, and finally strips remaining counted fillers or Word choice spans with punctuation repair. False starts are not part of the rewrite deletion list because the ordinary word must remain once.
 
@@ -83,12 +90,12 @@ Supabase owns authentication, Postgres, and private recording storage. The main 
 - `attempts`: prompt snapshot, audio path, transcript, duration, score, sections, metrics, and content result. `prompt_text` is intentionally denormalized so later edits do not rewrite history.
 - `note_feedback`: disputes against content findings. Disputes are reapplied when results are read; they do not overwrite the stored model result.
 
-Scoring metrics and content results are JSONB by design. Every scored attempt records its rubric and
-score version alongside its stored result snapshots. Later rubric, model, or mode changes must read
-historical attempts through their stored version and snapshots; they must not overwrite or silently
-reinterpret a past result. New shapes must remain compatible with historical `attempts` data. RLS
-applies to every user table and the private `recordings` bucket. Add explicit insert policies when
-adding a table or storage path.
+Scoring metrics and content results are JSONB by design. Every new v2-scored attempt must record
+its rubric and score version alongside its stored result snapshots. Legacy attempts may have null or
+legacy metadata; their stored snapshots remain authoritative. Later rubric, model, or mode changes
+must not overwrite or silently reinterpret a past result. New shapes must remain compatible with
+historical `attempts` data. RLS applies to every user table and the private `recordings` bucket. Add
+explicit insert policies when adding a table or storage path.
 
 Only `src/lib/env/server.ts` may read `SUPABASE_SECRET_KEY`, `DEEPGRAM_API_KEY`, or `DEEPSEEK_API_KEY`. The lint configuration and tests enforce this boundary. Never add secrets to a client component, a public environment variable, documentation examples, or committed local files.
 
