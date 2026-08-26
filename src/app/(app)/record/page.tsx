@@ -2,8 +2,10 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { RecordFlow } from '@/components/record/record-flow'
 import { RetryButton } from '@/components/system/retry-button'
+import { ButtonLink } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
-import { pickPracticePrompt } from '@/lib/prompts/server'
+import { getPromptById, pickPracticePrompt } from '@/lib/prompts/server'
+import { parseRecordPromptParam } from '@/lib/practice/navigation'
 import {
   isUuid,
   parsePracticeSessionDescriptor,
@@ -22,7 +24,7 @@ export const dynamic = 'force-dynamic'
 export default async function RecordPage({
   searchParams,
 }: {
-  searchParams: Promise<{ retry?: string | string[] }>
+  searchParams: Promise<{ retry?: string | string[]; prompt?: string | string[] }>
 }) {
   const supabase = await createClient()
   const {
@@ -30,7 +32,8 @@ export default async function RecordPage({
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const retry = (await searchParams).retry
+  const params = await searchParams
+  const retry = params.retry
   let session: PracticeSessionDescriptor | null = null
   if (typeof retry === 'string' && isUuid(retry)) {
     const { data: sourceAttempt } = await supabase
@@ -40,6 +43,35 @@ export default async function RecordPage({
       .eq('user_id', user.id)
       .maybeSingle()
     session = retrySessionFromAttempt(sourceAttempt)
+  }
+
+  const requestedPromptId = parseRecordPromptParam(params.prompt)
+  if (!session && requestedPromptId !== undefined) {
+    const prompt = requestedPromptId ? await getPromptById(requestedPromptId) : null
+    session = prompt
+      ? parsePracticeSessionDescriptor({
+          promptText: prompt.text,
+          promptId: prompt.id,
+          mode: prompt.mode,
+          difficulty: prompt.difficulty,
+          source: 'library',
+          targetDurationSeconds: prompt.targetDurationSeconds,
+          retryOfAttemptId: null,
+        })
+      : null
+
+    if (!session) {
+      return (
+        <ErrorState
+          title="That prompt is not available"
+          description="Choose another prompt from the practice library."
+        >
+          <ButtonLink href="/practice" variant="secondary">
+            Browse practice
+          </ButtonLink>
+        </ErrorState>
+      )
+    }
   }
 
   if (!session) {
