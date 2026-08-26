@@ -27,6 +27,7 @@ const VOCABULARY_KINDS = [
   'appropriateness',
 ] as const
 const GRAMMAR_KINDS = ['grammatical_error'] as const
+const MAX_FINDINGS_PER_CATEGORY = 8
 
 export class V2ContentParseError extends Error {
   constructor(message: string) {
@@ -43,6 +44,12 @@ function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
 
+/** Returns undefined when the wire value is neither a nonempty string nor null. */
+function nullableText(value: unknown): string | null | undefined {
+  if (value === null) return null
+  return text(value) ?? undefined
+}
+
 function overlaps(left: TranscriptEvidenceSpan, right: TranscriptEvidenceSpan): boolean {
   return left.start < right.end && right.start < left.end
 }
@@ -53,7 +60,21 @@ function validSpan(span: TranscriptEvidenceSpan, transcript: string): boolean {
     Number.isInteger(span.end) &&
     span.start >= 0 &&
     span.end > span.start &&
-    span.end <= transcript.length
+    span.end <= transcript.length &&
+    (span.confidence === undefined ||
+      (typeof span.confidence === 'number' &&
+        Number.isFinite(span.confidence) &&
+        span.confidence >= 0 &&
+        span.confidence <= 1))
+  )
+}
+
+function validMechanicalSpan(span: MechanicallyCountedSpan, transcript: string): boolean {
+  return (
+    validSpan(span, transcript) &&
+    typeof span.text === 'string' &&
+    span.text.trim().length > 0 &&
+    (span.category === 'filler' || span.category === 'false_start' || span.category === 'closer')
   )
 }
 
@@ -117,13 +138,20 @@ function categoryResult(
 }
 
 function parsePayload(raw: string): Record<string, unknown> {
+  let parsed: unknown
   try {
-    const parsed: unknown = JSON.parse(raw)
-    if (isRecord(parsed)) return parsed
+    parsed = JSON.parse(raw)
   } catch {
     // A retry is appropriate only for malformed JSON, matching the v1 policy.
+    throw new V2ContentParseError('The v2 content response was not a JSON object.')
   }
-  throw new V2ContentParseError('The v2 content response was not a JSON object.')
+  if (!isRecord(parsed)) {
+    throw new V2ContentParseError('The v2 content response was not a JSON object.')
+  }
+  if (parsed.version !== V2_CONTENT_DETECTOR_VERSION) {
+    throw new V2ContentParseError('The v2 content response had an unsupported version.')
+  }
+  return parsed
 }
 
 interface ParseContext {
@@ -171,7 +199,8 @@ function parseFinding(
   const quote = text(value.quote)
   const findingSeverity = severity(value.severity)
   const observation = text(value.observation)
-  if (!kind || !quote || !findingSeverity || !observation) {
+  const suggestion = nullableText(value.suggestion)
+  if (!kind || !quote || !findingSeverity || !observation || suggestion === undefined) {
     warnings.push(`${category}: malformed finding dropped`)
     return null
   }
@@ -193,7 +222,7 @@ function parseFinding(
     severity: findingSeverity,
     quote,
     observation,
-    suggestion: text(value.suggestion),
+    suggestion,
     evidence: [evidence],
     deduction: deduction(findingSeverity),
   }
@@ -206,14 +235,27 @@ function parseStructure(value: unknown, context: ParseContext): V2CategoryResult
   const warnings: string[] = []
   for (const id of STRUCTURE_CHECKS) {
     const check = value.checks[id]
-    if (!isRecord(check) || check.passed !== false) continue
-    const findingSeverity = severity(check.severity)
-    const observation = text(check.observation)
-    if (!findingSeverity || !observation) {
-      warnings.push(`structure.${id}: malformed check dropped`)
+    if (!isRecord(check) || typeof check.passed !== 'boolean') {
+      return emptyCategory('structure', `structure.${id} was missing or malformed`)
+    }
+    if (check.passed) {
+      if (
+        check.severity !== null ||
+        check.quote !== null ||
+        check.observation !== null ||
+        check.suggestion !== null
+      ) {
+        return emptyCategory('structure', `structure.${id} had invalid passed fields`)
+      }
       continue
     }
-    const quote = text(check.quote)
+    const findingSeverity = severity(check.severity)
+    const observation = text(check.observation)
+    const quote = nullableText(check.quote)
+    const suggestion = nullableText(check.suggestion)
+    if (!findingSeverity || !observation || quote === undefined || suggestion === undefined) {
+      return emptyCategory('structure', `structure.${id} was missing or malformed`)
+    }
     const evidence = quote ? acceptableQuote(quote, context, warnings, `structure.${id}`) : null
     if (quote && !evidence) continue
     findings.push({
@@ -221,7 +263,7 @@ function parseStructure(value: unknown, context: ParseContext): V2CategoryResult
       severity: findingSeverity,
       quote,
       observation,
-      suggestion: text(check.suggestion),
+      suggestion,
       evidence: evidence ? [evidence] : [],
       deduction: deduction(findingSeverity),
     })
@@ -240,11 +282,15 @@ function parseFindings(
     return emptyCategory(category, `${category} was missing`)
   }
   const warnings: string[] = []
-  const findings = value.findings.flatMap((item) => {
+  const capped = value.findings.slice(0, MAX_FINDINGS_PER_CATEGORY)
+  if (value.findings.length > MAX_FINDINGS_PER_CATEGORY) {
+    warnings.push(`${category}: findings truncated to ${MAX_FINDINGS_PER_CATEGORY}`)
+  }
+  const findings = capped.flatMap((item) => {
     const finding = parseFinding(item, category, context, warnings)
     return finding ? [finding] : []
   })
-  return categoryResult(category, findings, warnings, { findings_reviewed: value.findings.length })
+  return categoryResult(category, findings, warnings, { findings_reviewed: capped.length })
 }
 
 export function parseV2ContentResponse(
@@ -258,7 +304,7 @@ export function parseV2ContentResponse(
   const context: ParseContext = {
     transcript: input.transcript,
     mechanicallyCounted: (input.mechanicallyCounted ?? []).filter((span) =>
-      validSpan(span, input.transcript),
+      validMechanicalSpan(span, input.transcript),
     ),
     unreliable: (input.unreliableTranscriptSpans ?? []).filter((span) =>
       validSpan(span, input.transcript),
@@ -283,6 +329,13 @@ export function parseV2ContentResponse(
 export async function runV2ContentEvaluation(
   input: V2ContentEvaluationInput,
 ): Promise<V2ContentEvaluation> {
+  if (input.prompt.trim().length === 0 || input.transcript.trim().length === 0) {
+    return notChecked(
+      input.provider.name,
+      'A prompt and transcript are required for the content check.',
+      0,
+    )
+  }
   let calls = 0
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {

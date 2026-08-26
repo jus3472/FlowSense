@@ -7,9 +7,11 @@ export type V2FindingSeverity = 'minor' | 'clear'
 export type V2ContentStatus = 'checked' | 'not_checked'
 
 export interface TranscriptEvidenceSpan {
+  /** Zero-based character offset into the punctuated transcript string. */
   start: number
+  /** Exclusive zero-based character offset into the punctuated transcript string. */
   end: number
-  /** A caller may retain the raw word confidence for diagnostics. */
+  /** Optional recognized-word confidence, bounded inclusively from 0 through 1. */
   confidence?: number
 }
 
@@ -65,7 +67,9 @@ export interface V2ContentEvaluationInput {
   mode: PracticeMode
   prompt: string
   transcript: string
+  /** Character spans already charged by mechanical filler, false-start, or closer checks. */
   mechanicallyCounted?: readonly MechanicallyCountedSpan[]
+  /** Character spans derived from recognized words that are unreliable for language findings. */
   unreliableTranscriptSpans?: readonly TranscriptEvidenceSpan[]
   timeoutMs?: number
 }
