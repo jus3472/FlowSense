@@ -10,11 +10,11 @@
  * resolves to `never`.
  */
 
-export type Json = string | number | boolean | null | { [key: string]: Json } | Json[]
+import type { PracticeMode, PromptDifficulty, PromptSource } from '@/lib/practice/contracts'
 
-export type PracticeMode = 'practice' | 'interview' | 'presentation' | 'conversation'
-export type PromptDifficulty = 'beginner' | 'intermediate' | 'advanced'
-export type PromptSource = 'library' | 'custom'
+export type { PracticeMode, PromptDifficulty, PromptSource } from '@/lib/practice/contracts'
+
+export type Json = string | number | boolean | null | { [key: string]: Json } | Json[]
 
 export type ProfileRow = {
   id: string
