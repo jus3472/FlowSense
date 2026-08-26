@@ -22,7 +22,7 @@ export default async function HistoryPage() {
     supabase.from('profiles').select('focus_areas').eq('id', user.id).maybeSingle(),
     supabase
       .from('attempts')
-      .select('id, created_at, prompt_text, score')
+      .select('id, created_at, prompt_text, score, prompt_source')
       .eq('user_id', user.id)
       .not('score', 'is', null)
       .order('created_at', { ascending: false })
@@ -40,6 +40,7 @@ export default async function HistoryPage() {
       createdAt: attempt.created_at,
       promptText: attempt.prompt_text,
       score: attempt.score,
+      promptSource: attempt.prompt_source,
     })
   }
 

@@ -1,3 +1,4 @@
+import type { Route } from 'next'
 import {
   PRACTICE_MODES,
   PROMPT_DIFFICULTIES,
@@ -66,16 +67,16 @@ export function parseRecordPromptParam(value: SearchParam): string | null | unde
 export function practiceBrowseHref(
   mode: PracticeMode,
   filters: { difficulty?: PromptDifficulty; collectionId?: string } = {},
-): string {
+): Route {
   const params = new URLSearchParams()
   if (filters.difficulty) params.set('difficulty', filters.difficulty)
   if (filters.collectionId) params.set('collection', filters.collectionId)
   const query = params.toString()
-  return `/practice/${mode}${query ? `?${query}` : ''}`
+  return `/practice/${mode}${query ? `?${query}` : ''}` as Route
 }
 
-export function recordHrefForPrompt(promptId: string): string {
-  return `/record?prompt=${encodeURIComponent(promptId)}`
+export function recordHrefForPrompt(promptId: string): Route {
+  return `/record?prompt=${encodeURIComponent(promptId)}` as Route
 }
 
 export function formatExpectedDuration(seconds: number): string {

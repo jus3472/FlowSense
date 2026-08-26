@@ -1,10 +1,15 @@
 import type { Metadata } from 'next'
+import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { RecordFlow } from '@/components/record/record-flow'
 import { RetryButton } from '@/components/system/retry-button'
 import { ButtonLink } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
-import { getPromptById, pickPracticePrompt } from '@/lib/prompts/server'
+import {
+  CUSTOM_SESSION_COOKIE,
+  isCustomPracticeMarker,
+  parseCustomPracticeCookie,
+} from '@/lib/practice/custom'
 import { parseRecordPromptParam } from '@/lib/practice/navigation'
 import {
   isUuid,
@@ -12,6 +17,7 @@ import {
   retrySessionFromAttempt,
   type PracticeSessionDescriptor,
 } from '@/lib/practice/session'
+import { getPromptById, pickPracticePrompt } from '@/lib/prompts/server'
 import { createClient } from '@/lib/supabase/server'
 
 export const metadata: Metadata = {
@@ -24,7 +30,11 @@ export const dynamic = 'force-dynamic'
 export default async function RecordPage({
   searchParams,
 }: {
-  searchParams: Promise<{ retry?: string | string[]; prompt?: string | string[] }>
+  searchParams: Promise<{
+    retry?: string | string[]
+    prompt?: string | string[]
+    custom?: string | string[]
+  }>
 }) {
   const supabase = await createClient()
   const {
@@ -38,11 +48,39 @@ export default async function RecordPage({
   if (typeof retry === 'string' && isUuid(retry)) {
     const { data: sourceAttempt } = await supabase
       .from('attempts')
-      .select('id, prompt_id, prompt_text, practice_mode, prompt_source, prompt_difficulty')
+      .select(
+        'id, prompt_id, prompt_text, practice_mode, prompt_source, prompt_difficulty, metrics',
+      )
       .eq('id', retry)
       .eq('user_id', user.id)
       .maybeSingle()
     session = retrySessionFromAttempt(sourceAttempt)
+  }
+
+  if (!session && isCustomPracticeMarker(params.custom)) {
+    const custom = parseCustomPracticeCookie((await cookies()).get(CUSTOM_SESSION_COOKIE)?.value)
+    session = custom
+      ? parsePracticeSessionDescriptor({
+          ...custom,
+          promptId: null,
+          difficulty: 'beginner',
+          source: 'custom',
+          retryOfAttemptId: null,
+        })
+      : null
+
+    if (!session) {
+      return (
+        <ErrorState
+          title="Your custom prompt is not available"
+          description="Enter the prompt again to start this practice."
+        >
+          <ButtonLink href="/practice/custom" variant="secondary">
+            Enter a custom prompt
+          </ButtonLink>
+        </ErrorState>
+      )
+    }
   }
 
   const requestedPromptId = parseRecordPromptParam(params.prompt)
