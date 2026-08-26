@@ -38,7 +38,7 @@ const EXPECTED_CATEGORIES = {
 
 const rows = [
   ...migration.matchAll(
-    /^\s{4}\('(.+)', '(practice|interview|presentation|conversation)', '(easy|medium|hard)', (\d+), '([a-z_]+)'\),?$/gm,
+    /^\s{4}\('(.+)', '(practice|interview|presentation|conversation)', '(beginner|intermediate|advanced)', (\d+), '([a-z_]+)'\),?$/gm,
   ),
 ].map(([, text, mode, difficulty, duration, category]) => ({
   text,
@@ -64,7 +64,7 @@ describe('prompt taxonomy migration', () => {
       const prompts = promptRows.filter((row) => row.mode === mode)
       expect(prompts.length).toBeGreaterThanOrEqual(10)
       expect(new Set(prompts.map((row) => row.difficulty))).toEqual(
-        new Set(['easy', 'medium', 'hard']),
+        new Set(['beginner', 'intermediate', 'advanced']),
       )
     }
   })
