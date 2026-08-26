@@ -70,7 +70,10 @@ export default async function HomePage() {
       {historyFailed ? null : <StreakDisplay streak={streak} />}
 
       <ButtonLink href="/record" size="lg" fullWidth>
-        {"Start today's response"}
+        Start a response
+      </ButtonLink>
+      <ButtonLink href="/practice" variant="secondary" fullWidth>
+        Browse practice
       </ButtonLink>
 
       {historyFailed ? (

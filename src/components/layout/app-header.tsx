@@ -11,6 +11,12 @@ export function AppHeader() {
           <Wordmark />
         </Link>
         <nav aria-label="Main" className="flex items-center gap-2">
+          <Link
+            href="/practice"
+            className="text-foreground hover:bg-surface-sunken flex min-h-11 items-center rounded-full px-4 text-sm font-medium transition duration-150 ease-out"
+          >
+            Practice
+          </Link>
           <HistoryNavLink />
           <OverflowMenu />
         </nav>
