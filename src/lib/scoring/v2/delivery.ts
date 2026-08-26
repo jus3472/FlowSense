@@ -4,7 +4,8 @@ import type { ScoreEvidence, ScoreStatus } from '@/lib/scoring/v2/contracts'
 import type { AmplitudeSample, CaptureMetrics, PitchSample } from '@/lib/types/metrics'
 
 const MIN_AMPLITUDE_FRAMES = 40
-const MAX_CAPTURE_GAP_MS = 300
+const MAX_SAMPLE_INTERVAL_MS = 250
+const MIN_CADENCE_RATIO = 0.7
 
 export interface DeliveryMeasurements {
   pitch_spread_semitones: number | null
@@ -69,13 +70,39 @@ function validTimeline<T extends { t_ms: number }>(
   return true
 }
 
-function hasSamplingGap(samples: readonly AmplitudeSample[]): boolean {
+function amplitudeEvidenceIssue(capture: CaptureMetrics): string | null {
+  const intervalMs = capture.sample_interval_ms
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0 || intervalMs > MAX_SAMPLE_INTERVAL_MS) {
+    return 'Delivery was not checked because the capture sampling interval was invalid.'
+  }
+
+  const samples = capture.amplitude
+  const coverageToleranceMs = Math.max(intervalMs * 2, 100)
+  const maxGapMs = Math.max(intervalMs * 3, 300)
+  const expectedFrames = Math.floor(capture.duration_ms / intervalMs)
+  const minimumFramesForCadence = Math.floor(expectedFrames * MIN_CADENCE_RATIO)
+  const first = samples[0]
+  const last = samples.at(-1)
+
+  if (
+    !first ||
+    !last ||
+    first.t_ms > coverageToleranceMs ||
+    last.t_ms < capture.duration_ms - coverageToleranceMs
+  ) {
+    return 'Delivery was not checked because amplitude capture did not cover the recording.'
+  }
+  if (samples.length < minimumFramesForCadence) {
+    return 'Delivery was not checked because amplitude capture was too sparse.'
+  }
   for (let index = 1; index < samples.length; index += 1) {
     const previous = samples[index - 1]
     const current = samples[index]
-    if (previous && current && current.t_ms - previous.t_ms > MAX_CAPTURE_GAP_MS) return true
+    if (previous && current && current.t_ms - previous.t_ms > maxGapMs) {
+      return 'Delivery was not checked because capture sampling was interrupted.'
+    }
   }
-  return false
+  return null
 }
 
 function validAmplitude(samples: readonly AmplitudeSample[], durationMs: number): boolean {
@@ -126,12 +153,8 @@ export function evaluateDelivery(capture: CaptureMetrics): DeliveryEvaluation {
       measurements,
     )
   }
-  if (hasSamplingGap(capture.amplitude)) {
-    return notChecked(
-      'Delivery was not checked because capture sampling was interrupted.',
-      measurements,
-    )
-  }
+  const amplitudeIssue = amplitudeEvidenceIssue(capture)
+  if (amplitudeIssue) return notChecked(amplitudeIssue, measurements)
 
   // The legacy helper supplies octave correction and robust MAD. Unlike legacy
   // scoring, its insufficient-audio fallback is never treated as a perfect result.
@@ -144,11 +167,10 @@ export function evaluateDelivery(capture: CaptureMetrics): DeliveryEvaluation {
   }
 
   const activeAmplitude = capture.amplitude.map((sample) => sample.rms).filter((rms) => rms > 0)
+  const activeAmplitudeMedian = median(activeAmplitude)
   const amplitudeRelativeMad =
     activeAmplitude.length >= MIN_AMPLITUDE_FRAMES
-      ? medianAbsoluteDeviation(
-          activeAmplitude.map((rms) => Math.log(rms / median(activeAmplitude))),
-        )
+      ? medianAbsoluteDeviation(activeAmplitude.map((rms) => Math.log(rms / activeAmplitudeMedian)))
       : null
   measurements.pitch_spread_semitones = pitch.semitones
   measurements.amplitude_relative_mad = amplitudeRelativeMad

@@ -69,4 +69,35 @@ describe('v2 delivery evaluator', () => {
     expect(result).toMatchObject({ status: 'not_checked', component: null })
     expect(result.warnings[0]).toContain('interrupted')
   })
+
+  it('does not score a contiguous short burst that misses the recording tail', () => {
+    const amplitude = amplitudeTimeline(2_000, [{ from_ms: 0, to_ms: 2_000, rms: 0.12 }])
+    const result = evaluateDelivery(capture({ amplitude }))
+    expect(result).toMatchObject({ status: 'not_checked', component: null })
+    expect(result.deductions).toEqual([])
+    expect(result.warnings[0]).toContain('cover')
+  })
+
+  it('does not score nonmonotonic amplitude timestamps', () => {
+    const amplitude = amplitudeTimeline(4_000, [{ from_ms: 0, to_ms: 4_000, rms: 0.12 }])
+    amplitude[30] = { t_ms: 1_000, rms: 0.12 }
+    const result = evaluateDelivery(capture({ amplitude }))
+    expect(result).toMatchObject({ status: 'not_checked', component: null })
+    expect(result.warnings[0]).toContain('invalid')
+  })
+
+  it.each([-0.1, Number.NaN])('does not score an invalid RMS value of %s', (rms) => {
+    const amplitude = amplitudeTimeline(4_000, [{ from_ms: 0, to_ms: 4_000, rms: 0.12 }])
+    amplitude[10] = { t_ms: 500, rms }
+    const result = evaluateDelivery(capture({ amplitude }))
+    expect(result).toMatchObject({ status: 'not_checked', component: null })
+    expect(result.warnings[0]).toContain('invalid')
+  })
+
+  it.each([0, Number.NaN])('does not score an invalid sampling interval of %s', (interval) => {
+    const result = evaluateDelivery(capture({ sample_interval_ms: interval }))
+    expect(result).toMatchObject({ status: 'not_checked', component: null })
+    expect(result.deductions).toEqual([])
+    expect(result.warnings[0]).toContain('sampling interval')
+  })
 })
