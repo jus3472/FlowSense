@@ -1,11 +1,23 @@
 # FlowSense
 
-FlowSense is a speaking trainer for people who sound sharper on paper than they do out loud. A
-prompt appears, the user answers aloud for up to 60 seconds, and the result measures Clarity out of
-100.
+FlowSense is a speaking trainer for effective spoken communication. Users practice one response at
+a time in General Practice, Interviews, Presentations, or Conversations. A prompt comes from the
+built-in library or is custom, the user answers aloud for up to 60 seconds, and the result measures
+that response out of 100.
 
-The product measures rather than judges. It does not assess accent, grammar, vocabulary level, or
-confidence. A speech span can cost points under only one check or metric.
+Each mode uses the same top-level skill categories: fluency, clarity, vocabulary, grammar,
+structure, and delivery. Modes can adjust weights and add mode-specific feedback or checks, but
+they remain one measurement system rather than unrelated scoring systems. Results describe the
+response, never a permanent rating of the person. Feedback is concrete and measurement-first, and a
+speech span can cost points under only one check or metric.
+
+Grammar and vocabulary feedback is supported when it identifies a concrete, response-level choice
+that affects clarity or effectiveness. It is not vocabulary training, a vocabulary-level assessment,
+or a status judgment. FlowSense never judges accent. Any future pronunciation feedback must measure
+intelligibility or phoneme accuracy, never whether someone sounds native.
+
+Every attempt stores a rubric and score version. Stored attempts retain their prompt, transcript,
+capture data, scoring results, and result snapshots so later rubric changes do not rewrite history.
 
 ## Documentation
 

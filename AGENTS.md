@@ -17,8 +17,10 @@ Read [README.md](README.md) and [PROJECT.md](PROJECT.md) before making product o
 - Inspect the relevant implementation and tests before editing. Treat unusual scoring constants and exclusions as evidence of a previously observed failure.
 - Keep routes focused on routing and orchestration. Put reusable recording, scoring, provider, and result logic in the existing `src/lib/` areas so it remains directly testable.
 - Use strict TypeScript. Do not introduce `any`, bypass server environment boundaries, or add a state library where existing cookies, server actions, and local component state cover the need.
-- Preserve the two product invariants: the app measures rather than judges, and no speech span is charged twice. A model instruction is not sufficient enforcement when the behavior affects scores.
-- Keep changes compatible with historical `attempts` data. Metrics and content results are JSONB on purpose, and disputes are reapplied on read rather than written into the original result.
+- Preserve the two product invariants: the app measures rather than judges, and a speech span can cost points under only one check or metric. A model instruction is not sufficient enforcement when the behavior affects scores.
+- FlowSense measures one response, never a permanent rating of the person. Its shared categories are fluency, clarity, vocabulary, grammar, structure, and delivery across General Practice (`practice`), Interviews (`interview`), Presentations (`presentation`), and Conversations (`conversation`). Prompts can come from the built-in library or be custom. Modes may change weights and add relevant checks, but must remain one scoring system.
+- Grammar and vocabulary feedback must identify a concrete response-level choice that affects clarity or effectiveness. Do not turn either category into vocabulary training, a level assessment, or a status judgment. Never assess accent. Future pronunciation work must measure intelligibility or phoneme accuracy, never whether someone sounds native.
+- Keep changes compatible with historical `attempts` data. Preserve stored prompt, transcript, capture, scoring-result, and result-snapshot data. Every attempt stores a rubric and score version so later changes do not overwrite or silently reinterpret past attempts. Metrics and content results are JSONB on purpose, and disputes are reapplied on read rather than written into the original result.
 
 ## Scoring and Capture
 
@@ -33,7 +35,7 @@ Read [README.md](README.md) and [PROJECT.md](PROJECT.md) before making product o
 - Use semantic tokens from `src/app/globals.css`, never component hex values or Tailwind color-scale classes. Follow the existing spacing scale and responsive constraints.
 - Maintain the minimal single-column FlowSense interface. The score bar is a literal proportion of 100, not a gauge. Amber transcript marks mean a deduction, never a generic warning.
 - User-facing copy uses short, second-person, present-tense statements. Do not use em dashes, exclamation marks, praise, scolding, or prohibited product terminology.
-- Do not add comparisons, benchmarks, professional-only assumptions, or features that turn the product into vocabulary training or a free-form rewriting tool.
+- Do not add comparisons, benchmarks, professional-only assumptions, or features that turn the product into vocabulary training, an accent judgment, or a free-form rewriting tool.
 
 ## Validation and Operations
 

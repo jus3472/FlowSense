@@ -2,9 +2,21 @@
 
 ## Product
 
-FlowSense is a speaking trainer. A prompt appears, a countdown runs, and the user answers aloud for up to 60 seconds. The result is a 100-point Clarity score: 50 points for what was said and 50 for how it sounded.
+FlowSense is a speaking trainer for effective spoken communication. A built-in or custom prompt
+appears, a countdown runs, and the user answers aloud for up to 60 seconds. The result measures one
+response out of 100, never a permanent rating of the person.
 
-It is for people who can write clearly but stall, pad, or circle when speaking without preparation. Prompts are everyday topics. The interface must not assume a professional setting, a native speaker, or a particular age. It never comments on accent, grammar, vocabulary level, or confidence.
+The primary modes are General Practice (`practice`), Interviews (`interview`), Presentations
+(`presentation`), and Conversations (`conversation`). They share the same top-level skill
+categories: fluency, clarity, vocabulary, grammar, structure, and delivery. A mode can alter the
+weights and add mode-specific feedback or checks, but it cannot become an unrelated scoring system.
+
+It is for people who can write clearly but stall, pad, or circle when speaking. The interface must
+not assume a professional setting, a native speaker, or a particular age. It never judges accent or
+confidence. Grammar and vocabulary feedback is allowed only when it names a concrete,
+response-level choice that affects clarity or effectiveness. It is not vocabulary training, a
+vocabulary-level assessment, or a status judgment. Any future pronunciation feedback must measure
+intelligibility or phoneme accuracy, never whether someone sounds native.
 
 Two rules govern product and implementation work:
 
@@ -67,11 +79,16 @@ Every model quote is validated against the transcript. Content spans overlapping
 Supabase owns authentication, Postgres, and private recording storage. The main tables are:
 
 - `profiles`: user name and focus areas. A signup trigger creates each row.
-- `prompts`: active everyday prompts, publicly readable.
+- `prompts`: active built-in prompts, publicly readable. An attempt can instead retain custom prompt text.
 - `attempts`: prompt snapshot, audio path, transcript, duration, score, sections, metrics, and content result. `prompt_text` is intentionally denormalized so later edits do not rewrite history.
 - `note_feedback`: disputes against content findings. Disputes are reapplied when results are read; they do not overwrite the stored model result.
 
-Scoring metrics and content results are JSONB by design. The model changes frequently and should not require a schema migration for every scoring adjustment. RLS applies to every user table and the private `recordings` bucket. Add explicit insert policies when adding a table or storage path.
+Scoring metrics and content results are JSONB by design. Every scored attempt records its rubric and
+score version alongside its stored result snapshots. Later rubric, model, or mode changes must read
+historical attempts through their stored version and snapshots; they must not overwrite or silently
+reinterpret a past result. New shapes must remain compatible with historical `attempts` data. RLS
+applies to every user table and the private `recordings` bucket. Add explicit insert policies when
+adding a table or storage path.
 
 Only `src/lib/env/server.ts` may read `SUPABASE_SECRET_KEY`, `DEEPGRAM_API_KEY`, or `DEEPSEEK_API_KEY`. The lint configuration and tests enforce this boundary. Never add secrets to a client component, a public environment variable, documentation examples, or committed local files.
 
@@ -110,4 +127,8 @@ Inspection scripts need the local database connection. `npm run inspect:rewrites
 
 ## Decisions Not to Reopen Casually
 
-Do not add vocabulary training, self-correction penalties, clause-level abandonment detection, relative personal baselines, weighted-average scoring, free-form rewrites, user comparisons, benchmarks, gauge-style score bars, pricing, plans, or usage limits. These directions conflict with the product's measurement-first model or were previously rejected after testing.
+Do not add vocabulary training, vocabulary-level or status judgments, accent judgments,
+self-correction penalties, clause-level abandonment detection, relative personal baselines,
+weighted-average scoring, free-form rewrites, user comparisons, benchmarks, gauge-style score bars,
+pricing, plans, or usage limits. These directions conflict with the product's measurement-first
+model or were previously rejected after testing.
