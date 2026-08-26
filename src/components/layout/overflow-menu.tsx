@@ -129,7 +129,9 @@ export function OverflowMenu() {
           <Link href="/settings" role="menuitem" data-menuitem className={ITEM_CLASS}>
             Settings
           </Link>
-          <Link href="/progress" role="menuitem" data-menuitem className={ITEM_CLASS}>Progress</Link>
+          <Link href="/progress" role="menuitem" data-menuitem className={ITEM_CLASS}>
+            Progress
+          </Link>
 
           <form action={logOut}>
             <button type="submit" role="menuitem" data-menuitem className={ITEM_CLASS}>

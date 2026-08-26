@@ -12,7 +12,9 @@ export async function getV2Progress(
   options: ProgressAggregationOptions,
 ): Promise<ProgressAggregation> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) throw new Error('Your session ended. Log in and try again.')
   const { data, error } = await supabase
     .from('attempts')
