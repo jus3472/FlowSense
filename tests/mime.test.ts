@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { extensionForMimeType, selectRecordingMimeType } from '@/lib/recording/mime'
+import {
+  extensionForMimeType,
+  isRecordingMimeType,
+  selectRecordingMimeType,
+} from '@/lib/recording/mime'
 
 const supporting =
   (...supported: string[]) =>
@@ -53,5 +57,20 @@ describe('extensionForMimeType', () => {
 
   it('defaults to webm for anything unrecognised', () => {
     expect(extensionForMimeType('application/octet-stream')).toBe('webm')
+  })
+})
+
+describe('isRecordingMimeType', () => {
+  it('accepts every format the recorder can select', () => {
+    expect(isRecordingMimeType('audio/webm;codecs=opus')).toBe(true)
+    expect(isRecordingMimeType('audio/webm')).toBe(true)
+    expect(isRecordingMimeType('audio/mp4;codecs=mp4a.40.2')).toBe(true)
+    expect(isRecordingMimeType('audio/mp4')).toBe(true)
+    expect(isRecordingMimeType('audio/ogg;codecs=opus')).toBe(true)
+  })
+
+  it('rejects formats outside the recording allowlist', () => {
+    expect(isRecordingMimeType('audio/wav')).toBe(false)
+    expect(isRecordingMimeType('audio/webm; codecs=opus')).toBe(false)
   })
 })

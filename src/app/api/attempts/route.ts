@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server'
 import { apiError } from '@/lib/api/responses'
 import { extensionForMimeType } from '@/lib/recording/mime'
-import { MAX_RECORDING_MS } from '@/lib/recording/recorder'
+import { parseCreateAttemptPayload } from '@/lib/recording/attempt-payload'
 import { createClient } from '@/lib/supabase/server'
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
  * Creates the attempt row before the audio exists. The row is the anchor: the
@@ -25,32 +23,16 @@ export async function POST(request: Request) {
     return apiError('The request body was not valid JSON.', 400)
   }
 
-  const payload = body as Record<string, unknown>
-  const promptText = typeof payload.promptText === 'string' ? payload.promptText.trim() : ''
-  const promptId =
-    typeof payload.promptId === 'string' && UUID.test(payload.promptId) ? payload.promptId : null
-  const mimeType = typeof payload.mimeType === 'string' ? payload.mimeType : ''
-  const durationMs =
-    typeof payload.durationMs === 'number' && Number.isFinite(payload.durationMs)
-      ? Math.round(payload.durationMs)
-      : null
-
-  if (promptText.length === 0) return apiError('The prompt text was missing.', 400)
-  if (mimeType.length === 0) return apiError('The recording format was missing.', 400)
-  if (durationMs === null || durationMs <= 0) {
-    return apiError('The recording length was missing.', 400)
-  }
-  if (durationMs > MAX_RECORDING_MS * 2) {
-    return apiError('That recording is longer than FlowSense accepts.', 400)
-  }
+  const payload = parseCreateAttemptPayload(body)
+  if (!payload.ok) return apiError(payload.error, 400)
 
   const { data, error } = await supabase
     .from('attempts')
     .insert({
       user_id: user.id,
-      prompt_id: promptId,
-      prompt_text: promptText,
-      duration_ms: durationMs,
+      prompt_id: payload.value.promptId,
+      prompt_text: payload.value.promptText,
+      duration_ms: payload.value.durationMs,
     })
     .select('id')
     .single()
@@ -61,6 +43,6 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     attemptId: data.id,
-    storagePath: `${user.id}/${data.id}.${extensionForMimeType(mimeType)}`,
+    storagePath: `${user.id}/${data.id}.${extensionForMimeType(payload.value.mimeType)}`,
   })
 }

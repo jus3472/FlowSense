@@ -12,6 +12,11 @@ export const RECORDING_MIME_CANDIDATES = [
 
 export type IsTypeSupported = (mimeType: string) => boolean
 
+/** Whether a MIME type is one the recorder can create and the pipeline supports. */
+export function isRecordingMimeType(mimeType: string): boolean {
+  return (RECORDING_MIME_CANDIDATES as readonly string[]).includes(mimeType)
+}
+
 /** The first candidate the browser will actually record, or null if none. */
 export function selectRecordingMimeType(isTypeSupported: IsTypeSupported): string | null {
   for (const candidate of RECORDING_MIME_CANDIDATES) {
