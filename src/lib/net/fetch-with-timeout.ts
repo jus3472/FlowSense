@@ -27,14 +27,30 @@ export async function fetchWithTimeout(
   { label, timeoutMs = NETWORK_TIMEOUT_MS }: TimeoutOptions,
 ): Promise<Response> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const callerSignal = init.signal
+  const abortFromCaller = () => controller.abort(callerSignal?.reason)
+
+  if (callerSignal?.aborted) {
+    abortFromCaller()
+  } else {
+    callerSignal?.addEventListener('abort', abortFromCaller, { once: true })
+  }
+
+  let timedOut = false
+  const timer = controller.signal.aborted
+    ? undefined
+    : setTimeout(() => {
+        timedOut = true
+        controller.abort()
+      }, timeoutMs)
 
   try {
     return await fetch(input, { ...init, signal: controller.signal })
   } catch (error) {
-    if (controller.signal.aborted) throw new RequestTimeoutError(label, timeoutMs)
+    if (timedOut) throw new RequestTimeoutError(label, timeoutMs)
     throw error
   } finally {
-    clearTimeout(timer)
+    if (timer !== undefined) clearTimeout(timer)
+    callerSignal?.removeEventListener('abort', abortFromCaller)
   }
 }
