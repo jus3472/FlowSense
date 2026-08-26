@@ -1,0 +1,553 @@
+import { describe, expect, it, vi } from 'vitest'
+import { contentDetectorFromModel } from '@/lib/scoring/v2/content/adapter'
+import {
+  V2_CONTENT_DETECTOR_VERSION,
+  type V2ContentDetectorProvider,
+} from '@/lib/scoring/v2/content/contracts'
+import {
+  parseV2ContentResponse,
+  runV2ContentEvaluation,
+  V2ContentParseError,
+} from '@/lib/scoring/v2/content/evaluate'
+import { buildV2ContentUserPrompt, V2_CONTENT_SYSTEM_PROMPT } from '@/lib/scoring/v2/content/prompt'
+
+const TRANSCRIPT = 'I think the park is good because it has a lake. The park is good for families.'
+const PARK = { start: 12, end: 16, text: 'park', category: 'filler' as const }
+
+function structure(overrides: Record<string, unknown> = {}) {
+  const passed = { passed: true, severity: null, quote: null, observation: null, suggestion: null }
+  return {
+    checks: {
+      answered_prompt: passed,
+      main_point: passed,
+      logical_progression: passed,
+      relevant_support: passed,
+      unnecessary_repetition: passed,
+      topic_drift: passed,
+      completion: passed,
+      ...overrides,
+    },
+  }
+}
+
+function response(overrides: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    version: V2_CONTENT_DETECTOR_VERSION,
+    structure: structure(),
+    grammar: { findings: [] },
+    vocabulary: { findings: [] },
+    ...overrides,
+  })
+}
+
+function provider(complete: V2ContentDetectorProvider['complete']): V2ContentDetectorProvider {
+  return { name: 'fake-v2', complete }
+}
+
+describe('v2 content response validation', () => {
+  it('returns separate normalized structure, grammar, and vocabulary components', () => {
+    const parsed = parseV2ContentResponse(
+      response({
+        structure: structure({
+          main_point: {
+            passed: false,
+            severity: 'minor',
+            quote: null,
+            observation: 'The main point is delayed.',
+            suggestion: null,
+          },
+        }),
+        grammar: {
+          findings: [
+            {
+              kind: 'grammatical_error',
+              severity: 'clear',
+              quote: 'it has a lake',
+              observation: 'This evidence is specific.',
+              suggestion: null,
+            },
+          ],
+        },
+        vocabulary: {
+          findings: [
+            {
+              kind: 'vague_language',
+              severity: 'minor',
+              quote: 'good',
+              observation: 'This does not name the benefit.',
+              suggestion: null,
+            },
+          ],
+        },
+      }),
+      { transcript: TRANSCRIPT },
+    )
+
+    expect(parsed.categories.structure.component).toBe(0.9)
+    expect(parsed.categories.grammar.component).toBe(0.75)
+    expect(parsed.categories.vocabulary.component).toBe(0.9)
+    expect(parsed.categories.structure.findings[0]?.quote).toBeNull()
+    expect(parsed.categories.grammar.findings[0]?.evidence[0]).toMatchObject({
+      start: expect.any(Number),
+    })
+  })
+
+  it('fails missing categories in the user favor without inventing deductions', () => {
+    const parsed = parseV2ContentResponse(
+      JSON.stringify({ version: V2_CONTENT_DETECTOR_VERSION, structure: structure() }),
+      {
+        transcript: TRANSCRIPT,
+      },
+    )
+    expect(parsed.categories.structure.status).toBe('checked')
+    expect(parsed.categories.grammar).toMatchObject({ status: 'not_checked', component: null })
+    expect(parsed.categories.vocabulary).toMatchObject({ status: 'not_checked', component: null })
+  })
+
+  it('throws only for malformed response envelopes', () => {
+    expect(() => parseV2ContentResponse('not json', { transcript: TRANSCRIPT })).toThrow(
+      V2ContentParseError,
+    )
+    expect(() => parseV2ContentResponse('[]', { transcript: TRANSCRIPT })).toThrow(
+      V2ContentParseError,
+    )
+  })
+
+  it('requires the exact response version before interpreting any category', () => {
+    expect(() =>
+      parseV2ContentResponse(JSON.stringify({ structure: structure() }), {
+        transcript: TRANSCRIPT,
+      }),
+    ).toThrow(/unsupported version/)
+    expect(() =>
+      parseV2ContentResponse(
+        JSON.stringify({
+          version: 'v1',
+          structure: structure(),
+          grammar: { findings: [] },
+          vocabulary: { findings: [] },
+        }),
+        { transcript: TRANSCRIPT },
+      ),
+    ).toThrow(/unsupported version/)
+    expect(() =>
+      parseV2ContentResponse(
+        JSON.stringify({
+          version: 'v2.content-detector.2',
+          structure: structure(),
+          grammar: { findings: [] },
+          vocabulary: { findings: [] },
+        }),
+        { transcript: TRANSCRIPT },
+      ),
+    ).toThrow(/unsupported version/)
+  })
+
+  it('neutralizes an incomplete structure envelope and validates passed checks', () => {
+    const incomplete = parseV2ContentResponse(
+      response({
+        structure: {
+          checks: { main_point: { passed: false, severity: 'clear', observation: 'x' } },
+        },
+      }),
+      { transcript: TRANSCRIPT },
+    )
+    expect(incomplete.categories.structure).toMatchObject({
+      status: 'not_checked',
+      component: null,
+    })
+
+    const passed = parseV2ContentResponse(response({ structure: structure() }), {
+      transcript: TRANSCRIPT,
+    })
+    expect(passed.categories.structure).toMatchObject({
+      status: 'checked',
+      component: 1,
+      findings: [],
+    })
+
+    const malformedPass = parseV2ContentResponse(
+      response({ structure: structure({ completion: { passed: true, severity: 'minor' } }) }),
+      { transcript: TRANSCRIPT },
+    )
+    expect(malformedPass.categories.structure).toMatchObject({
+      status: 'not_checked',
+      component: null,
+    })
+  })
+
+  it('drops grammar and vocabulary findings without exact transcript evidence', () => {
+    const parsed = parseV2ContentResponse(
+      response({
+        grammar: {
+          findings: [
+            {
+              kind: 'grammatical_error',
+              severity: 'clear',
+              quote: 'never said',
+              observation: 'x',
+              suggestion: null,
+            },
+          ],
+        },
+        vocabulary: {
+          findings: [
+            {
+              kind: 'imprecise_wording',
+              severity: 'minor',
+              quote: 'not spoken',
+              observation: 'x',
+              suggestion: null,
+            },
+          ],
+        },
+      }),
+      { transcript: TRANSCRIPT },
+    )
+    expect(parsed.categories.grammar.findings).toEqual([])
+    expect(parsed.categories.vocabulary.findings).toEqual([])
+    expect(parsed.warnings.join(' ')).toMatch(/not in the transcript/)
+  })
+
+  it('requires recognized vocabulary kinds and severity values', () => {
+    const parsed = parseV2ContentResponse(
+      response({
+        vocabulary: {
+          findings: [
+            { kind: 'fancy_words', severity: 'clear', quote: 'good', observation: 'x' },
+            { kind: 'vague_language', severity: 'uncertain', quote: 'good', observation: 'x' },
+          ],
+        },
+      }),
+      { transcript: TRANSCRIPT },
+    )
+    expect(parsed.categories.vocabulary.findings).toEqual([])
+    expect(parsed.categories.vocabulary.component).toBe(1)
+  })
+
+  it('accepts grammar findings only when they identify a grammatical error', () => {
+    const parsed = parseV2ContentResponse(
+      response({
+        grammar: {
+          findings: [
+            {
+              kind: 'style',
+              severity: 'clear',
+              quote: 'good',
+              observation: 'This is a preference.',
+              suggestion: null,
+            },
+          ],
+        },
+      }),
+      { transcript: TRANSCRIPT },
+    )
+    expect(parsed.categories.grammar.findings).toEqual([])
+    expect(parsed.categories.grammar.warnings.join(' ')).toMatch(/unknown finding kind/)
+  })
+})
+
+describe('v2 content evidence exclusions', () => {
+  it('drops low-confidence grammar and vocabulary evidence', () => {
+    const goodStart = TRANSCRIPT.indexOf('good')
+    const parsed = parseV2ContentResponse(
+      response({
+        grammar: {
+          findings: [
+            {
+              kind: 'grammatical_error',
+              severity: 'clear',
+              quote: 'good',
+              observation: 'x',
+              suggestion: null,
+            },
+          ],
+        },
+        vocabulary: {
+          findings: [
+            {
+              kind: 'vague_language',
+              severity: 'minor',
+              quote: 'lake',
+              observation: 'x',
+              suggestion: null,
+            },
+          ],
+        },
+      }),
+      {
+        transcript: TRANSCRIPT,
+        unreliableTranscriptSpans: [{ start: goodStart, end: goodStart + 4, confidence: 0.31 }],
+      },
+    )
+    expect(parsed.categories.grammar.findings).toEqual([])
+    expect(parsed.categories.vocabulary.findings).toHaveLength(1)
+  })
+
+  it('uses transcript character offsets derived from recognized word evidence', () => {
+    const recognizedWord = {
+      word: 'lake',
+      transcriptStart: TRANSCRIPT.indexOf('lake'),
+      confidence: 0.22,
+    }
+    const parsed = parseV2ContentResponse(
+      response({
+        vocabulary: {
+          findings: [
+            {
+              kind: 'vague_language',
+              severity: 'minor',
+              quote: 'lake',
+              observation: 'x',
+              suggestion: null,
+            },
+          ],
+        },
+      }),
+      {
+        transcript: TRANSCRIPT,
+        unreliableTranscriptSpans: [
+          {
+            start: recognizedWord.transcriptStart,
+            end: recognizedWord.transcriptStart + recognizedWord.word.length,
+            confidence: recognizedWord.confidence,
+          },
+        ],
+      },
+    )
+    expect(parsed.categories.vocabulary.findings).toEqual([])
+  })
+
+  it('ignores invalid confidence and offset evidence rather than charging from it', () => {
+    const parsed = parseV2ContentResponse(
+      response({
+        vocabulary: {
+          findings: [
+            {
+              kind: 'vague_language',
+              severity: 'minor',
+              quote: 'lake',
+              observation: 'x',
+              suggestion: null,
+            },
+          ],
+        },
+      }),
+      {
+        transcript: TRANSCRIPT,
+        unreliableTranscriptSpans: [{ start: 0, end: 4, confidence: 2 }],
+      },
+    )
+    expect(parsed.categories.vocabulary.findings).toHaveLength(1)
+  })
+
+  it('excludes filler, false-start, and closer claims before vocabulary can deduct', () => {
+    const text = 'Um, I think it is good. You know.'
+    const parsed = parseV2ContentResponse(
+      response({
+        vocabulary: {
+          findings: [
+            {
+              kind: 'vague_language',
+              severity: 'clear',
+              quote: 'Um',
+              observation: 'x',
+              suggestion: null,
+            },
+            {
+              kind: 'repeated_wording',
+              severity: 'clear',
+              quote: 'You know',
+              observation: 'x',
+              suggestion: null,
+            },
+            {
+              kind: 'imprecise_wording',
+              severity: 'minor',
+              quote: 'good',
+              observation: 'x',
+              suggestion: null,
+            },
+          ],
+        },
+      }),
+      {
+        transcript: text,
+        mechanicallyCounted: [
+          { text: 'Um', category: 'filler', start: 0, end: 2 },
+          { text: 'You know', category: 'closer', start: 25, end: 33 },
+          { text: 'I think', category: 'false_start', start: 4, end: 11 },
+        ],
+      },
+    )
+    expect(parsed.categories.vocabulary.findings.map((finding) => finding.quote)).toEqual(['good'])
+  })
+
+  it('keeps one claimed quote across categories and drops overlapping repeated wording', () => {
+    const parsed = parseV2ContentResponse(
+      response({
+        grammar: {
+          findings: [
+            {
+              kind: 'grammatical_error',
+              severity: 'minor',
+              quote: 'park is good',
+              observation: 'x',
+              suggestion: null,
+            },
+          ],
+        },
+        vocabulary: {
+          findings: [
+            {
+              kind: 'repeated_wording',
+              severity: 'clear',
+              quote: 'good',
+              observation: 'x',
+              suggestion: null,
+            },
+          ],
+        },
+      }),
+      { transcript: TRANSCRIPT },
+    )
+    expect(parsed.categories.grammar.findings).toHaveLength(1)
+    expect(parsed.categories.vocabulary.findings).toEqual([])
+    expect(parsed.warnings.join(' ')).toMatch(/earlier v2 finding/)
+  })
+
+  it('does not let malformed mechanically counted evidence create a deduction', () => {
+    const parsed = parseV2ContentResponse(response(), {
+      transcript: TRANSCRIPT,
+      mechanicallyCounted: [PARK],
+    })
+    expect(parsed.categories.vocabulary.component).toBe(1)
+  })
+
+  it('caps untrusted finding arrays before they can manufacture unbounded deductions', () => {
+    const parsed = parseV2ContentResponse(
+      response({
+        vocabulary: {
+          findings: Array.from({ length: 20 }, () => ({
+            kind: 'vague_language',
+            severity: 'minor',
+            quote: 'lake',
+            observation: 'x',
+            suggestion: null,
+          })),
+        },
+      }),
+      { transcript: TRANSCRIPT },
+    )
+    expect(parsed.categories.vocabulary.findings).toHaveLength(1)
+    expect(parsed.categories.vocabulary.warnings.join(' ')).toMatch(/truncated to 8/)
+  })
+})
+
+describe('v2 provider behavior and prompt contract', () => {
+  it('retries malformed JSON once, then returns not_checked', async () => {
+    const complete = vi
+      .fn<V2ContentDetectorProvider['complete']>()
+      .mockResolvedValueOnce('not json')
+      .mockResolvedValueOnce(response())
+    const checked = await runV2ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: 'Describe a park.',
+      transcript: TRANSCRIPT,
+    })
+    expect(checked.status).toBe('checked')
+    expect(checked.calls).toBe(2)
+
+    const failed = await runV2ContentEvaluation({
+      provider: provider(async () => 'not json'),
+      mode: 'practice',
+      prompt: 'Describe a park.',
+      transcript: TRANSCRIPT,
+    })
+    expect(failed.status).toBe('not_checked')
+    expect(failed.calls).toBe(2)
+    expect(failed.categories.grammar.component).toBeNull()
+  })
+
+  it('does not retry provider outages', async () => {
+    const complete = vi
+      .fn<V2ContentDetectorProvider['complete']>()
+      .mockRejectedValue(new Error('upstream 500'))
+    const result = await runV2ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: 'Describe a park.',
+      transcript: TRANSCRIPT,
+    })
+    expect(result.status).toBe('not_checked')
+    expect(result.calls).toBe(1)
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not call a provider for an empty prompt or transcript', async () => {
+    const complete = vi.fn<V2ContentDetectorProvider['complete']>().mockResolvedValue(response())
+    const blankPrompt = await runV2ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: '  ',
+      transcript: TRANSCRIPT,
+    })
+    const blankTranscript = await runV2ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: 'Describe a park.',
+      transcript: ' ',
+    })
+    expect(blankPrompt).toMatchObject({ status: 'not_checked', calls: 0 })
+    expect(blankTranscript).toMatchObject({ status: 'not_checked', calls: 0 })
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  it('adapts the existing transport without sharing the legacy response contract', async () => {
+    const complete = vi.fn().mockResolvedValue(response())
+    const adapter = contentDetectorFromModel({ name: 'legacy-transport', complete })
+    await adapter.complete({
+      version: V2_CONTENT_DETECTOR_VERSION,
+      mode: 'interview',
+      prompt: 'Tell me about a challenge.',
+      transcript: TRANSCRIPT,
+    })
+    expect(complete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: V2_CONTENT_SYSTEM_PROMPT,
+        user: expect.stringContaining('response_shape'),
+      }),
+    )
+  })
+
+  it('describes the exact keyed, versioned response schema the parser requires', () => {
+    const user = JSON.parse(
+      buildV2ContentUserPrompt({
+        version: V2_CONTENT_DETECTOR_VERSION,
+        mode: 'practice',
+        prompt: 'Describe a park.',
+        transcript: TRANSCRIPT,
+      }),
+    ) as { response_shape: { version: string; structure: { checks: Record<string, unknown> } } }
+    expect(user.response_shape.version).toBe(V2_CONTENT_DETECTOR_VERSION)
+    expect(user.response_shape.structure.checks.main_point).toMatchObject({
+      passed: false,
+      observation: expect.any(String),
+      suggestion: expect.any(String),
+    })
+    expect(user.response_shape.structure.checks.answered_prompt).toMatchObject({
+      passed: true,
+      severity: null,
+      quote: null,
+      observation: null,
+      suggestion: null,
+    })
+  })
+
+  it('instructs precision without vocabulary-level or stylistic penalties', () => {
+    expect(V2_CONTENT_SYSTEM_PROMPT).toMatch(/never penalize stylistic preference/i)
+    expect(V2_CONTENT_SYSTEM_PROMPT).toMatch(/not fancy words or vocabulary level/i)
+    expect(V2_CONTENT_SYSTEM_PROMPT).toMatch(/fillers, false starts, or closers/i)
+  })
+})
