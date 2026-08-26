@@ -6,10 +6,8 @@ import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
-import type { StoredContentResult } from '@/lib/scoring/assemble'
-import type { AttemptView } from '@/lib/results/types'
+import { readAttemptResult } from '@/lib/results/attempt-result'
 import { createClient } from '@/lib/supabase/server'
-import type { AttemptMetrics } from '@/lib/types/metrics'
 
 export const metadata: Metadata = {
   title: 'Your answer',
@@ -44,12 +42,22 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     audioUrl = data?.signedUrl ?? null
   }
 
-  const metrics = (attempt.metrics as AttemptMetrics | null) ?? {}
-  const delivery = metrics.delivery
   const durationMs = attempt.duration_ms ?? 0
+  const result = readAttemptResult({
+    id: attempt.id,
+    promptText: attempt.prompt_text,
+    transcript: attempt.transcript,
+    durationMs: attempt.duration_ms,
+    createdAt: attempt.created_at,
+    audioUrl,
+    score: attempt.score,
+    sectionScores: attempt.section_scores,
+    metrics: attempt.metrics,
+    contentResult: attempt.content_result,
+  })
 
   // A recording that never finished scoring still shows what it does have.
-  if (attempt.score === null || !delivery || !attempt.section_scores || !attempt.content_result) {
+  if (result.kind === 'incomplete') {
     return (
       <div className="flex flex-col gap-8">
         <h1 className="text-foreground text-xl font-semibold">{attempt.prompt_text}</h1>
@@ -67,20 +75,22 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     )
   }
 
-  const view: AttemptView = {
-    id: attempt.id,
-    promptText: attempt.prompt_text,
-    transcript: attempt.transcript ?? '',
-    durationMs,
-    createdAt: attempt.created_at,
-    audioUrl,
-    score: attempt.score,
-    sections: attempt.section_scores as unknown as AttemptView['sections'],
-    metrics: delivery.metrics as AttemptView['metrics'],
-    statistics: delivery.statistics as AttemptView['statistics'],
-    pauses: delivery.pauses as AttemptView['pauses'],
-    words: metrics.transcript?.words ?? [],
-    content: attempt.content_result as unknown as StoredContentResult,
+  if (result.kind !== 'legacy') {
+    return (
+      <div className="flex flex-col gap-8">
+        <h1 className="text-foreground text-xl font-semibold">{attempt.prompt_text}</h1>
+        {audioUrl ? <AudioPlayer src={audioUrl} durationMs={durationMs} /> : null}
+        <Card>
+          <EmptyState
+            title="Result unavailable"
+            description="This response uses a result format that is not available here yet."
+          />
+        </Card>
+        <ButtonLink href={`/record?retry=${attempt.id}`} size="lg" fullWidth>
+          Try this prompt again
+        </ButtonLink>
+      </div>
+    )
   }
 
   // Disputes live in note_feedback and are re-applied on every read, so the
@@ -92,7 +102,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
 
   return (
     <ResultsView
-      attempt={view}
+      attempt={result.attempt}
       initialDisputes={(disputeRows ?? []).map((row) => ({
         note_type: row.note_type,
         quote: row.quote,

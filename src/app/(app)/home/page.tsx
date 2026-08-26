@@ -7,12 +7,11 @@ import { RetryButton } from '@/components/system/retry-button'
 import { ButtonLink } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
 import { focusPhrase, sanitizeFocusAreas } from '@/lib/focus-areas'
+import { legacyAttemptForHome } from '@/lib/results/attempt-result'
 import { largestDeduction, summariseAttempt } from '@/lib/results/summary'
-import { CONTENT_POINTS, type CheckName } from '@/lib/scoring/content'
-import type { DeliveryMetricName, MetricResult } from '@/lib/scoring/mechanical'
+import { CONTENT_POINTS } from '@/lib/scoring/content'
 import { computeStreak } from '@/lib/streak'
 import { createClient } from '@/lib/supabase/server'
-import type { AttemptMetrics } from '@/lib/types/metrics'
 
 export const metadata: Metadata = {
   title: 'Home',
@@ -29,7 +28,9 @@ export default async function HomePage() {
     supabase.from('profiles').select('focus_areas').eq('id', user.id).maybeSingle(),
     supabase
       .from('attempts')
-      .select('id, created_at, score, section_scores, metrics')
+      .select(
+        'id, prompt_text, transcript, duration_ms, created_at, score, section_scores, metrics, content_result',
+      )
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(30),
@@ -49,18 +50,22 @@ export default async function HomePage() {
   const latest = attempts.find((attempt) => attempt.score !== null) ?? null
   let summary: string | null = null
   if (latest?.score !== null && latest) {
-    const delivery = (latest.metrics as AttemptMetrics | null)?.delivery
-    const sections = latest.section_scores as {
-      content?: { checks?: Record<CheckName, number> }
-    } | null
-    if (delivery) {
+    const legacy = legacyAttemptForHome({
+      id: latest.id,
+      promptText: latest.prompt_text,
+      transcript: latest.transcript,
+      durationMs: latest.duration_ms,
+      createdAt: latest.created_at,
+      audioUrl: null,
+      score: latest.score,
+      sectionScores: latest.section_scores,
+      metrics: latest.metrics,
+      contentResult: latest.content_result,
+    })
+    if (legacy) {
       summary = summariseAttempt(
         latest.score,
-        largestDeduction(
-          delivery.metrics as Record<DeliveryMetricName, MetricResult>,
-          sections?.content?.checks ?? null,
-          CONTENT_POINTS,
-        ),
+        largestDeduction(legacy.metrics, legacy.sections.content.checks, CONTENT_POINTS),
       )
     }
   }
