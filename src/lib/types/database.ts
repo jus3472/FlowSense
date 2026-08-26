@@ -12,6 +12,10 @@
 
 export type Json = string | number | boolean | null | { [key: string]: Json } | Json[]
 
+export type PracticeMode = 'practice' | 'interview' | 'presentation' | 'conversation'
+export type PromptDifficulty = 'beginner' | 'intermediate' | 'advanced'
+export type PromptSource = 'library' | 'custom'
+
 export type ProfileRow = {
   id: string
   display_name: string | null
@@ -23,6 +27,10 @@ export type PromptRow = {
   id: string
   text: string
   active: boolean
+  mode: PracticeMode
+  difficulty: PromptDifficulty
+  target_duration_seconds: number
+  collection_id: string | null
   created_at: string
 }
 
@@ -38,6 +46,11 @@ export type AttemptRow = {
   section_scores: Json | null
   metrics: Json | null
   content_result: Json | null
+  practice_mode: PracticeMode | null
+  prompt_source: PromptSource | null
+  prompt_difficulty: PromptDifficulty | null
+  rubric_version: string | null
+  retry_of_attempt_id: string | null
   created_at: string
 }
 
