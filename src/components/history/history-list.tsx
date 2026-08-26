@@ -63,6 +63,7 @@ export function HistoryList({
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement>())
+  const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null)
   const focusAfterDismissRef = useRef<string | null>(null)
 
   const visible = applyFilter(entries, filter)
@@ -79,6 +80,10 @@ export function HistoryList({
 
     deleteButtonRefs.current.get(focusAfterDismissRef.current)?.focus()
     focusAfterDismissRef.current = null
+  }, [confirming])
+
+  useEffect(() => {
+    if (confirming !== null) confirmDeleteButtonRef.current?.focus()
   }, [confirming])
 
   useEffect(() => {
@@ -104,6 +109,7 @@ export function HistoryList({
       setConfirming(null)
     } catch (thrown) {
       setError(thrown instanceof Error ? thrown.message : 'It could not be deleted.')
+      dismissConfirmation(id, true)
     } finally {
       setBusy(null)
     }
@@ -192,6 +198,7 @@ export function HistoryList({
                     <p className="text-foreground text-sm">Delete this response?</p>
                     <span className="flex shrink-0 items-center gap-1">
                       <button
+                        ref={confirmDeleteButtonRef}
                         type="button"
                         aria-label="Confirm delete"
                         title="Delete response"
@@ -206,7 +213,7 @@ export function HistoryList({
                         aria-label="Cancel delete"
                         title="Cancel"
                         disabled={busy === entry.id}
-                        onClick={() => dismissConfirmation(entry.id, false)}
+                        onClick={() => dismissConfirmation(entry.id, true)}
                         className={ICON_BUTTON}
                       >
                         <CloseIcon />

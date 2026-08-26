@@ -2,8 +2,9 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { AnchorHTMLAttributes, ReactNode } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { HistoryList } from '@/components/history/history-list'
+import { deleteAttempt } from '@/lib/results/api'
 import type { HistoryEntry } from '@/lib/results/history'
 
 vi.mock('next/link', () => ({
@@ -34,22 +35,60 @@ const entries: HistoryEntry[] = [
 ]
 
 describe('HistoryList', () => {
+  beforeEach(() => {
+    vi.mocked(deleteAttempt).mockReset()
+  })
+
   it('shows the response time in each history row', () => {
     render(<HistoryList entries={entries} focusPhrase="with less filler" />)
 
     expect(screen.getByText(/9:05\sAM/)).toBeInTheDocument()
   })
 
-  it('dismisses delete confirmation on Escape and restores focus to delete', async () => {
+  it('moves focus to confirm delete when confirmation opens', async () => {
     render(<HistoryList entries={entries} focusPhrase="with less filler" />)
 
     const deleteButton = screen.getByRole('button', { name: 'Delete response' })
-    deleteButton.focus()
     fireEvent.click(deleteButton)
 
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Confirm delete' })).toHaveFocus()
+    })
+  })
+
+  it('dismisses delete confirmation on cancel and restores focus to delete', async () => {
+    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel delete' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Delete response' })).toHaveFocus()
+    })
+  })
+
+  it('dismisses delete confirmation on Escape and restores focus to delete', async () => {
+    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))
     await screen.findByText('Delete this response?')
 
     fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.queryByText('Delete this response?')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Delete response' })).toHaveFocus()
+    })
+  })
+
+  it('restores focus to delete when deletion fails', async () => {
+    vi.mocked(deleteAttempt).mockRejectedValueOnce(new Error('It could not be deleted.'))
+    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm delete' }))
+
+    await screen.findByRole('alert')
 
     expect(screen.queryByText('Delete this response?')).not.toBeInTheDocument()
     await waitFor(() => {
