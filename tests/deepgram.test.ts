@@ -40,7 +40,7 @@ describe('parseDeepgramResponse', () => {
 
   it('keeps start and end on every word', () => {
     const parsed = parseDeepgramResponse(RESPONSE_WITH_FILLERS)
-    expect(parsed.words[1]).toEqual({ word: 'um', start: 0.4, end: 0.72 })
+    expect(parsed.words[1]).toEqual({ word: 'um', start: 0.4, end: 0.72, confidence: 0.977 })
     for (const entry of parsed.words) {
       expect(Number.isFinite(entry.start)).toBe(true)
       expect(Number.isFinite(entry.end)).toBe(true)

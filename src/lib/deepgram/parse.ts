@@ -7,6 +7,7 @@ export interface TranscriptWord {
   word: string
   start: number
   end: number
+  confidence?: number
 }
 
 export interface ParsedTranscript {
@@ -68,7 +69,8 @@ export function parseDeepgramResponse(payload: unknown): ParsedTranscript {
     const start = numberOrNull(entry.start)
     const end = numberOrNull(entry.end)
     if (word === null || start === null || end === null) continue
-    words.push({ word, start, end })
+    const confidence = numberOrNull(entry.confidence)
+    words.push({ word, start, end, ...(confidence !== null && confidence >= 0 && confidence <= 1 ? { confidence } : {}) })
   }
 
   const metadata = isRecord(payload.metadata) ? payload.metadata : null
