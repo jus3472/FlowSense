@@ -1,4 +1,5 @@
 import { AudioPlayer } from '@/components/record/audio-player'
+import type { Route } from 'next'
 import { TranscriptPanel } from '@/components/results/transcript-panel'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -146,7 +147,7 @@ export function V2ResultsView({
             <p className="text-muted text-sm">Open the previous response to review it.</p>
           )}
           {previousAttemptId ? (
-            <ButtonLink href={`/attempts/${previousAttemptId}`} variant="secondary">
+            <ButtonLink href={`/attempts/${previousAttemptId}` as Route} variant="secondary">
               View previous response
             </ButtonLink>
           ) : null}
