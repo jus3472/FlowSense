@@ -21,9 +21,9 @@ alter table public.attempts
   add column if not exists prompt_difficulty text
     check (prompt_difficulty is null or prompt_difficulty in ('beginner', 'intermediate', 'advanced')),
   add column if not exists rubric_version text,
-  -- Restrict preserves the retry chain. Delete the retry first, or retain both.
+  -- Preserve a retry's history if its source and audio are deleted.
   add column if not exists retry_of_attempt_id uuid
-    references public.attempts (id) on delete restrict,
+    references public.attempts (id) on delete set null,
   add constraint attempts_retry_not_self_check
     check (retry_of_attempt_id is null or retry_of_attempt_id <> id);
 

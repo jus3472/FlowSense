@@ -30,8 +30,8 @@ describe('practice schema migration', () => {
     expect(migration).not.toMatch(/prompt_id uuid not null/)
   })
 
-  it('preserves retry history and provides the required indexes without replacing RLS', () => {
-    expect(migration).toMatch(/references public\.attempts \(id\) on delete restrict/)
+  it('preserves retry history after source deletion and provides the required indexes', () => {
+    expect(migration).toMatch(/references public\.attempts \(id\) on delete set null/)
     expect(migration).toMatch(/attempts_retry_not_self_check/)
     expect(migration).toMatch(/attempts_user_practice_mode_created_idx/)
     expect(migration).toMatch(/attempts_retry_of_attempt_idx/)
