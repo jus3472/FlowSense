@@ -13,13 +13,19 @@ import {
   retryDifferenceLabel,
   type ProgressRetryAttemptInput,
 } from '@/lib/progress/retries'
-import { SKILL_CATEGORIES, type PracticeMode, type SkillCategory } from '@/lib/practice/contracts'
+import {
+  PRACTICE_MODES,
+  SKILL_CATEGORIES,
+  type PracticeMode,
+  type SkillCategory,
+} from '@/lib/practice/contracts'
 import {
   V2_SCORE_PAYLOAD_VERSION,
   type V2PersistedCategoryScore,
   type V2ScorePayload,
 } from '@/lib/scoring/v2/assemble'
 import { rubricFor } from '@/lib/scoring/v2/rubrics'
+import type { ProgressDashboardData } from '@/lib/progress/server'
 import { legacySectionSnapshot, progressAttempt, v2Snapshot } from './helpers/result-snapshots'
 
 vi.mock('next/link', () => ({
@@ -40,6 +46,18 @@ function series(values: readonly number[]): ProgressSeries {
     state: values.length >= 2 ? 'ready' : 'insufficient_data',
     averageValue:
       values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length,
+  }
+}
+
+function dashboard(
+  progress: ProgressDashboardData['progress'],
+  over: Partial<ProgressDashboardData> = {},
+): ProgressDashboardData {
+  return {
+    progress,
+    retryComparisons: [],
+    coverage: { completedAttemptLimit: 200, truncated: false },
+    ...over,
   }
 }
 
@@ -88,9 +106,17 @@ function attempt(
 
 describe('progress dashboard helpers', () => {
   it('parses only one supported mode value', () => {
-    expect(parseProgressMode('interview')).toBe('interview')
-    expect(parseProgressMode('unknown')).toBeUndefined()
-    expect(parseProgressMode(['interview', 'practice'])).toBeUndefined()
+    expect(parseProgressMode(undefined)).toEqual({ status: 'valid' })
+    for (const mode of PRACTICE_MODES) {
+      expect(parseProgressMode(mode)).toEqual({ status: 'valid', mode })
+    }
+    expect(parseProgressMode('unknown')).toEqual({ status: 'invalid' })
+    expect(parseProgressMode('')).toEqual({ status: 'invalid' })
+    expect(parseProgressMode(['interview', 'practice'])).toEqual({ status: 'invalid' })
+    expect(parseProgressMode(['interview', 'interview'])).toEqual({ status: 'invalid' })
+
+    const page = readFileSync('src/app/(app)/progress/page.tsx', 'utf8')
+    expect(page).toContain("if (parsed.status === 'invalid') redirect('/progress')")
   })
 
   it('selects only a unique ready strongest or practice category', () => {
@@ -106,6 +132,28 @@ describe('progress dashboard helpers', () => {
     categories.fluency = series([50, 50])
     categories.grammar = series([50, 50])
     expect(selectCategory(categories, true)).toBeNull()
+    expect(selectCategory(categories, false)).toBeNull()
+  })
+
+  it('does not rank categories with unequal or different checked populations', () => {
+    const categories = Object.fromEntries(
+      SKILL_CATEGORIES.map((category) => [category, series([50, 60])]),
+    ) as Record<SkillCategory, ProgressSeries>
+    categories.fluency = series([80, 90, 95])
+
+    expect(selectCategory(categories, true)).toBeNull()
+    expect(selectCategory(categories, false)).toBeNull()
+
+    categories.fluency = series([80, 90])
+    categories.grammar = {
+      ...series([30, 40]),
+      points: series([30, 40]).points.map((point) => ({
+        ...point,
+        attemptId: `other-${point.attemptId}`,
+      })),
+    }
+    expect(selectCategory(categories, true)).toBeNull()
+    expect(selectCategory(categories, false)).toBeNull()
   })
 
   it('shows a current value, an accessible trend, and an explicit insufficient state', () => {
@@ -168,9 +216,7 @@ describe('progress dashboard helpers', () => {
 
   it('renders zero-attempt and legacy-only accounts as valid empty states', () => {
     const empty = aggregateV2Progress([], { now: NOW })
-    const { rerender } = render(
-      <ProgressDashboard dashboard={{ progress: empty, retryComparisons: [] }} />,
-    )
+    const { rerender } = render(<ProgressDashboard dashboard={dashboard(empty)} />)
 
     expect(screen.getByText('No practice results yet')).toBeInTheDocument()
     expect(screen.queryByText('Progress is unavailable')).not.toBeInTheDocument()
@@ -179,7 +225,7 @@ describe('progress dashboard helpers', () => {
       [progressAttempt('legacy', '2026-08-25T12:00:00.000Z', legacySectionSnapshot)],
       { now: NOW },
     )
-    rerender(<ProgressDashboard dashboard={{ progress: legacyOnly, retryComparisons: [] }} />)
+    rerender(<ProgressDashboard dashboard={dashboard(legacyOnly)} />)
 
     expect(screen.getByText('No compatible progress yet')).toBeInTheDocument()
     expect(screen.queryByText('Progress is unavailable')).not.toBeInTheDocument()
@@ -196,7 +242,7 @@ describe('progress dashboard helpers', () => {
       ],
       { now: NOW },
     )
-    render(<ProgressDashboard dashboard={{ progress, retryComparisons: [] }} />)
+    render(<ProgressDashboard dashboard={dashboard(progress)} />)
 
     expect(screen.getByText('Some trends need more data')).toBeInTheDocument()
     expect(
@@ -224,7 +270,7 @@ describe('progress dashboard helpers', () => {
     const attempts = [parent, retry]
     const progress = aggregateV2Progress(attempts, { now: NOW })
     const retryComparisons = recentRetryComparisons(attempts, { now: NOW })
-    render(<ProgressDashboard dashboard={{ progress, retryComparisons }} />)
+    render(<ProgressDashboard dashboard={dashboard(progress, { retryComparisons })} />)
 
     expect(screen.getByRole('heading', { name: 'Recent retries' })).toBeInTheDocument()
     expect(screen.getAllByText(/→/).length).toBeGreaterThan(0)
@@ -234,14 +280,32 @@ describe('progress dashboard helpers', () => {
 
   it('does not add a second main landmark inside the app layout main', () => {
     const progress = aggregateV2Progress([], { now: NOW })
-    const { container } = render(
-      <ProgressDashboard dashboard={{ progress, retryComparisons: [] }} />,
-    )
+    const { container } = render(<ProgressDashboard dashboard={dashboard(progress)} />)
     const pageSource = readFileSync('src/app/(app)/progress/page.tsx', 'utf8')
     const dashboardSource = readFileSync('src/components/progress/progress-dashboard.tsx', 'utf8')
 
     expect(container.querySelector('main')).toBeNull()
     expect(pageSource).not.toMatch(/<main\b/)
     expect(dashboardSource).not.toMatch(/<main\b/)
+  })
+
+  it('discloses when older completed responses fall outside the query window', () => {
+    const progress = aggregateV2Progress(
+      [progressAttempt('recent', '2026-08-25T12:00:00.000Z', v2Snapshot())],
+      { now: NOW },
+    )
+    render(
+      <ProgressDashboard
+        dashboard={dashboard(progress, {
+          coverage: { completedAttemptLimit: 200, truncated: true },
+        })}
+      />,
+    )
+
+    expect(
+      screen.getByText(
+        'This view uses your 200 most recent completed responses. Earlier responses are not included.',
+      ),
+    ).toBeInTheDocument()
   })
 })

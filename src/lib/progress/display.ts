@@ -6,27 +6,46 @@ import {
   type SkillCategory,
 } from '@/lib/practice/contracts'
 
-export function parseProgressMode(value: unknown): PracticeMode | undefined {
-  return typeof value === 'string' && (PRACTICE_MODES as readonly string[]).includes(value)
-    ? (value as PracticeMode)
-    : undefined
+export type ProgressModeParseResult =
+  { status: 'valid'; mode?: PracticeMode } | { status: 'invalid' }
+
+export function parseProgressMode(value: unknown): ProgressModeParseResult {
+  if (value === undefined) return { status: 'valid' }
+  if (typeof value !== 'string' || !(PRACTICE_MODES as readonly string[]).includes(value)) {
+    return { status: 'invalid' }
+  }
+  return { status: 'valid', mode: value as PracticeMode }
 }
 
 export function selectCategory(
   series: Readonly<Record<SkillCategory, ProgressSeries>>,
   descending: boolean,
 ): SkillCategory | null {
-  const ranked = SKILL_CATEGORIES.filter((category) => series[category].state === 'ready').sort(
-    (left, right) => {
-      const delta = (series[right].averageValue ?? 0) - (series[left].averageValue ?? 0)
-      return descending ? delta : -delta
-    },
-  )
+  const comparable = SKILL_CATEGORIES.map((category) => ({ category, series: series[category] }))
+  const referencePopulation = comparable[0]?.series.points.map((point) => point.attemptId) ?? []
+  if (
+    comparable.some(
+      ({ series: candidate }) =>
+        candidate.state !== 'ready' ||
+        candidate.averageValue === null ||
+        !Number.isFinite(candidate.averageValue) ||
+        candidate.valueCount !== candidate.points.length ||
+        candidate.points.length !== referencePopulation.length ||
+        candidate.points.some((point, index) => point.attemptId !== referencePopulation[index]),
+    )
+  ) {
+    return null
+  }
+
+  const ranked = comparable.sort((left, right) => {
+    const delta = (right.series.averageValue ?? 0) - (left.series.averageValue ?? 0)
+    return descending ? delta : -delta
+  })
   if (ranked.length === 0) return null
   const first = ranked[0]
   const second = ranked[1]
-  if (first && second && series[first].averageValue === series[second].averageValue) {
+  if (first && second && first.series.averageValue === second.series.averageValue) {
     return null
   }
-  return first ?? null
+  return first?.category ?? null
 }

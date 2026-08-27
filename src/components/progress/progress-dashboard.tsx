@@ -187,6 +187,13 @@ export function ProgressDashboard({
           Some saved results use a different or unavailable result format and are not included.
         </p>
       ) : null}
+
+      {dashboard.coverage.truncated ? (
+        <p className="text-muted text-xs">
+          This view uses your {dashboard.coverage.completedAttemptLimit} most recent completed
+          responses. Earlier responses are not included.
+        </p>
+      ) : null}
     </div>
   )
 }

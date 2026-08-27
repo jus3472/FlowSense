@@ -15,11 +15,14 @@ export default async function ProgressPage({
 }: {
   searchParams: Promise<{ mode?: string | string[] }>
 }) {
+  const parsed = parseProgressMode((await searchParams).mode)
+  if (parsed.status === 'invalid') redirect('/progress')
+
   const {
     data: { user },
   } = await (await createClient()).auth.getUser()
   if (!user) redirect('/login')
-  const mode = parseProgressMode((await searchParams).mode)
+  const mode = parsed.mode
   const result = await getProgressDashboardData(user.id, { now: new Date(), mode })
 
   if (result.status === 'failure') {
