@@ -114,16 +114,20 @@ describe('history query navigation', () => {
   it('validates filters and canonicalizes default parameters', () => {
     expect(parseHistoryQuery({})).toEqual({
       status: 'valid',
-      query: { metadata: 'all', score: 'all', page: 1 },
+      query: { metadata: 'all', page: 1 },
     })
     expect(parseHistoryQuery({ show: 'custom', score: 'low', page: '2' })).toEqual({
       status: 'valid',
-      query: { metadata: 'custom', score: 'low', page: 2 },
+      query: { metadata: 'custom', page: 2 },
+      canonical: true,
     })
-    expect(historyHref({ metadata: 'all', score: 'all', page: 1 })).toBe('/history')
-    expect(historyHref({ metadata: 'retry', score: 'high', page: 3 })).toBe(
-      '/history?show=retry&score=high&page=3',
-    )
+    expect(parseHistoryQuery({ score: 'high' })).toEqual({
+      status: 'valid',
+      query: { metadata: 'all', page: 1 },
+      canonical: true,
+    })
+    expect(historyHref({ metadata: 'all', page: 1 })).toBe('/history')
+    expect(historyHref({ metadata: 'retry', page: 3 })).toBe('/history?show=retry&page=3')
   })
 
   it.each([

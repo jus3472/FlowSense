@@ -96,4 +96,29 @@ describe('History score cohorts', () => {
     expect(summary.points.map((point) => point.attemptId)).toEqual(['b'])
     expect(summary).toMatchObject({ scannedCount: 2, excludedCount: 1, truncated: true })
   })
+
+  it('compares legacy snapshots across stored display modes as one score generation', () => {
+    const summary = summarizeHistoryScoreCohort(
+      [
+        {
+          ...input('null-mode', '2026-08-27T00:00:01.000Z', legacySectionSnapshot, 60),
+          practiceMode: null,
+        },
+        input('practice-mode', '2026-08-27T00:00:02.000Z', legacySectionSnapshot, 70),
+        {
+          ...input('interview-mode', '2026-08-27T00:00:03.000Z', legacySectionSnapshot, 80),
+          practiceMode: 'interview',
+        },
+      ],
+      { scanLimit: 200, truncated: false },
+    )
+
+    expect(summary.cohort).toEqual({ kind: 'legacy' })
+    expect(summary.points.map((point) => [point.attemptId, point.value])).toEqual([
+      ['null-mode', 60],
+      ['practice-mode', 70],
+      ['interview-mode', 80],
+    ])
+    expect(summary.average).toBe(70)
+  })
 })

@@ -23,6 +23,11 @@ type HistoryAttemptRow = Pick<
   | 'retry_of_attempt_id'
 >
 
+type HistoryScoreRow = Pick<
+  AttemptRow,
+  'id' | 'created_at' | 'score' | 'section_scores' | 'practice_mode'
+>
+
 export interface HistoryPageData {
   entries: HistoryEntry[]
   scoreSummary: HistoryScoreSummary
@@ -63,7 +68,7 @@ function historyEntry(row: HistoryAttemptRow): HistoryEntry {
   }
 }
 
-function scoreSummary(rows: readonly HistoryAttemptRow[], truncated: boolean) {
+function scoreSummary(rows: readonly HistoryScoreRow[], truncated: boolean) {
   return summarizeHistoryScoreCohort(
     rows.map((row) => ({
       id: row.id,
@@ -74,26 +79,6 @@ function scoreSummary(rows: readonly HistoryAttemptRow[], truncated: boolean) {
     })),
     { scanLimit: HISTORY_SCORE_SCAN_SIZE, truncated },
   )
-}
-
-function pageFromCohort(
-  rows: readonly HistoryAttemptRow[],
-  summary: HistoryScoreSummary,
-  query: HistoryQuery,
-): { entries: HistoryEntry[]; hasNext: boolean } {
-  if (summary.average === null) return { entries: [], hasNext: false }
-  const average = summary.average
-  const values = new Map(summary.points.map((point) => [point.attemptId, point.value]))
-  const filtered = rows.filter((row) => {
-    const value = values.get(row.id)
-    if (value === undefined) return false
-    return query.score === 'high' ? value >= average : value < average
-  })
-  const offset = (query.page - 1) * HISTORY_PAGE_SIZE
-  return {
-    entries: filtered.slice(offset, offset + HISTORY_PAGE_SIZE).map(historyEntry),
-    hasNext: filtered.length > offset + HISTORY_PAGE_SIZE,
-  }
 }
 
 /** Returns only a bounded diagnostic code, never database text or row contents. */
@@ -117,9 +102,7 @@ export async function loadHistoryPage(
 
   let cohortQuery = supabase
     .from('attempts')
-    .select(
-      'id, created_at, prompt_text, score, section_scores, practice_mode, prompt_source, retry_of_attempt_id',
-    )
+    .select('id, created_at, score, section_scores, practice_mode')
     .eq('user_id', userId)
     .eq('status', 'done')
   cohortQuery = applyMetadataFilter(cohortQuery, historyQuery.metadata)
@@ -139,20 +122,6 @@ export async function loadHistoryPage(
     scannedRows,
     (cohortResult.data?.length ?? 0) > HISTORY_SCORE_SCAN_SIZE,
   )
-
-  if (historyQuery.score !== 'all') {
-    const page = pageFromCohort(scannedRows, summary, historyQuery)
-    return {
-      status: 'ready',
-      data: {
-        entries: page.entries,
-        scoreSummary: summary,
-        hasAnyEntries: (existenceResult.data?.length ?? 0) > 0,
-        hasNext: page.hasNext,
-        hasPrevious: historyQuery.page > 1,
-      },
-    }
-  }
 
   const offset = (historyQuery.page - 1) * HISTORY_PAGE_SIZE
   let pageQuery = supabase

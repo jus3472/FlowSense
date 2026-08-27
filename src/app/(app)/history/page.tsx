@@ -4,7 +4,7 @@ import { HistoryList } from '@/components/history/history-list'
 import { RetryButton } from '@/components/system/retry-button'
 import { ErrorState } from '@/components/ui/error-state'
 import { focusPhrase, sanitizeFocusAreas } from '@/lib/focus-areas'
-import { parseHistoryQuery, type HistorySearchParams } from '@/lib/results/history'
+import { historyHref, parseHistoryQuery, type HistorySearchParams } from '@/lib/results/history'
 import { loadHistoryPage, safeHistoryErrorCode } from '@/lib/results/history-server'
 import { createClient } from '@/lib/supabase/server'
 
@@ -21,6 +21,7 @@ export default async function HistoryPage({
 }) {
   const parsed = parseHistoryQuery(await searchParams)
   if (parsed.status === 'invalid') redirect('/history')
+  if (parsed.canonical) redirect(historyHref(parsed.query))
   const supabase = await createClient()
   const {
     data: { user },

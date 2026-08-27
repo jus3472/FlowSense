@@ -4,7 +4,7 @@ import { decodeStoredSectionSnapshot } from '@/lib/results/snapshot'
 export type HistoryResultKind = 'legacy' | 'v2' | 'partial' | 'unsupported'
 
 export type HistoryScoreCohort =
-  | { kind: 'legacy'; mode: PracticeMode | null }
+  | { kind: 'legacy' }
   | {
       kind: 'v2'
       scoreVersion: string
@@ -94,7 +94,7 @@ function scoredCandidate(input: HistoryScoreInput): ScoredCandidate | null {
       createdAt: input.createdAt,
       value: input.score,
       time,
-      cohort: { kind: 'legacy', mode: input.practiceMode },
+      cohort: { kind: 'legacy' },
     }
   }
   return null
@@ -102,7 +102,7 @@ function scoredCandidate(input: HistoryScoreInput): ScoredCandidate | null {
 
 function cohortKey(cohort: HistoryScoreCohort): string {
   return cohort.kind === 'legacy'
-    ? JSON.stringify(['legacy', cohort.mode])
+    ? JSON.stringify(['legacy'])
     : JSON.stringify([cohort.kind, cohort.scoreVersion, cohort.rubricVersion, cohort.mode])
 }
 

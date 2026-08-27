@@ -14,7 +14,6 @@ import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { deleteAttempt } from '@/lib/results/api'
 import {
-  FILTER_LABEL,
   METADATA_FILTER_LABEL,
   DEFAULT_HISTORY_QUERY,
   groupByDay,
@@ -23,7 +22,6 @@ import {
   historyScoreLabel,
   timeLabel,
   type HistoryEntry,
-  type HistoryFilter,
   type HistoryMetadataFilter,
   type HistoryQuery,
 } from '@/lib/results/history'
@@ -31,7 +29,6 @@ import type { HistoryScoreSummary } from '@/lib/results/history-cohort'
 import { attemptHref } from '@/lib/routes'
 import { cn } from '@/lib/utils'
 
-const FILTERS: HistoryFilter[] = ['all', 'high', 'low']
 const METADATA_FILTERS: HistoryMetadataFilter[] = [
   'all',
   'general',
@@ -228,7 +225,6 @@ export function HistoryList({
               router.push(
                 historyHref({
                   metadata: event.target.value as HistoryMetadataFilter,
-                  score: query.score,
                   page: 1,
                 }),
               )
@@ -242,23 +238,6 @@ export function HistoryList({
             ))}
           </select>
         </label>
-        <div role="group" aria-label="Filter responses" className="flex flex-wrap gap-2">
-          {FILTERS.map((value) => (
-            <Link
-              key={value}
-              href={historyHref({ metadata: query.metadata, score: value, page: 1 })}
-              aria-current={query.score === value ? 'page' : undefined}
-              className={cn(
-                'inline-flex min-h-11 items-center rounded-full px-4 text-sm font-medium whitespace-nowrap transition duration-150 ease-out',
-                query.score === value
-                  ? 'bg-accent-soft text-foreground ring-accent ring-2 ring-inset'
-                  : 'bg-surface-sunken text-foreground hover:bg-accent-soft',
-              )}
-            >
-              {FILTER_LABEL[value]}
-            </Link>
-          ))}
-        </div>
       </div>
 
       {error ? (

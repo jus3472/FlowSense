@@ -244,8 +244,9 @@ describe('HistoryList', () => {
       />,
     )
 
-    expect(screen.getByRole('group', { name: 'Filter responses' })).toHaveClass('flex-wrap')
-    expect(screen.getByRole('link', { name: 'High scores' })).toHaveClass('whitespace-nowrap')
+    expect(screen.getByLabelText('Show responses')).toHaveClass('min-h-11')
+    expect(screen.queryByRole('link', { name: 'High scores' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Low scores' })).not.toBeInTheDocument()
     expect(screen.getByText(longPrompt)).toHaveClass('min-w-0', 'break-words')
     expect(screen.getByText(longPrompt).parentElement).toHaveClass('min-w-0', 'flex-1')
     expect(screen.getByText('100')).toHaveClass('w-12', 'shrink-0', 'text-right')
@@ -283,28 +284,21 @@ describe('HistoryList', () => {
     expect(screen.getByText('Conversation · Custom prompt · Retry')).toBeInTheDocument()
   })
 
-  it('combines the metadata selector with score filters and explains an empty filter', () => {
+  it('uses the metadata selector and explains an empty filter', () => {
     render(
       <HistoryList
         entries={[]}
         focusPhrase="with less filler"
         hasAnyEntries
-        query={{ metadata: 'interview', score: 'high', page: 1 }}
+        query={{ metadata: 'interview', page: 1 }}
       />,
     )
 
     expect(screen.getByLabelText('Show responses')).toHaveValue('interview')
-    expect(screen.getByRole('link', { name: 'High scores' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    )
-    expect(screen.getByRole('link', { name: 'Low scores' })).toHaveAttribute(
-      'href',
-      '/history?show=interview&score=low',
-    )
+    expect(screen.queryByRole('group', { name: 'Filter responses' })).not.toBeInTheDocument()
     expect(screen.getByText('Nothing in this filter')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Show responses'), { target: { value: 'custom' } })
-    expect(navigation.push).toHaveBeenCalledWith('/history?show=custom&score=high')
+    expect(navigation.push).toHaveBeenCalledWith('/history?show=custom')
   })
 
   it('links complete and partial rows through the canonical attempt route', () => {
@@ -339,7 +333,7 @@ describe('HistoryList', () => {
       <HistoryList
         entries={entries}
         focusPhrase="with less filler"
-        query={{ metadata: 'custom', score: 'low', page: 2 }}
+        query={{ metadata: 'custom', page: 2 }}
         hasPrevious
         hasNext
       />,
@@ -347,11 +341,11 @@ describe('HistoryList', () => {
 
     expect(screen.getByRole('link', { name: 'Newer responses' })).toHaveAttribute(
       'href',
-      '/history?show=custom&score=low',
+      '/history?show=custom',
     )
     expect(screen.getByRole('link', { name: 'Older responses' })).toHaveAttribute(
       'href',
-      '/history?show=custom&score=low&page=3',
+      '/history?show=custom&page=3',
     )
   })
 

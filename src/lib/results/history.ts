@@ -65,16 +65,8 @@ export function groupByDay(
   return [...groups.values()]
 }
 
-export type HistoryFilter = 'all' | 'high' | 'low'
-
 export type HistoryMetadataFilter =
   'all' | 'general' | 'interview' | 'presentation' | 'conversation' | 'custom' | 'retry'
-
-export const FILTER_LABEL: Record<HistoryFilter, string> = {
-  all: 'All',
-  high: 'High scores',
-  low: 'Low scores',
-}
 
 export const METADATA_FILTER_LABEL: Record<HistoryMetadataFilter, string> = {
   all: 'All responses',
@@ -88,19 +80,16 @@ export const METADATA_FILTER_LABEL: Record<HistoryMetadataFilter, string> = {
 
 export interface HistoryQuery {
   metadata: HistoryMetadataFilter
-  score: HistoryFilter
   page: number
 }
 
 export const DEFAULT_HISTORY_QUERY: HistoryQuery = {
   metadata: 'all',
-  score: 'all',
   page: 1,
 }
 
 export type HistorySearchParams = Record<string, string | string[] | undefined>
 
-const HISTORY_FILTERS: readonly HistoryFilter[] = ['all', 'high', 'low']
 const HISTORY_METADATA_FILTERS: readonly HistoryMetadataFilter[] = [
   'all',
   'general',
@@ -117,15 +106,15 @@ function singular(value: string | string[] | undefined): string | undefined {
 
 export function parseHistoryQuery(
   params: HistorySearchParams,
-): { status: 'valid'; query: HistoryQuery } | { status: 'invalid' } {
+): { status: 'valid'; query: HistoryQuery; canonical?: true } | { status: 'invalid' } {
   if (Array.isArray(params.show) || Array.isArray(params.score) || Array.isArray(params.page))
     return { status: 'invalid' }
   const metadata = singular(params.show) ?? DEFAULT_HISTORY_QUERY.metadata
-  const score = singular(params.score) ?? DEFAULT_HISTORY_QUERY.score
+  const obsoleteScore = singular(params.score)
   const rawPage = singular(params.page)
   if (
     !HISTORY_METADATA_FILTERS.includes(metadata as HistoryMetadataFilter) ||
-    !HISTORY_FILTERS.includes(score as HistoryFilter) ||
+    (obsoleteScore !== undefined && !['all', 'high', 'low'].includes(obsoleteScore)) ||
     (rawPage !== undefined && !/^[1-9]\d{0,4}$/.test(rawPage))
   )
     return { status: 'invalid' }
@@ -133,16 +122,15 @@ export function parseHistoryQuery(
     status: 'valid',
     query: {
       metadata: metadata as HistoryMetadataFilter,
-      score: score as HistoryFilter,
       page: rawPage ? Number(rawPage) : DEFAULT_HISTORY_QUERY.page,
     },
+    ...(obsoleteScore !== undefined ? { canonical: true as const } : {}),
   }
 }
 
 export function historyHref(query: HistoryQuery): Route {
   const params = new URLSearchParams()
   if (query.metadata !== DEFAULT_HISTORY_QUERY.metadata) params.set('show', query.metadata)
-  if (query.score !== DEFAULT_HISTORY_QUERY.score) params.set('score', query.score)
   if (query.page !== DEFAULT_HISTORY_QUERY.page) params.set('page', String(query.page))
   const suffix = params.toString()
   return (suffix ? `/history?${suffix}` : '/history') as Route

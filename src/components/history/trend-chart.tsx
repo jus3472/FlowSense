@@ -12,8 +12,7 @@ function cohortDescription(summary: HistoryScoreSummary): string {
   if (!summary.cohort || summary.points.length === 0) {
     return 'No compatible scored responses are available in this filter.'
   }
-  const mode = summary.cohort.mode
-  const label = mode === null ? 'legacy General' : MODE_LABEL[mode]
+  const label = summary.cohort.kind === 'legacy' ? 'legacy' : MODE_LABEL[summary.cohort.mode]
   return `${summary.points.length} compatible ${label} ${summary.points.length === 1 ? 'response' : 'responses'}.`
 }
 
