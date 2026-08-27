@@ -139,7 +139,20 @@ describe('attempt result reader', () => {
       legacyInput({ score: partial ? null : 100, sectionScores: v2Payload(partial) }),
     )
     expect(result.kind).toBe('v2')
-    if (result.kind === 'v2') expect(result.payload.total_earned_points).toBe(partial ? null : 100)
+    if (result.kind === 'v2') {
+      expect(result.payload.total_earned_points).toBe(partial ? null : 100)
+    }
+  })
+
+  it('uses the complete stored v2 snapshot when the legacy score column is null', () => {
+    const payload = v2Payload()
+    const result = readAttemptResult(legacyInput({ score: null, sectionScores: payload }))
+
+    expect(result.kind).toBe('v2')
+    if (result.kind === 'v2') {
+      expect(result.payload).toBe(payload)
+      expect(result.payload.total_earned_points).toBe(100)
+    }
   })
 
   it('lets a genuine legacy payload win over v2 row metadata', () => {
@@ -148,7 +161,7 @@ describe('attempt result reader', () => {
 
   it('fails malformed stored JSON safely rather than casting it as legacy', () => {
     expect(readAttemptResult(legacyInput({ metrics: { delivery: { metrics: {} } } })).kind).toBe(
-      'unsupported',
+      'malformed',
     )
   })
 
@@ -156,7 +169,7 @@ describe('attempt result reader', () => {
     expect(
       readAttemptResult(legacyInput({ sectionScores: { ...v2Payload(), version: 'v3.score.1' } }))
         .kind,
-    ).toBe('unsupported')
+    ).toBe('unsupported_version')
   })
 
   it('keeps an attempt with no stored score incomplete', () => {
@@ -188,12 +201,12 @@ describe('attempt result reader', () => {
           },
         }),
       ).kind,
-    ).toBe('unsupported')
+    ).toBe('malformed')
     expect(
       readAttemptResult(
         legacyInput({ contentResult: { ...legacyContent, extra_spans: [{ text: 1 }] } }),
       ).kind,
-    ).toBe('unsupported')
+    ).toBe('malformed')
   })
 
   it.each([42, null])('rejects a present non-object transcript block', (transcript) => {
@@ -201,7 +214,7 @@ describe('attempt result reader', () => {
       readAttemptResult(
         legacyInput({ metrics: { delivery: { metrics, statistics, pauses: [] }, transcript } }),
       ).kind,
-    ).toBe('unsupported')
+    ).toBe('malformed')
   })
 
   it('accepts valid transcript words but rejects bad timings and confidence', () => {
@@ -220,11 +233,11 @@ describe('attempt result reader', () => {
       readAttemptResult(
         legacyInput({ metrics: withWords([{ word: 'hello', start: 'now', end: 0.4 }]) }),
       ).kind,
-    ).toBe('unsupported')
+    ).toBe('malformed')
     expect(
       readAttemptResult(
         legacyInput({ metrics: withWords([{ word: 'hello', start: 0, end: 0.4, confidence: 2 }]) }),
       ).kind,
-    ).toBe('unsupported')
+    ).toBe('malformed')
   })
 })

@@ -5,7 +5,7 @@ import {
   type RetryComparison,
   type RetryComparisonRow,
 } from '@/lib/results/retry-comparison'
-import { isV2ScorePayload } from '@/lib/scoring/v2/assemble'
+import { decodeStoredSectionSnapshot } from '@/lib/results/snapshot'
 
 export interface ProgressRetryAttemptInput {
   id: string
@@ -45,21 +45,24 @@ export function recentRetryComparisons(
 
   for (const attempt of input) {
     const createdAt = Date.parse(attempt.createdAt)
+    const current = decodeStoredSectionSnapshot(attempt.sectionScores)
     if (
       !attempt.retryOfAttemptId ||
       attempt.retryOfAttemptId === attempt.id ||
       !Number.isFinite(createdAt) ||
       createdAt < recentStart ||
       createdAt > now ||
-      !isV2ScorePayload(attempt.sectionScores) ||
-      (options.mode && attempt.sectionScores.mode !== options.mode)
+      current.kind !== 'v2' ||
+      (options.mode && current.payload.mode !== options.mode)
     ) {
       continue
     }
 
     const parent = byId.get(attempt.retryOfAttemptId)
-    if (!parent || !isV2ScorePayload(parent.sectionScores)) continue
-    const comparison = compareRetryResults(attempt.sectionScores, parent.sectionScores)
+    if (!parent) continue
+    const previous = decodeStoredSectionSnapshot(parent.sectionScores)
+    if (previous.kind !== 'v2') continue
+    const comparison = compareRetryResults(current.payload, previous.payload)
     if (!comparison || comparison.rows.length === 0) continue
 
     comparisons.push({
