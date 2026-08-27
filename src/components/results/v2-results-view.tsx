@@ -8,6 +8,7 @@ import {
   formatV2Feedback,
   priorityV2Category,
   strongestV2Category,
+  v2CategoryStatusView,
   v2CategoryViews,
   v2ModeFeedback,
   v2OverallTakeaway,
@@ -78,20 +79,18 @@ export function V2ResultsView({
         {v2CategoryViews(payload).map(({ category, label, result }) => {
           const measurements = formatV2Measurements(result.measurements)
           const feedback = formatV2Feedback(result)
-          const status =
-            result.status === 'scored'
-              ? `${result.earned_points} / ${result.max_points}`
-              : result.status === 'not_checked'
-                ? 'Not checked'
-                : 'Unavailable'
+          const status = v2CategoryStatusView(result)
           return (
             <Card key={category} className="p-4">
               <details>
                 <summary className="text-foreground flex cursor-pointer list-none items-center justify-between gap-4 font-medium">
                   <span>{label}</span>
-                  <span className="numeric text-muted text-sm">{status}</span>
+                  <span className="numeric text-muted text-sm">{status.label}</span>
                 </summary>
                 <div className="mt-4 flex flex-col gap-3">
+                  {status.description ? (
+                    <p className="text-muted text-sm">{status.description}</p>
+                  ) : null}
                   {result.warnings.map((warning) => (
                     <p key={warning} className="text-muted text-sm">
                       {warning}
@@ -103,9 +102,9 @@ export function V2ResultsView({
                         <li key={measurement}>{measurement}</li>
                       ))}
                     </ul>
-                  ) : (
+                  ) : result.status === 'scored' ? (
                     <p className="text-muted text-sm">No concrete measurement is available.</p>
-                  )}
+                  ) : null}
                   {feedback.length > 0 ? (
                     <ul className="text-muted flex flex-col gap-2 text-sm">
                       {feedback.map((line) => (

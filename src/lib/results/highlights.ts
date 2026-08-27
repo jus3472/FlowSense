@@ -1,4 +1,9 @@
-import type { CheckFinding, CheckName, ExtraSpan } from '@/lib/scoring/content'
+import {
+  normalizeSpan,
+  type CheckFinding,
+  type CheckName,
+  type ExtraSpan,
+} from '@/lib/scoring/content'
 import type { FillerHit } from '@/lib/scoring/fillers'
 import type { Pause } from '@/lib/scoring/pauses'
 import type { RepeatedPhrase } from '@/lib/scoring/statistics'
@@ -76,6 +81,33 @@ const FILLER_LABEL: Record<string, string> = {
 export function collectHighlights(input: HighlightInput): Highlight[] {
   const tokens = buildTokens(input.words, input.transcript)
   const highlights: Highlight[] = []
+  const occupied: Array<{ from: number; to: number }> = []
+
+  const add = (range: { from: number; to: number }, kind: HighlightKind, label: string) => {
+    if (occupied.some((used) => range.from < used.to && range.to > used.from)) return false
+    occupied.push(range)
+    highlights.push({ ...range, kind, label })
+    return true
+  }
+
+  const allocateOne = (quote: string, kind: HighlightKind, label: string) => {
+    for (const range of findAll(input.transcript, quote)) {
+      if (add(range, kind, label)) return
+    }
+  }
+
+  const allocateOccurrences = (
+    quote: string,
+    count: number,
+    kind: HighlightKind,
+    label: string,
+  ) => {
+    let allocated = 0
+    for (const range of findAll(input.transcript, quote)) {
+      if (allocated >= count) return
+      if (add(range, kind, label)) allocated += 1
+    }
+  }
 
   for (const item of input.countedItems) {
     const kind: HighlightKind = item.category === 'false_start' ? 'false_start' : 'filler'
@@ -87,38 +119,46 @@ export function collectHighlights(input: HighlightInput): Highlight[] {
           : 'Filler'
 
     const range = rangeFor(tokens, item.token_indices)
-    if (range) highlights.push({ ...range, kind, label })
+    if (range) add(range, kind, label)
   }
 
+  const wordChoiceFindings = new Set<string>()
   for (const span of input.extraSpans) {
-    for (const range of findAll(input.transcript, span.text)) {
-      highlights.push({ ...range, kind: 'word_choice', label: `Word choice, ${span.category}` })
-    }
+    const findingKey = normalizeSpan(span.text)
+    if (!findingKey || wordChoiceFindings.has(findingKey)) continue
+    wordChoiceFindings.add(findingKey)
+    allocateOne(span.text, 'word_choice', `Word choice, ${span.category}`)
   }
 
   const wordChoice = input.checks.word_choice
   if (!wordChoice.passed && wordChoice.quote) {
-    for (const range of findAll(input.transcript, wordChoice.quote)) {
-      highlights.push({ ...range, kind: 'word_choice', label: 'Word choice' })
+    const findingKey = normalizeSpan(wordChoice.quote)
+    if (findingKey && !wordChoiceFindings.has(findingKey)) {
+      wordChoiceFindings.add(findingKey)
+      allocateOne(wordChoice.quote, 'word_choice', 'Word choice')
     }
   }
 
-  // Anchored to the phrases the mechanical half found, so every occurrence marks.
+  // Mechanical repetition evidence carries an occurrence count. A provider
+  // quote without matching mechanical evidence supports one occurrence only.
   if (!input.checks.no_repetition.passed) {
     const quoted = input.checks.no_repetition.quote
-    const phrases = quoted ? [quoted] : input.repeatedPhrases.map((phrase) => phrase.phrase)
-    for (const phrase of phrases) {
-      for (const range of findAll(input.transcript, phrase)) {
-        highlights.push({ ...range, kind: 'repetition', label: 'No repetition' })
+    if (quoted) {
+      const normalizedQuote = normalizeSpan(quoted)
+      const evidence = input.repeatedPhrases.find(
+        (phrase) => normalizeSpan(phrase.phrase) === normalizedQuote,
+      )
+      allocateOccurrences(quoted, evidence?.count ?? 1, 'repetition', 'No repetition')
+    } else {
+      for (const phrase of input.repeatedPhrases) {
+        allocateOccurrences(phrase.phrase, phrase.count, 'repetition', 'No repetition')
       }
     }
   }
 
   const explained = input.checks.explained
   if (!explained.passed && explained.quote) {
-    for (const range of findAll(input.transcript, explained.quote)) {
-      highlights.push({ ...range, kind: 'explained', label: 'Explained your reasoning' })
-    }
+    allocateOne(explained.quote, 'explained', 'Explained your reasoning')
   }
 
   return highlights.sort((a, b) => a.from - b.from || b.to - a.to)
@@ -139,10 +179,7 @@ export function mergeHighlights(highlights: readonly Highlight[], transcript: st
       continue
     }
 
-    if (highlight.from < previous.to) {
-      previous.to = Math.max(previous.to, highlight.to)
-      continue
-    }
+    if (highlight.from < previous.to) continue
 
     const between = transcript.slice(previous.to, highlight.from)
     if (previous.label === highlight.label && between.trim().length === 0) {
