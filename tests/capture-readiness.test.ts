@@ -58,6 +58,14 @@ describe('assessCaptureReadiness', () => {
     expect(assessCaptureReadiness(recording({ amplitude }))).toEqual({ ok: true })
   })
 
+  it('accepts flat nonzero quiet or unvoiced audio when pitch detection misses', () => {
+    const amplitude = Array.from({ length: 21 }, (_, index) => ({
+      t_ms: index * 50,
+      rms: 0.00002,
+    }))
+    expect(assessCaptureReadiness(recording({ amplitude, pitch: [] }))).toEqual({ ok: true })
+  })
+
   it('accepts voiced frames even when amplitude is steady', () => {
     const amplitude = Array.from({ length: 21 }, (_, index) => ({
       t_ms: index * 50,

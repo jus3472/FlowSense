@@ -111,9 +111,16 @@ export function RecordFlow({ session }: RecordFlowProps) {
   }, [])
 
   const cancelCaptureForHistoryTraversal = useCallback(() => {
+    const wasRecording = phase.name === 'recording'
     recorderRef.current?.cancel()
     releaseStream()
-  }, [releaseStream])
+    if (wasRecording && mountedRef.current) {
+      setPhase({
+        name: 'recorder-failed',
+        message: 'The recording stopped when the page changed.',
+      })
+    }
+  }, [phase.name, releaseStream])
 
   const { allowNextNavigation } = useActiveRecordingExitGuard(
     phase.name === 'recording' || phase.name === 'processing',

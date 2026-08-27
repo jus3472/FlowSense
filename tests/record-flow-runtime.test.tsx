@@ -235,7 +235,7 @@ describe('RecordFlow runtime guards', () => {
     expect(stop).toHaveBeenCalledTimes(1)
   })
 
-  it('cancels capture before an active back or forward transition completes', async () => {
+  it('cancels capture and recovers when a popstate traversal leaves the flow mounted', async () => {
     const { stream, stop } = streamWithTrack()
     runtime.getUserMedia.mockResolvedValue(stream)
     render(<RecordFlow session={session} />)
@@ -247,7 +247,7 @@ describe('RecordFlow runtime guards', () => {
     }
     window.addEventListener('popstate', laterRouterListener)
 
-    window.dispatchEvent(new PopStateEvent('popstate'))
+    act(() => window.dispatchEvent(new PopStateEvent('popstate')))
 
     window.removeEventListener('popstate', laterRouterListener)
     expect(releasedBeforeRouterListener).toBe(true)
@@ -255,6 +255,10 @@ describe('RecordFlow runtime guards', () => {
     expect(runtime.samplerStop).toHaveBeenCalledTimes(1)
     expect(runtime.samplerClose).toHaveBeenCalledTimes(1)
     expect(stop).toHaveBeenCalledTimes(1)
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The recording stopped when the page changed.',
+    )
+    expect(screen.getByRole('button', { name: 'Start over' })).toBeVisible()
   })
 
   it('keeps an immediate stop local and recoverable', async () => {

@@ -11,6 +11,7 @@ export type CaptureReadiness =
 const TOO_SHORT_MESSAGE = 'That recording was too short to process. Start again and speak first.'
 const EMPTY_AUDIO_MESSAGE = 'No usable audio was captured. Check your microphone and start again.'
 const NO_SPEECH_MESSAGE = 'No speech was detected. Check your microphone and start again.'
+const DIGITAL_SILENCE_RMS_EPSILON = 1e-8
 
 function hasValidVoicedFrame(recording: AttemptRecording): boolean {
   return recording.pitch.some(
@@ -34,7 +35,7 @@ function hasConclusiveSilentTimeline(recording: AttemptRecording): boolean {
   if (samples.length < Math.max(4, Math.floor(expectedSamples * 0.6))) return false
 
   let previousTimestamp = -1
-  const rmsValues: number[] = []
+  let digitallySilent = true
   for (const { t_ms: tMs, rms } of samples) {
     if (
       !Number.isFinite(tMs) ||
@@ -42,12 +43,12 @@ function hasConclusiveSilentTimeline(recording: AttemptRecording): boolean {
       tMs > recording.durationMs ||
       tMs < previousTimestamp ||
       !Number.isFinite(rms) ||
-      rms < 0
+      rms < -DIGITAL_SILENCE_RMS_EPSILON
     ) {
       return false
     }
     previousTimestamp = tMs
-    rmsValues.push(rms)
+    if (rms > DIGITAL_SILENCE_RMS_EPSILON) digitallySilent = false
   }
 
   const firstTimestamp = samples[0]?.t_ms ?? Number.POSITIVE_INFINITY
@@ -57,13 +58,9 @@ function hasConclusiveSilentTimeline(recording: AttemptRecording): boolean {
     return false
   }
 
-  const minimum = Math.min(...rmsValues)
-  const maximum = Math.max(...rmsValues)
-  if (maximum === 0) return true
-
-  // This is deliberately relative rather than an absolute loudness floor.
-  // Quiet speech still varies over time, while steady room tone does not.
-  return minimum > 0 && maximum / minimum < 1.08
+  // Nonzero audio is inconclusive. Pitch detection can miss whispered or
+  // unvoiced speech, and browser AGC can flatten a real response's RMS.
+  return digitallySilent
 }
 
 /**
