@@ -1,15 +1,19 @@
 const STEPS = [
   {
-    title: 'A prompt appears',
-    body: 'One everyday question. No preparation time and nothing to look up.',
+    title: 'Choose your practice',
+    body: 'Pick General Practice, Interviews, Presentations, or Conversations. Start with a library prompt or write a custom prompt.',
   },
   {
-    title: 'You answer out loud',
-    body: 'Speak for up to 60 seconds. No script and no second take.',
+    title: 'Answer out loud',
+    body: 'Speak for up to 60 seconds. The result measures this response.',
   },
   {
-    title: 'You see how you sounded',
-    body: 'A score out of 100, your words marked up, and a tighter version of your answer.',
+    title: 'Review the result',
+    body: 'See Fluency, Clarity, Vocabulary, Grammar, Structure, and Delivery with concrete evidence when it is available.',
+  },
+  {
+    title: 'Try Again',
+    body: 'Record the same prompt again when you want another take.',
   },
 ]
 

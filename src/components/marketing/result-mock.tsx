@@ -1,8 +1,4 @@
-/**
- * MOCK. Every value below is hardcoded sample content with no data source
- * behind it. The real result view arrives in a later prompt and replaces this
- * file wholesale, so nothing here should be treated as a data shape.
- */
+/** Static marketing sample. It does not read or calculate result data. */
 
 interface Segment {
   text: string
@@ -20,10 +16,7 @@ const SAMPLE_TRANSCRIPT: Segment[] = [
 
 const SAMPLE_SCORE = 74
 
-const SAMPLE_SECTIONS = [
-  { label: 'What you said', points: 38, outOf: 50 },
-  { label: 'How you sounded', points: 36, outOf: 50 },
-]
+const SAMPLE_CATEGORIES = ['Fluency', 'Clarity', 'Vocabulary', 'Grammar', 'Structure', 'Delivery']
 
 export function ResultMock() {
   return (
@@ -44,38 +37,33 @@ export function ResultMock() {
         </p>
 
         <div className="flex flex-col gap-4">
+          <p className="text-muted text-sm">Sample Interview result</p>
           <div className="flex items-baseline gap-2">
             <span className="numeric text-foreground text-2xl font-medium">{SAMPLE_SCORE}</span>
             <span className="numeric text-muted text-sm">/ 100</span>
           </div>
 
-          <dl className="flex flex-col gap-3">
-            {SAMPLE_SECTIONS.map((section) => (
-              <div key={section.label} className="flex flex-col gap-2">
-                <div className="flex items-baseline justify-between gap-4">
-                  <dt className="text-muted text-sm">{section.label}</dt>
-                  <dd className="numeric text-foreground text-sm">
-                    {section.points} / {section.outOf}
-                  </dd>
-                </div>
-                <div
-                  aria-hidden="true"
-                  className="bg-surface-sunken h-1 overflow-hidden rounded-full"
+          <div className="flex flex-col gap-3">
+            <p className="text-muted text-sm">Response categories</p>
+            <ul
+              aria-label="Sample result categories"
+              className="grid grid-cols-2 gap-3 sm:grid-cols-3"
+            >
+              {SAMPLE_CATEGORIES.map((category) => (
+                <li
+                  key={category}
+                  className="rounded-input bg-surface-sunken text-foreground px-3 py-2 text-sm"
                 >
-                  <div
-                    className="bg-accent h-full rounded-full"
-                    style={{ width: `${(section.points / section.outOf) * 100}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </dl>
+                  {category}
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       </div>
 
       <p className="text-muted text-sm">
-        A sample result. Yours uses your own words. Marked spans are where the point went soft, not
-        mistakes.
+        Your result uses your response. Marked spans point to specific evidence behind a deduction.
       </p>
     </section>
   )
