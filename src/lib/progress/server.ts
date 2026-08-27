@@ -12,9 +12,14 @@ export async function getV2Progress(
   options: ProgressAggregationOptions,
 ): Promise<ProgressAggregation> {
   const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) throw new Error('Your session ended. Log in and try again.')
   const { data, error } = await supabase
     .from('attempts')
     .select('id, created_at, section_scores')
+    .eq('user_id', user.id)
     .order('created_at', { ascending: true })
 
   if (error) throw new Error(`Progress attempts could not be loaded: ${error.message}`)
