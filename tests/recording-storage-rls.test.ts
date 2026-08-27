@@ -29,12 +29,9 @@ describe('recording storage hardening migration', () => {
     )
   })
 
-  it('removes authenticated deletion while retaining the backend boundary', () => {
-    expect(migration).toContain('revoke delete on storage.objects from authenticated')
-    expect(migration).toContain(
-      'grant select, insert, update, delete on storage.objects to service_role',
-    )
+  it('removes only the recordings delete policy without changing table-wide privileges', () => {
     expect(migration).not.toMatch(/create policy "recordings_delete_own"/)
+    expect(migration).not.toMatch(/^\s*(?:grant|revoke)\b/im)
   })
 
   it('does not add a bypass function or broaden another RLS surface', () => {

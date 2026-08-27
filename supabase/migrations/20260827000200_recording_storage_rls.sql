@@ -51,6 +51,3 @@ create policy "recordings_update_own" on storage.objects
 -- the service-role attempt deletion route remains the only mutation boundary
 -- after upload processing begins.
 drop policy if exists "recordings_delete_own" on storage.objects;
-revoke delete on storage.objects from authenticated;
-grant select, insert, update on storage.objects to authenticated;
-grant select, insert, update, delete on storage.objects to service_role;

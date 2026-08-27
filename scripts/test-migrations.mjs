@@ -216,20 +216,6 @@ async function assertAttemptSecurity(label) {
   `)
   assert(rls.rows[0]?.relrowsecurity === true, `${label}: attempts RLS must stay enabled`)
 
-  const storagePrivileges = await client.query(`
-    select privilege_type
-    from information_schema.role_table_grants
-    where table_schema = 'storage'
-      and table_name = 'objects'
-      and grantee = 'authenticated'
-    order by privilege_type
-  `)
-  assert(
-    JSON.stringify(storagePrivileges.rows.map((row) => row.privilege_type)) ===
-      '["INSERT","SELECT","UPDATE"]',
-    `${label}: authenticated storage privileges must exclude DELETE`,
-  )
-
   const storagePolicies = await client.query(`
     select policyname, cmd
     from pg_policies
@@ -434,15 +420,15 @@ async function assertAttemptSecurity(label) {
       '42501',
       `${label}: processed recording reinsert`,
     )
-    await expectPgError(
-      () =>
-        client.query(
-          `delete from storage.objects
-           where bucket_id = 'recordings' and name = $1`,
-          [ownerStoragePath],
-        ),
-      '42501',
-      `${label}: authenticated recording delete`,
+    const authenticatedDelete = await client.query(
+      `delete from storage.objects
+       where bucket_id = 'recordings' and name = $1
+       returning name`,
+      [ownerStoragePath],
+    )
+    assert(
+      authenticatedDelete.rowCount === 0,
+      `${label}: authenticated recording delete bypassed RLS`,
     )
   } finally {
     await resetRole()
