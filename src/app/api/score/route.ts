@@ -359,9 +359,6 @@ export async function POST(request: Request) {
         timeoutMs: MODEL_TIMEOUT_MS,
       }),
     })
-    if (contentError) {
-      logAttemptDiagnostic('legacy_content_check', 'content_check_not_checked', attemptId)
-    }
 
     // The rate of under removal, one line per attempt that needed help.
     if (tighten && (tighten.outcome === 'retried' || tighten.outcome === 'stripped')) {
