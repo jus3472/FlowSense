@@ -16,6 +16,8 @@
     "test:e2e:install": "playwright install chromium",
     "verify": "npm run typecheck && npm run lint && npm run test",
     "db:push": "node scripts/db-push.mjs",
+    "db:preflight": "node scripts/db-preflight.mjs",
+    "test:migrations": "node scripts/test-migrations.mjs",
     "inspect:attempts": "node scripts/inspect-attempts.mjs",
     "inspect:scores": "node scripts/inspect-scores.mjs",
     "inspect:rewrites": "node --experimental-transform-types scripts/inspect-rewrites.mjs",
