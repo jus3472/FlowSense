@@ -32,6 +32,7 @@ describe('server-owned attempt boundary', () => {
     expect(createRoute).toContain(".eq('client_request_id', payload.clientRequestId)")
     expect(createRoute).toContain(".eq('active', true)")
     expect(createRoute).toContain('retryCreationSession(payload, parent)')
+    expect(createRoute).toContain('metrics, status')
     expect(browserApi).toContain('requestIdsBySession')
     expect(browserApi).toContain('clientRequestId = requestIdForSession(session)')
     expect(createRoute.indexOf(".eq('client_request_id', payload.clientRequestId)")).toBeLessThan(
@@ -64,6 +65,18 @@ describe('server-owned attempt boundary', () => {
     expect(transcribeRoute).toContain('duration_seconds: parsed.durationSeconds')
     expect(transcribeRoute).not.toContain('DEEPGRAM_DEBUG')
     expect(transcribeRoute).not.toContain('JSON.stringify(raw)')
+  })
+
+  it('loads lifecycle status for retry entry points and reuses completed transcription', () => {
+    const recordPage = readFileSync('src/app/(app)/record/page.tsx', 'utf8')
+    const resultPage = readFileSync('src/app/(app)/attempts/[id]/page.tsx', 'utf8')
+    const transcribeRoute = readFileSync('src/app/api/transcribe/route.ts', 'utf8')
+
+    expect(recordPage).toContain('metrics, status')
+    expect(resultPage).toContain('retry_of_attempt_id, status')
+    expect(resultPage).toContain('isActiveAttemptStatus(attempt.status)')
+    expect(transcribeRoute).toContain('readStoredCompletedTranscription')
+    expect(transcribeRoute).toContain("[attempt.status],\n      'scoring'")
   })
 
   it('keeps v2 writes atomic and disputes outside stored attempt snapshots', () => {

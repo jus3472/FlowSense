@@ -9,6 +9,11 @@ import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ErrorState } from '@/components/ui/error-state'
+import {
+  isActiveAttemptStatus,
+  isRetryableAttemptStatus,
+  type AttemptStatus,
+} from '@/lib/attempts/lifecycle'
 import { logAttemptDiagnostic } from '@/lib/attempts/server'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { readAttemptResult } from '@/lib/results/attempt-result'
@@ -60,6 +65,30 @@ function resultWithAudioStatus(content: ReactNode, audioUnavailable: boolean) {
   )
 }
 
+const PROCESSING_DESCRIPTION: Record<
+  Extract<AttemptStatus, 'uploading' | 'transcribing' | 'scoring'>,
+  string
+> = {
+  uploading: 'Your recording is still being saved.',
+  transcribing: 'Your transcript is still being prepared.',
+  scoring: 'Your response is still being scored.',
+}
+
+function processingResult(promptText: string, status: keyof typeof PROCESSING_DESCRIPTION) {
+  return (
+    <div className="flex flex-col gap-8">
+      <h1 className="text-foreground text-xl font-semibold">{promptText}</h1>
+      <Card>
+        <EmptyState
+          title="Your response is processing"
+          description={`${PROCESSING_DESCRIPTION[status]} Refresh to check again.`}
+        />
+      </Card>
+      <RetryButton>Refresh result</RetryButton>
+    </div>
+  )
+}
+
 export default async function AttemptPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
@@ -74,7 +103,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     attemptResponse = await supabase
       .from('attempts')
       .select(
-        'id, prompt_text, transcript, duration_ms, audio_path, created_at, score, section_scores, metrics, content_result, retry_of_attempt_id',
+        'id, prompt_text, transcript, duration_ms, audio_path, created_at, score, section_scores, metrics, content_result, retry_of_attempt_id, status',
       )
       .eq('id', id)
       .eq('user_id', user.id)
@@ -91,6 +120,14 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
   }
 
   if (!attempt) notFound()
+
+  if (isActiveAttemptStatus(attempt.status)) {
+    return processingResult(attempt.prompt_text, attempt.status)
+  }
+  if (!isRetryableAttemptStatus(attempt.status)) {
+    logAttemptDiagnostic('load_attempt_result', 'attempt_status_invalid', attempt.id)
+    return resultLoadError()
+  }
 
   let audioUrl: string | null = null
   let audioUnavailable = false

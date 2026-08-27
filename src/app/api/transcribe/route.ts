@@ -4,6 +4,7 @@ import { validateOwnedAttemptAudioPath } from '@/lib/attempts/audio-path'
 import {
   ATTEMPT_FAILURE_CODES,
   canRunTranscription,
+  isRetryableAttemptStatus,
   terminalStatusForTimeout,
 } from '@/lib/attempts/lifecycle'
 import {
@@ -12,6 +13,7 @@ import {
   markOwnedAttemptFailure,
   transitionOwnedAttempt,
 } from '@/lib/attempts/server'
+import { readStoredCompletedTranscription } from '@/lib/attempts/transcription'
 import {
   DeepgramParseError,
   deepgramQualityMetrics,
@@ -65,15 +67,66 @@ export async function POST(request: Request) {
   }
   if (!attempt) return apiError('That attempt does not exist.', 404)
 
-  const metrics = (attempt.metrics as AttemptMetrics | null) ?? {}
-  const storedWords = metrics.transcript?.words
-  if (
-    (attempt.status === 'scoring' || attempt.status === 'done') &&
-    attempt.transcript !== null &&
-    storedWords
-  ) {
-    return NextResponse.json({ transcript: attempt.transcript, wordCount: storedWords.length })
+  const storedTranscription = readStoredCompletedTranscription(attempt.transcript, attempt.metrics)
+  if ((attempt.status === 'scoring' || attempt.status === 'done') && storedTranscription) {
+    return NextResponse.json({
+      transcript: storedTranscription.transcript,
+      wordCount: storedTranscription.words.length,
+    })
   }
+  if (
+    isRetryableAttemptStatus(attempt.status) &&
+    attempt.status !== 'done' &&
+    storedTranscription
+  ) {
+    const resumed = await transitionOwnedAttempt(
+      admin,
+      userId,
+      attemptId,
+      [attempt.status],
+      'scoring',
+    )
+    if (resumed) {
+      return NextResponse.json({
+        transcript: storedTranscription.transcript,
+        wordCount: storedTranscription.words.length,
+      })
+    }
+
+    // A concurrent retry may have won the terminal-to-scoring transition.
+    // Re-read the owned row before returning a conflict, but never join a new
+    // provider call when its completed transcript is already being scored.
+    const { data: concurrent, error: concurrentError } = await admin
+      .from('attempts')
+      .select('transcript, metrics, status')
+      .eq('id', attemptId)
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (concurrentError) {
+      logAttemptDiagnostic(
+        'reload_transcription_attempt',
+        'attempt_read_failed',
+        attemptId,
+        concurrentError,
+      )
+      return apiError('The transcript could not be resumed.', 500)
+    }
+    const concurrentTranscription = readStoredCompletedTranscription(
+      concurrent?.transcript,
+      concurrent?.metrics,
+    )
+    if (
+      concurrentTranscription &&
+      (concurrent?.status === 'scoring' || concurrent?.status === 'done')
+    ) {
+      return NextResponse.json({
+        transcript: concurrentTranscription.transcript,
+        wordCount: concurrentTranscription.words.length,
+      })
+    }
+    return apiError('That attempt could not resume scoring.', 409)
+  }
+
   if (!canRunTranscription(attempt.status)) {
     return apiError('That attempt is not ready to be transcribed.', 409)
   }
@@ -87,6 +140,8 @@ export async function POST(request: Request) {
     )
     if (!resumed) return apiError('That attempt could not resume transcription.', 409)
   }
+
+  const metrics = (attempt.metrics as AttemptMetrics | null) ?? {}
 
   const ownedAudio = validateOwnedAttemptAudioPath({
     userId,
