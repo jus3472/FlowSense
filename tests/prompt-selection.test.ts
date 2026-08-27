@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   choosePrompt,
+  choosePromptByModePriority,
   derivePromptCollections,
   filterPromptLibrary,
   parseLibraryPrompt,
@@ -31,10 +32,23 @@ function prompt(id: string): LibraryPrompt {
 }
 
 describe('prompt selection', () => {
+  it('uses ordered modes and falls back when the first has no prompt', () => {
+    const practice = prompt(FIRST_ID)
+    const presentation = { ...prompt(SECOND_ID), mode: 'presentation' as const }
+    expect(
+      choosePromptByModePriority([practice, presentation], ['interview', 'presentation']),
+    ).toBe(presentation)
+    expect(choosePromptByModePriority([practice], ['interview'])).toBe(practice)
+  })
   it('filters active library rows by mode, difficulty, and collection or category', () => {
     const rows = [
       row(),
-      row({ id: SECOND_ID, mode: 'interview', difficulty: 'advanced', collection_id: 'behavioral' }),
+      row({
+        id: SECOND_ID,
+        mode: 'interview',
+        difficulty: 'advanced',
+        collection_id: 'behavioral',
+      }),
       row({ id: THIRD_ID, difficulty: 'advanced' }),
     ]
 
@@ -53,7 +67,9 @@ describe('prompt selection', () => {
         collectionId: 'behavioral',
       },
     ])
-    expect(filterPromptLibrary(rows, { collectionId: 'storytelling', category: 'behavioral' })).toEqual([])
+    expect(
+      filterPromptLibrary(rows, { collectionId: 'storytelling', category: 'behavioral' }),
+    ).toEqual([])
   })
 
   it('derives mode-scoped, sorted collections and counts only prompts with a collection', () => {

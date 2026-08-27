@@ -10,14 +10,16 @@ import {
   isCustomPracticeMarker,
   parseCustomPracticeCookie,
 } from '@/lib/practice/custom'
-import { parseRecordPromptParam } from '@/lib/practice/navigation'
+import { parsePracticeMode, parseRecordPromptParam } from '@/lib/practice/navigation'
+import { sanitizeFocusAreas } from '@/lib/focus-areas'
 import {
   isUuid,
   parsePracticeSessionDescriptor,
   retrySessionFromAttempt,
   type PracticeSessionDescriptor,
 } from '@/lib/practice/session'
-import { getPromptById, pickPracticePrompt } from '@/lib/prompts/server'
+import { getPromptById, pickPreferredPracticePrompt } from '@/lib/prompts/server'
+import { practiceModePriority } from '@/lib/focus-areas'
 import { createClient } from '@/lib/supabase/server'
 
 export const metadata: Metadata = {
@@ -34,6 +36,7 @@ export default async function RecordPage({
     retry?: string | string[]
     prompt?: string | string[]
     custom?: string | string[]
+    mode?: string | string[]
   }>
 }) {
   const supabase = await createClient()
@@ -115,7 +118,14 @@ export default async function RecordPage({
   if (!session) {
     // Chosen on the server so the prompt reaches the browser without being
     // rendered. The record screen keeps it hidden until the countdown starts.
-    const prompt = await pickPracticePrompt()
+    const requestedMode = parsePracticeMode(typeof params.mode === 'string' ? params.mode : null)
+    const areas = sanitizeFocusAreas(
+      (await supabase.from('profiles').select('focus_areas').eq('id', user.id).maybeSingle()).data
+        ?.focus_areas ?? [],
+    )
+    const prompt = await pickPreferredPracticePrompt(
+      requestedMode ? [requestedMode] : practiceModePriority(areas),
+    )
     session = prompt
       ? parsePracticeSessionDescriptor({
           promptText: prompt.text,

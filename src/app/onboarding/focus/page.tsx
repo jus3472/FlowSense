@@ -5,7 +5,7 @@ import { sanitizeFocusAreas } from '@/lib/focus-areas'
 import { createClient } from '@/lib/supabase/server'
 
 export const metadata: Metadata = {
-  title: 'Focus areas',
+  title: 'Practice goals',
 }
 
 export default async function FocusPage({

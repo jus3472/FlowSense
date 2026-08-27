@@ -7,7 +7,8 @@ const modePage = readFileSync('src/app/(app)/practice/[mode]/page.tsx', 'utf8')
 
 describe('practice hub routes', () => {
   it('keeps the home fast start and browse path visible together', () => {
-    expect(home).toContain('href="/record"')
+    expect(home).toContain('recordHrefForPrompt(recommendedPrompt.id)')
+    expect(home).toContain('Suggested prompt')
     expect(home).toContain('Start a response')
     expect(home).toContain('href="/practice"')
     expect(home).toContain('Browse practice')
@@ -25,7 +26,7 @@ describe('practice hub routes', () => {
     expect(record).toContain('getPromptById(requestedPromptId)')
     expect(record).toContain('title="That prompt is not available"')
     expect(record.indexOf('requestedPromptId !== undefined')).toBeLessThan(
-      record.indexOf('pickPracticePrompt()'),
+      record.indexOf('pickPreferredPracticePrompt('),
     )
   })
 
