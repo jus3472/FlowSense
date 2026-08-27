@@ -6,6 +6,7 @@ import { hasCompletedOnboarding } from '@/lib/onboarding'
 import { CUSTOM_HANDOFF_HEADER, resolveCustomPracticeHandoff } from '@/lib/practice/custom-handoff'
 import { CUSTOM_SESSION_COOKIE, isCustomPracticeMarker } from '@/lib/practice/custom'
 import { isProtectedPath } from '@/lib/routes'
+import { supabaseAuthCookieOptions } from '@/lib/supabase/cookie-options'
 import type { Database } from '@/lib/types/database'
 
 /**
@@ -29,6 +30,7 @@ export async function updateSession(request: NextRequest) {
     publicEnv.supabaseUrl,
     publicEnv.supabasePublishableKey,
     {
+      cookieOptions: supabaseAuthCookieOptions(),
       cookies: {
         getAll() {
           return request.cookies.getAll()
