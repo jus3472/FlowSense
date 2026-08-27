@@ -62,6 +62,7 @@ default.
 | `npm run lint`                      | Run ESLint                                  |
 | `npm run typecheck`                 | Run strict TypeScript checking              |
 | `npm run test`                      | Run the Vitest suite                        |
+| `npm run test:e2e`                  | Run deterministic Chromium critical flows   |
 | `npm run verify`                    | Run typecheck, lint, and tests              |
 | `npm run db:push`                   | Apply migrations in `supabase/migrations`   |
 | `npm run inspect:attempts`          | Inspect stored capture timelines            |
@@ -71,6 +72,13 @@ default.
 
 `npm run inspect:rewrites -- --write` updates stored rewrites and can call the content provider
 when a retry is necessary. Run it deliberately.
+
+## Browser tests
+
+Install Chromium once with `npm run test:e2e:install`, then run `npm run test:e2e`. The suite starts
+the real Next app and a loopback-only fake Supabase service. It blocks unexpected external browser
+traffic and uses fake media, fake tokens, and deterministic provider responses. Failure traces,
+screenshots, videos, and the HTML report are written to ignored Playwright output directories.
 
 ## Scoring calibration
 
