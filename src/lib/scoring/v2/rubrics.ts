@@ -1,91 +1,45 @@
 import { PRACTICE_MODES, type PracticeMode, type SkillCategory } from '@/lib/practice/contracts'
 import { RUBRIC_VERSION, type ModeRubricConfig } from '@/lib/scoring/v2/contracts'
 
-const CORE_CHECKS = [
-  { id: 'fluency.filler_control', category: 'fluency', availability: 'available', optional: false },
-  { id: 'clarity.direct_answer', category: 'clarity', availability: 'available', optional: false },
-  {
-    id: 'vocabulary.precise_wording',
-    category: 'vocabulary',
-    availability: 'available',
-    optional: false,
-  },
-  {
-    id: 'grammar.sentence_control',
-    category: 'grammar',
-    availability: 'available',
-    optional: false,
-  },
-  {
-    id: 'structure.logical_order',
-    category: 'structure',
-    availability: 'available',
-    optional: false,
-  },
-  { id: 'delivery.pace', category: 'delivery', availability: 'available', optional: false },
-] as const
+const NO_EXECUTABLE_CHECKS = Object.freeze([])
 
-const MODE_CHECKS: Record<PracticeMode, ModeRubricConfig['checks'][number]> = {
-  practice: {
-    id: 'structure.prompt_coverage',
-    category: 'structure',
-    availability: 'available',
-    optional: true,
-  },
-  interview: {
-    id: 'structure.role_response',
-    category: 'structure',
-    availability: 'available',
-    optional: true,
-  },
-  presentation: {
-    id: 'delivery.audience_signposting',
-    category: 'delivery',
-    availability: 'available',
-    optional: true,
-  },
-  conversation: {
-    id: 'fluency.turn_taking',
-    category: 'fluency',
-    availability: 'unavailable',
-    optional: true,
-  },
+function category(weight: number) {
+  return Object.freeze({
+    availability: 'available' as const,
+    weight,
+    check_ids: NO_EXECUTABLE_CHECKS,
+  })
 }
 
-function category(weight: number, checkIds: readonly string[]) {
-  return { availability: 'available' as const, weight, check_ids: checkIds }
-}
-
-function categories(
-  weights: Readonly<Record<SkillCategory, number>>,
-  modeCheck: ModeRubricConfig['checks'][number],
-) {
-  const allChecks = [...CORE_CHECKS, modeCheck]
-  return Object.fromEntries(
-    (Object.keys(weights) as SkillCategory[]).map((name) => [
-      name,
-      category(
-        weights[name],
-        allChecks.filter((check) => check.category === name).map((check) => check.id),
-      ),
-    ]),
-  ) as ModeRubricConfig['categories']
+function categories(weights: Readonly<Record<SkillCategory, number>>) {
+  return Object.freeze({
+    fluency: category(weights.fluency),
+    clarity: category(weights.clarity),
+    vocabulary: category(weights.vocabulary),
+    grammar: category(weights.grammar),
+    structure: category(weights.structure),
+    delivery: category(weights.delivery),
+  }) satisfies ModeRubricConfig['categories']
 }
 
 function rubric(
   mode: PracticeMode,
   weights: Readonly<Record<SkillCategory, number>>,
 ): ModeRubricConfig {
-  const modeCheck = MODE_CHECKS[mode]
-  return {
+  return Object.freeze({
     version: RUBRIC_VERSION,
     mode,
-    categories: categories(weights, modeCheck),
-    checks: [...CORE_CHECKS, modeCheck],
-  }
+    categories: categories(weights),
+    checks: NO_EXECUTABLE_CHECKS,
+  })
 }
 
-export const MODE_RUBRICS: Readonly<Record<PracticeMode, ModeRubricConfig>> = {
+/**
+ * The v2.score.1 evaluators are invoked as category modules, not through named
+ * rubric checks. Executable check metadata is therefore intentionally empty.
+ * Adding configuration-driven checks requires a new immutable version pair.
+ */
+export const MODE_RUBRICS: Readonly<Record<PracticeMode, ModeRubricConfig>> = Object.freeze({
   practice: rubric('practice', {
     fluency: 22,
     clarity: 20,
@@ -118,9 +72,9 @@ export const MODE_RUBRICS: Readonly<Record<PracticeMode, ModeRubricConfig>> = {
     structure: 14,
     delivery: 16,
   }),
-}
+})
 
-/** Keeps callers from depending on the storage shape of the rubric collection. */
+/** Current-score convenience only. Historical readers must resolve the stored version pair. */
 export function rubricFor(mode: PracticeMode): ModeRubricConfig {
   return MODE_RUBRICS[mode]
 }

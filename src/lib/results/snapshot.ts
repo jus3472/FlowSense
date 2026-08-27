@@ -1,11 +1,7 @@
 import { CHECK_NAMES } from '@/lib/scoring/content'
 import { DELIVERY_POINTS } from '@/lib/scoring/mechanical'
-import {
-  isV2ScorePayload,
-  V2_SCORE_PAYLOAD_VERSION,
-  type V2ScorePayload,
-} from '@/lib/scoring/v2/assemble'
-import { RUBRIC_VERSION } from '@/lib/scoring/v2/contracts'
+import { isV2ScorePayload, type V2ScorePayload } from '@/lib/scoring/v2/assemble'
+import { supportsScoringDefinition } from '@/lib/scoring/v2/registry'
 
 export interface LegacySectionSnapshot {
   content: {
@@ -88,7 +84,7 @@ export function decodeStoredSectionSnapshot(value: unknown): StoredSectionSnapsh
     }
     const scoreVersion = value.version
     const rubricVersion = value.rubric_version
-    if (scoreVersion !== V2_SCORE_PAYLOAD_VERSION || rubricVersion !== RUBRIC_VERSION) {
+    if (!supportsScoringDefinition(scoreVersion, rubricVersion)) {
       return { kind: 'unsupported_version', scoreVersion, rubricVersion }
     }
     return isV2ScorePayload(value) ? { kind: 'v2', payload: value } : { kind: 'malformed' }
