@@ -21,6 +21,8 @@ type HistoryAttemptRow = Pick<
   | 'practice_mode'
   | 'prompt_source'
   | 'retry_of_attempt_id'
+  | 'status'
+  | 'failure_code'
 >
 
 type HistoryScoreRow = Pick<
@@ -55,7 +57,14 @@ function applyMetadataFilter<T>(query: T, metadata: HistoryMetadataFilter): T {
 }
 
 function historyEntry(row: HistoryAttemptRow): HistoryEntry {
-  const stored = readHistoryStoredResult(row.section_scores, row.score)
+  const stored =
+    row.status === 'done'
+      ? readHistoryStoredResult(row.section_scores, row.score)
+      : { score: null, kind: undefined }
+  const terminalStatus =
+    row.status === 'done' || row.status === 'failed' || row.status === 'timed_out'
+      ? row.status
+      : undefined
   return {
     id: row.id,
     createdAt: row.created_at,
@@ -65,6 +74,8 @@ function historyEntry(row: HistoryAttemptRow): HistoryEntry {
     practiceMode: row.practice_mode,
     promptSource: row.prompt_source,
     retryOfAttemptId: row.retry_of_attempt_id,
+    ...(terminalStatus ? { status: terminalStatus } : {}),
+    failureCode: row.failure_code,
   }
 }
 
@@ -97,7 +108,7 @@ export async function loadHistoryPage(
     .from('attempts')
     .select('id')
     .eq('user_id', userId)
-    .eq('status', 'done')
+    .in('status', ['done', 'failed', 'timed_out'])
     .limit(1)
 
   let cohortQuery = supabase
@@ -127,10 +138,10 @@ export async function loadHistoryPage(
   let pageQuery = supabase
     .from('attempts')
     .select(
-      'id, created_at, prompt_text, score, section_scores, practice_mode, prompt_source, retry_of_attempt_id',
+      'id, created_at, prompt_text, score, section_scores, practice_mode, prompt_source, retry_of_attempt_id, status, failure_code',
     )
     .eq('user_id', userId)
-    .eq('status', 'done')
+    .in('status', ['done', 'failed', 'timed_out'])
   pageQuery = applyMetadataFilter(pageQuery, historyQuery.metadata)
   const pageResult = await pageQuery
     .order('created_at', { ascending: false })

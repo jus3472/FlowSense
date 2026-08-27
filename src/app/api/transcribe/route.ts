@@ -27,14 +27,12 @@ import {
 } from '@/lib/deepgram/request'
 import { deepgramApiKey } from '@/lib/env/server'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
+import { TRANSCRIPTION_PROVIDER_TIMEOUT_MS } from '@/lib/recording/timeouts'
 import { isUuid } from '@/lib/practice/session'
 import type { AttemptMetrics } from '@/lib/types/metrics'
 
 /** Deepgram on 60 seconds of audio finishes in a few seconds. This is headroom. */
 export const maxDuration = 60
-
-/** Leaves room to answer before the browser's own 30 second abort fires. */
-const DEEPGRAM_TIMEOUT_MS = 25_000
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -57,7 +55,7 @@ export async function POST(request: Request) {
 
   const { data: attempt, error: readError } = await admin
     .from('attempts')
-    .select('id, audio_path, metrics, transcript, status')
+    .select('id, audio_path, metrics, transcript, status, failure_code')
     .eq('id', attemptId)
     .eq('user_id', userId)
     .maybeSingle()
@@ -66,6 +64,12 @@ export async function POST(request: Request) {
     return apiError('The transcript could not be made.', 500)
   }
   if (!attempt) return apiError('That attempt does not exist.', 404)
+  if (
+    (attempt.status === 'failed' || attempt.status === 'timed_out') &&
+    attempt.failure_code === ATTEMPT_FAILURE_CODES.clientUploadAbandoned
+  ) {
+    return apiError('That recording was not saved and cannot be transcribed.', 409)
+  }
 
   const storedTranscription = readStoredCompletedTranscription(attempt.transcript, attempt.metrics)
   if ((attempt.status === 'scoring' || attempt.status === 'done') && storedTranscription) {
@@ -189,7 +193,7 @@ export async function POST(request: Request) {
 
   const contentType = ownedAudio.mimeType
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), DEEPGRAM_TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), TRANSCRIPTION_PROVIDER_TIMEOUT_MS)
   const url = buildDeepgramUrl()
   console.info('[transcribe] request', {
     attemptId,
@@ -199,7 +203,8 @@ export async function POST(request: Request) {
     audioBytes: audio.size,
   })
 
-  let response: Response
+  let response: Response | null = null
+  let raw: unknown
   try {
     response = await fetch(url, {
       method: 'POST',
@@ -210,12 +215,41 @@ export async function POST(request: Request) {
       body: await audio.arrayBuffer(),
       signal: controller.signal,
     })
+
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined)
+      logAttemptDiagnostic(
+        'transcription_provider_response',
+        ATTEMPT_FAILURE_CODES.transcriptionRejected,
+        attemptId,
+      )
+      await markOwnedAttemptFailure(
+        admin,
+        userId,
+        attemptId,
+        ['transcribing'],
+        'failed',
+        ATTEMPT_FAILURE_CODES.transcriptionRejected,
+      )
+      return apiError('The transcript could not be made.', 502)
+    }
+
+    // Keep the provider deadline active until the response body has actually
+    // been consumed. Fetch resolves as soon as headers arrive.
+    raw = await response.json()
   } catch (error) {
     const timedOut = controller.signal.aborted
     const failureCode = timedOut
       ? ATTEMPT_FAILURE_CODES.transcriptionTimeout
-      : ATTEMPT_FAILURE_CODES.transcriptionUnavailable
-    logAttemptDiagnostic('call_transcription_provider', failureCode, attemptId, error)
+      : response
+        ? ATTEMPT_FAILURE_CODES.transcriptionInvalidResponse
+        : ATTEMPT_FAILURE_CODES.transcriptionUnavailable
+    logAttemptDiagnostic(
+      response ? 'parse_transcription_json' : 'call_transcription_provider',
+      failureCode,
+      attemptId,
+      error,
+    )
     await markOwnedAttemptFailure(
       admin,
       userId,
@@ -230,45 +264,6 @@ export async function POST(request: Request) {
     )
   } finally {
     clearTimeout(timer)
-  }
-
-  if (!response.ok) {
-    await response.body?.cancel().catch(() => undefined)
-    logAttemptDiagnostic(
-      'transcription_provider_response',
-      ATTEMPT_FAILURE_CODES.transcriptionRejected,
-      attemptId,
-    )
-    await markOwnedAttemptFailure(
-      admin,
-      userId,
-      attemptId,
-      ['transcribing'],
-      'failed',
-      ATTEMPT_FAILURE_CODES.transcriptionRejected,
-    )
-    return apiError('The transcript could not be made.', 502)
-  }
-
-  let raw: unknown
-  try {
-    raw = await response.json()
-  } catch (error) {
-    logAttemptDiagnostic(
-      'parse_transcription_json',
-      ATTEMPT_FAILURE_CODES.transcriptionInvalidResponse,
-      attemptId,
-      error,
-    )
-    await markOwnedAttemptFailure(
-      admin,
-      userId,
-      attemptId,
-      ['transcribing'],
-      'failed',
-      ATTEMPT_FAILURE_CODES.transcriptionInvalidResponse,
-    )
-    return apiError('The transcript could not be made.', 502)
   }
 
   let parsed

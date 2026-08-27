@@ -1,4 +1,5 @@
 import type { Route } from 'next'
+import { ATTEMPT_FAILURE_CODES, type AttemptStatus } from '@/lib/attempts/lifecycle'
 import { dayKey } from '@/lib/streak'
 import type { PracticeMode, PromptSource } from '@/lib/practice/contracts'
 import type { HistoryResultKind } from '@/lib/results/history-cohort'
@@ -12,6 +13,8 @@ export interface HistoryEntry {
   practiceMode?: PracticeMode | null
   promptSource?: PromptSource | null
   retryOfAttemptId?: string | null
+  status?: Extract<AttemptStatus, 'done' | 'failed' | 'timed_out'>
+  failureCode?: string | null
 }
 
 export interface HistoryGroup {
@@ -160,10 +163,18 @@ export function historyContext(entry: HistoryEntry): string[] {
     ...(typeof entry.retryOfAttemptId === 'string' ? ['Retry'] : []),
     ...(entry.resultKind === 'unsupported' ? ['Unsupported result'] : []),
     ...(entry.resultKind === 'partial' ? ['Partial result'] : []),
+    ...(entry.failureCode === ATTEMPT_FAILURE_CODES.clientUploadAbandoned
+      ? ['Unfinished recording']
+      : entry.status === 'failed'
+        ? ['Processing failed']
+        : entry.status === 'timed_out'
+          ? ['Processing timed out']
+          : []),
   ]
 }
 
 export function historyScoreLabel(entry: HistoryEntry): string {
+  if (entry.status === 'failed' || entry.status === 'timed_out') return 'Not scored'
   if (entry.resultKind === 'unsupported') return 'Unsupported'
   if (entry.score === null) return 'Overall unavailable'
   return String(entry.score)

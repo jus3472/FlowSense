@@ -4,6 +4,7 @@ import { StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RecordFlow } from '@/components/record/record-flow'
+import { RequestTimeoutError } from '@/lib/net/fetch-with-timeout'
 import type { PracticeSessionDescriptor } from '@/lib/practice/session'
 import { MICROPHONE_ACQUISITION_TIMEOUT_MS } from '@/lib/recording/microphone'
 
@@ -11,8 +12,10 @@ const NativeURL = URL
 
 const runtime = vi.hoisted(() => ({
   routerReplace: vi.fn(),
+  abandonUploadingAttempt: vi.fn(),
   createAttempt: vi.fn(),
   createAttemptForSession: vi.fn(),
+  persistAttemptFailure: vi.fn(),
   uploadAudio: vi.fn(),
   saveRecording: vi.fn(),
   transcribeAttempt: vi.fn(),
@@ -30,8 +33,10 @@ vi.mock('next/navigation', () => ({
 }))
 
 vi.mock('@/lib/recording/api', () => ({
+  abandonUploadingAttempt: runtime.abandonUploadingAttempt,
   createAttempt: runtime.createAttempt,
   createAttemptForSession: runtime.createAttemptForSession,
+  persistAttemptFailure: runtime.persistAttemptFailure,
   uploadAudio: runtime.uploadAudio,
   saveRecording: runtime.saveRecording,
   transcribeAttempt: runtime.transcribeAttempt,
@@ -129,6 +134,17 @@ async function reachCountdown() {
   await screen.findByRole('button', { name: 'Finish countdown' })
 }
 
+async function recordValidResponse() {
+  await reachCountdown()
+  fireEvent.click(screen.getByRole('button', { name: 'Finish countdown' }))
+  act(() => vi.advanceTimersByTime(1_000))
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    // Let the immediately resolved mock boundaries settle inside React's act.
+    for (let index = 0; index < 10; index += 1) await Promise.resolve()
+  })
+}
+
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true })
   vi.setSystemTime(new Date('2026-08-27T12:00:00.000Z'))
@@ -147,7 +163,13 @@ beforeEach(() => {
   })
 
   runtime.createAttempt.mockResolvedValue({ attemptId: 'attempt-id', storagePath: 'path' })
-  runtime.createAttemptForSession.mockReturnValue({ payload: true })
+  runtime.createAttemptForSession.mockReturnValue({
+    ...session,
+    clientRequestId: '20000000-0000-4000-8000-000000000001',
+    durationMs: 1_000,
+    mimeType: 'audio/webm;codecs=opus',
+  })
+  runtime.persistAttemptFailure.mockResolvedValue(undefined)
   runtime.uploadAudio.mockResolvedValue(undefined)
   runtime.saveRecording.mockResolvedValue(undefined)
   runtime.transcribeAttempt.mockResolvedValue(undefined)
@@ -391,5 +413,180 @@ describe('RecordFlow runtime guards', () => {
     expect(runtime.uploadAudio.mock.invocationCallOrder[0]).toBeLessThan(
       runtime.transcribeAttempt.mock.invocationCallOrder[0] ?? 0,
     )
+  })
+
+  it('persists a client transcription failure before offering a retry', async () => {
+    const { stream } = streamWithTrack()
+    let finishPersistence: (() => void) | undefined
+    runtime.getUserMedia.mockResolvedValue(stream)
+    runtime.transcribeAttempt.mockRejectedValueOnce(new Error('The connection failed.'))
+    runtime.persistAttemptFailure.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishPersistence = resolve
+      }),
+    )
+    render(<RecordFlow session={session} />)
+
+    await recordValidResponse()
+
+    await waitFor(() =>
+      expect(runtime.persistAttemptFailure).toHaveBeenCalledWith(
+        'attempt-id',
+        'transcribing',
+        'failed',
+      ),
+    )
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+
+    await act(async () => finishPersistence?.())
+
+    expect(await screen.findByRole('button', { name: 'Try again' })).toBeEnabled()
+  })
+
+  it('persists a client scoring timeout as timed out', async () => {
+    const { stream } = streamWithTrack()
+    runtime.getUserMedia.mockResolvedValue(stream)
+    runtime.scoreAttempt.mockRejectedValueOnce(new RequestTimeoutError('Scoring your answer', 75))
+    render(<RecordFlow session={session} />)
+
+    await recordValidResponse()
+
+    await waitFor(() =>
+      expect(runtime.persistAttemptFailure).toHaveBeenCalledWith(
+        'attempt-id',
+        'scoring',
+        'timed_out',
+      ),
+    )
+    expect(await screen.findByRole('heading', { name: 'Scoring timed out' })).toBeVisible()
+  })
+
+  it('keeps an upload failure local and retries the same attempt without duplicate work', async () => {
+    const { stream } = streamWithTrack()
+    runtime.getUserMedia.mockResolvedValue(stream)
+    runtime.uploadAudio.mockRejectedValueOnce(new Error('The upload failed.'))
+    render(<RecordFlow session={session} />)
+
+    await recordValidResponse()
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }))
+
+    await waitFor(() => expect(runtime.routerReplace).toHaveBeenCalledWith('/attempts/attempt-id'))
+    expect(runtime.createAttempt).toHaveBeenCalledTimes(1)
+    expect(runtime.uploadAudio).toHaveBeenCalledTimes(2)
+    expect(runtime.saveRecording).toHaveBeenCalledTimes(1)
+    expect(runtime.persistAttemptFailure).not.toHaveBeenCalled()
+  })
+
+  it('abandons the retryable row when the user leaves after an upload failure', async () => {
+    const { stream } = streamWithTrack()
+    runtime.getUserMedia.mockResolvedValue(stream)
+    runtime.uploadAudio.mockRejectedValueOnce(new Error('The upload failed.'))
+    const view = render(<RecordFlow session={session} />)
+
+    await recordValidResponse()
+    expect(await screen.findByRole('button', { name: 'Try again' })).toBeEnabled()
+
+    view.unmount()
+
+    expect(runtime.abandonUploadingAttempt).toHaveBeenCalledWith(
+      runtime.createAttemptForSession.mock.results[0]?.value,
+      'attempt-id',
+    )
+  })
+
+  it('ignores a second retry click while one processing run is active', async () => {
+    const { stream } = streamWithTrack()
+    let finishRetry: (() => void) | undefined
+    runtime.getUserMedia.mockResolvedValue(stream)
+    runtime.transcribeAttempt
+      .mockRejectedValueOnce(new Error('The connection failed.'))
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          finishRetry = resolve
+        }),
+      )
+    render(<RecordFlow session={session} />)
+
+    await recordValidResponse()
+    const retry = await screen.findByRole('button', { name: 'Try again' })
+    act(() => {
+      retry.click()
+      retry.click()
+    })
+
+    await waitFor(() => expect(runtime.transcribeAttempt).toHaveBeenCalledTimes(2))
+    await act(async () => finishRetry?.())
+    await waitFor(() => expect(runtime.routerReplace).toHaveBeenCalledWith('/attempts/attempt-id'))
+    expect(runtime.scoreAttempt).toHaveBeenCalledTimes(1)
+  })
+
+  it('abandons a pending creation with its full idempotent payload and does not upload afterward', async () => {
+    const { stream } = streamWithTrack()
+    let finishCreation: ((attempt: { attemptId: string; storagePath: string }) => void) | undefined
+    runtime.getUserMedia.mockResolvedValue(stream)
+    runtime.createAttempt.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishCreation = resolve
+      }),
+    )
+    const view = render(<RecordFlow session={session} />)
+
+    await recordValidResponse()
+    await waitFor(() => expect(runtime.createAttempt).toHaveBeenCalledTimes(1))
+    view.unmount()
+
+    expect(runtime.abandonUploadingAttempt).toHaveBeenCalledWith(
+      runtime.createAttemptForSession.mock.results[0]?.value,
+      undefined,
+    )
+    await act(async () => finishCreation?.({ attemptId: 'attempt-id', storagePath: 'path' }))
+    expect(runtime.uploadAudio).not.toHaveBeenCalled()
+  })
+
+  it('does not start provider work when teardown happens while recording details are saving', async () => {
+    const { stream } = streamWithTrack()
+    let finishSave: (() => void) | undefined
+    runtime.getUserMedia.mockResolvedValue(stream)
+    runtime.saveRecording.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishSave = resolve
+      }),
+    )
+    const view = render(<RecordFlow session={session} />)
+
+    await recordValidResponse()
+    await waitFor(() => expect(runtime.saveRecording).toHaveBeenCalledOnce())
+    view.unmount()
+    await act(async () => finishSave?.())
+
+    expect(runtime.abandonUploadingAttempt).toHaveBeenCalledWith(
+      runtime.createAttemptForSession.mock.results[0]?.value,
+      'attempt-id',
+    )
+    expect(runtime.transcribeAttempt).not.toHaveBeenCalled()
+    expect(runtime.scoreAttempt).not.toHaveBeenCalled()
+  })
+
+  it('does not abandon an upload when pagehide is entering the back-forward cache', async () => {
+    const { stream } = streamWithTrack()
+    let finishCreation: ((attempt: { attemptId: string; storagePath: string }) => void) | undefined
+    runtime.getUserMedia.mockResolvedValue(stream)
+    runtime.createAttempt.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishCreation = resolve
+      }),
+    )
+    const view = render(<RecordFlow session={session} />)
+    await recordValidResponse()
+    await waitFor(() => expect(runtime.createAttempt).toHaveBeenCalledTimes(1))
+    const pageHide = new Event('pagehide')
+    Object.defineProperty(pageHide, 'persisted', { value: true })
+
+    window.dispatchEvent(pageHide)
+
+    expect(runtime.abandonUploadingAttempt).not.toHaveBeenCalled()
+    await act(async () => finishCreation?.({ attemptId: 'attempt-id', storagePath: 'path' }))
+    await waitFor(() => expect(runtime.routerReplace).toHaveBeenCalledWith('/attempts/attempt-id'))
+    view.unmount()
   })
 })

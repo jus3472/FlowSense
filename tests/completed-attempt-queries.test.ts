@@ -25,10 +25,11 @@ describe('completed attempt query boundaries', () => {
     expect(home).not.toContain('section_scores.not.is.null')
   })
 
-  it('requires done status for History existence, score average, and page queries', () => {
+  it('lists terminal History rows but keeps its score cohort done-only', () => {
     const history = source('src/lib/results/history-server.ts')
 
-    expect(history.match(/\.eq\('status', 'done'\)/g)).toHaveLength(3)
+    expect(history.match(/\.eq\('status', 'done'\)/g)).toHaveLength(1)
+    expect(history.match(/\.in\('status', \['done', 'failed', 'timed_out'\]\)/g)).toHaveLength(2)
     expect(history).not.toContain('score.not.is.null')
     expect(history).not.toContain('section_scores.not.is.null')
   })

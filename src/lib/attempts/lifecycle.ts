@@ -23,6 +23,12 @@ export const ATTEMPT_FAILURE_CODES = {
   scoringUnexpected: 'scoring_unexpected',
   scoringPersistenceFailed: 'scoring_persistence_failed',
   unsupportedRubricVersion: 'unsupported_rubric_version',
+  clientUploadAbandoned: 'client_upload_abandoned',
+  clientTranscriptionFailed: 'client_transcription_failed',
+  clientTranscriptionTimeout: 'client_transcription_timeout',
+  clientScoringFailed: 'client_scoring_failed',
+  clientScoringTimeout: 'client_scoring_timeout',
+  deletionInProgress: 'deletion_in_progress',
 } as const
 
 export type AttemptFailureCode = (typeof ATTEMPT_FAILURE_CODES)[keyof typeof ATTEMPT_FAILURE_CODES]

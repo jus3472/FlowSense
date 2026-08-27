@@ -5,6 +5,7 @@ import {
   groupByDay,
   historyContext,
   historyMode,
+  historyScoreLabel,
   matchesMetadataFilter,
   timeLabel,
   type HistoryEntry,
@@ -450,6 +451,28 @@ describe('history grouping', () => {
     expect(historyContext(customRetry)).toEqual(['Conversation', 'Custom prompt', 'Retry'])
     expect(matchesMetadataFilter(customRetry, 'custom')).toBe(true)
     expect(matchesMetadataFilter(customRetry, 'retry')).toBe(true)
+  })
+
+  it('distinguishes terminal failures and never exposes their stale score', () => {
+    const abandoned: HistoryEntry = {
+      id: 'abandoned',
+      createdAt: '2026-08-27T12:00:00.000Z',
+      promptText: 'Explain one decision.',
+      score: null,
+      status: 'failed',
+      failureCode: 'client_upload_abandoned',
+    }
+    const timedOut: HistoryEntry = {
+      ...abandoned,
+      id: 'timed-out',
+      status: 'timed_out',
+      failureCode: 'client_scoring_timeout',
+    }
+
+    expect(historyContext(abandoned)).toEqual(['General', 'Unfinished recording'])
+    expect(historyContext(timedOut)).toEqual(['General', 'Processing timed out'])
+    expect(historyScoreLabel({ ...abandoned, score: 99 })).toBe('Not scored')
+    expect(historyScoreLabel({ ...timedOut, score: 98 })).toBe('Not scored')
   })
 })
 

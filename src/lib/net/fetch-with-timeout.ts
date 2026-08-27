@@ -13,6 +13,24 @@ export class RequestTimeoutError extends Error {
 interface TimeoutOptions {
   label: string
   timeoutMs?: number
+  discardNonOkBody?: boolean
+}
+
+const BODYLESS_STATUS = new Set([204, 205, 304])
+
+async function bufferResponse(response: Response, discardNonOkBody: boolean): Promise<Response> {
+  let body: ArrayBuffer | null = null
+  if (!response.ok && discardNonOkBody) {
+    await response.body?.cancel()
+  } else if (response.body) {
+    body = await response.arrayBuffer()
+  }
+
+  return new Response(BODYLESS_STATUS.has(response.status) ? null : body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  })
 }
 
 /**
@@ -24,7 +42,7 @@ interface TimeoutOptions {
 export async function fetchWithTimeout(
   input: string,
   init: RequestInit,
-  { label, timeoutMs = NETWORK_TIMEOUT_MS }: TimeoutOptions,
+  { label, timeoutMs = NETWORK_TIMEOUT_MS, discardNonOkBody = false }: TimeoutOptions,
 ): Promise<Response> {
   const controller = new AbortController()
   const callerSignal = init.signal
@@ -45,9 +63,13 @@ export async function fetchWithTimeout(
       }, timeoutMs)
 
   try {
-    return await fetch(input, { ...init, signal: controller.signal })
+    const response = await fetch(input, { ...init, signal: controller.signal })
+    // Fetch settles when response headers arrive. Buffer the body before
+    // clearing the timer so a truncated or stalled body cannot wait forever.
+    return await bufferResponse(response, discardNonOkBody)
   } catch (error) {
     if (timedOut) throw new RequestTimeoutError(label, timeoutMs)
+    if (callerSignal?.aborted) throw callerSignal.reason
     throw error
   } finally {
     if (timer !== undefined) clearTimeout(timer)

@@ -2,7 +2,11 @@ import 'server-only'
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
-import type { AttemptFailureCode, AttemptStatus } from '@/lib/attempts/lifecycle'
+import {
+  ATTEMPT_FAILURE_CODES,
+  type AttemptFailureCode,
+  type AttemptStatus,
+} from '@/lib/attempts/lifecycle'
 import type { Database } from '@/lib/types/database'
 
 export type AttemptAdminClient = ReturnType<typeof createAdminClient>
@@ -41,6 +45,37 @@ export function logAttemptDiagnostic(
   })
 }
 
+export type AttemptTransitionResult = 'updated' | 'stale' | 'failure'
+
+/**
+ * Distinguishes a stale compare-and-set from a database failure. Every lifecycle
+ * transition also respects the database-visible deletion claim.
+ */
+export async function transitionOwnedAttemptDetailed(
+  admin: AttemptAdminClient,
+  userId: string,
+  attemptId: string,
+  expectedStatuses: readonly AttemptStatus[],
+  status: AttemptStatus,
+  values: Database['public']['Tables']['attempts']['Update'] = {},
+): Promise<AttemptTransitionResult> {
+  const { data, error } = await admin
+    .from('attempts')
+    .update({ ...values, status })
+    .eq('id', attemptId)
+    .eq('user_id', userId)
+    .in('status', [...expectedStatuses])
+    .or(`failure_code.is.null,failure_code.neq.${ATTEMPT_FAILURE_CODES.deletionInProgress}`)
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    logAttemptDiagnostic('status_transition', 'status_transition_failed', attemptId, error)
+    return 'failure'
+  }
+  return data === null ? 'stale' : 'updated'
+}
+
 export async function transitionOwnedAttempt(
   admin: AttemptAdminClient,
   userId: string,
@@ -49,20 +84,16 @@ export async function transitionOwnedAttempt(
   status: AttemptStatus,
   values: Database['public']['Tables']['attempts']['Update'] = {},
 ): Promise<boolean> {
-  const { data, error } = await admin
-    .from('attempts')
-    .update({ ...values, status })
-    .eq('id', attemptId)
-    .eq('user_id', userId)
-    .in('status', [...expectedStatuses])
-    .select('id')
-    .maybeSingle()
-
-  if (error) {
-    logAttemptDiagnostic('status_transition', 'status_transition_failed', attemptId, error)
-    return false
-  }
-  return data !== null
+  return (
+    (await transitionOwnedAttemptDetailed(
+      admin,
+      userId,
+      attemptId,
+      expectedStatuses,
+      status,
+      values,
+    )) === 'updated'
+  )
 }
 
 export async function markOwnedAttemptFailure(

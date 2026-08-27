@@ -53,6 +53,26 @@ export interface PipelineSteps {
   score: () => Promise<void>
 }
 
+export interface PipelineTerminalFailure {
+  state: ProcessingState & { stage: 'failed' | 'timed_out'; failedStage: WorkStage }
+  error: unknown
+}
+
+export interface PipelineOptions {
+  /** Best-effort side effect completed before the retry control is exposed. */
+  onTerminalFailure?: (failure: PipelineTerminalFailure) => Promise<void> | void
+}
+
+export function isIntentionalAbort(error: unknown): boolean {
+  return (
+    !(error instanceof RequestTimeoutError) &&
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    error.name === 'AbortError'
+  )
+}
+
 /** Stage names read as progress, step names read as actions. */
 const STEP_FOR_STAGE: Record<WorkStage, keyof PipelineSteps> = {
   uploading: 'upload',
@@ -69,6 +89,7 @@ const STEP_FOR_STAGE: Record<WorkStage, keyof PipelineSteps> = {
 export async function runProcessingPipeline(
   steps: PipelineSteps,
   onState: (state: ProcessingState) => void,
+  options: PipelineOptions = {},
 ): Promise<ProcessingState> {
   const emit = (state: ProcessingState): ProcessingState => {
     onState(state)
@@ -80,7 +101,13 @@ export async function runProcessingPipeline(
     try {
       await steps[STEP_FOR_STAGE[stage]]()
     } catch (error) {
-      return emit(terminalFor(stage, error))
+      const terminal = terminalFor(stage, error) as PipelineTerminalFailure['state']
+      try {
+        await options.onTerminalFailure?.({ state: terminal, error })
+      } catch {
+        // Failure persistence is best effort and cannot hide the original state.
+      }
+      return emit(terminal)
     }
   }
 

@@ -18,12 +18,15 @@ import { RecordingStep } from '@/components/record/recording-step'
 import { useActiveRecordingExitGuard } from '@/components/record/use-active-recording-exit-guard'
 import { Button, ButtonLink } from '@/components/ui/button'
 import {
+  abandonUploadingAttempt,
   createAttempt,
   createAttemptForSession,
+  persistAttemptFailure,
   saveRecording,
   scoreAttempt,
   transcribeAttempt,
   uploadAudio,
+  type CreateAttemptInput,
 } from '@/lib/recording/api'
 import {
   SAMPLE_INTERVAL_MS,
@@ -36,6 +39,7 @@ import { acquireMicrophone, stopMediaStream } from '@/lib/recording/microphone'
 import {
   INITIAL_PROCESSING_STATE,
   describeError,
+  isIntentionalAbort,
   runProcessingPipeline,
   type PipelineSteps,
   type ProcessingState,
@@ -88,9 +92,12 @@ export function RecordFlow({ session }: RecordFlowProps) {
   const samplerRef = useRef<AudioSampler | null>(null)
   const recorderRef = useRef<AttemptRecorder | null>(null)
   const objectUrlRef = useRef<string | null>(null)
+  const creationRef = useRef<CreateAttemptInput | null>(null)
   const attemptRef = useRef<{ attemptId: string; storagePath: string } | null>(null)
   const uploadedRef = useRef(false)
   const savedRef = useRef(false)
+  const abandonedUploadRef = useRef(false)
+  const pipelineRunningRef = useRef(false)
   const mountedRef = useRef(false)
   const requestingMicrophoneRef = useRef(false)
 
@@ -103,17 +110,25 @@ export function RecordFlow({ session }: RecordFlowProps) {
     if (stream) stopMediaStream(stream)
   }, [])
 
+  const abandonUnfinishedUpload = useCallback(() => {
+    const creation = creationRef.current
+    if (!creation || savedRef.current || abandonedUploadRef.current) return
+    abandonedUploadRef.current = true
+    abandonUploadingAttempt(creation, attemptRef.current?.attemptId)
+  }, [])
+
   const cancelCaptureForHistoryTraversal = useCallback(() => {
     const wasRecording = phase.name === 'recording'
     recorderRef.current?.cancel()
     releaseStream()
+    abandonUnfinishedUpload()
     if (wasRecording && mountedRef.current) {
       setPhase({
         name: 'recorder-failed',
         message: 'The recording stopped when the page changed.',
       })
     }
-  }, [phase.name, releaseStream])
+  }, [abandonUnfinishedUpload, phase.name, releaseStream])
 
   const { allowNextNavigation } = useActiveRecordingExitGuard(
     phase.name === 'recording' || phase.name === 'processing',
@@ -124,8 +139,14 @@ export function RecordFlow({ session }: RecordFlowProps) {
   // indicator goes out rather than staying lit on an abandoned page.
   useEffect(() => {
     mountedRef.current = true
+    const handlePageHide = (event: PageTransitionEvent) => {
+      if (!event.persisted) abandonUnfinishedUpload()
+    }
+    window.addEventListener('pagehide', handlePageHide)
     return () => {
       mountedRef.current = false
+      window.removeEventListener('pagehide', handlePageHide)
+      abandonUnfinishedUpload()
       recorderRef.current?.cancel()
       releaseStream()
       if (objectUrlRef.current) {
@@ -133,10 +154,13 @@ export function RecordFlow({ session }: RecordFlowProps) {
         objectUrlRef.current = null
       }
     }
-  }, [releaseStream])
+  }, [abandonUnfinishedUpload, releaseStream])
 
   const runPipeline = useCallback(
     async (recording: AttemptRecording) => {
+      if (pipelineRunningRef.current || abandonedUploadRef.current) return
+      pipelineRunningRef.current = true
+
       const capture: CaptureMetrics = {
         mime_type: recording.mimeType,
         started_at: recording.startedAt,
@@ -146,47 +170,75 @@ export function RecordFlow({ session }: RecordFlowProps) {
         pitch: recording.pitch,
       }
 
-      const steps: PipelineSteps = {
-        // Each part checks whether it already succeeded, so a retry resumes
-        // instead of duplicating rows or re-uploading audio that is already there.
-        upload: async () => {
-          attemptRef.current ??= await createAttempt(
-            createAttemptForSession(session, {
+      try {
+        const assertUploadContinues = () => {
+          if (!mountedRef.current || abandonedUploadRef.current) {
+            throw new DOMException('The upload stopped when the page changed.', 'AbortError')
+          }
+        }
+
+        const steps: PipelineSteps = {
+          // Each part checks whether it already succeeded, so a retry resumes
+          // instead of duplicating rows or re-uploading audio that is already there.
+          upload: async () => {
+            creationRef.current ??= createAttemptForSession(session, {
               durationMs: recording.durationMs,
               mimeType: recording.mimeType,
-            }),
-          )
-          const attempt = attemptRef.current
+            })
+            attemptRef.current ??= await createAttempt(creationRef.current)
+            assertUploadContinues()
+            const attempt = attemptRef.current
 
-          if (!uploadedRef.current) {
-            await uploadAudio(recording.blob, attempt.storagePath, recording.mimeType)
-            uploadedRef.current = true
-          }
-          if (!savedRef.current) {
-            await saveRecording(attempt.attemptId, attempt.storagePath, capture)
-            savedRef.current = true
-          }
-        },
-        transcribe: async () => {
-          const attempt = attemptRef.current
-          if (!attempt) throw new Error('The recording was not saved, so it cannot be transcribed.')
-          await transcribeAttempt(attempt.attemptId)
-        },
-        // The mechanical half is instant. The model call is the slow part, and a
-        // model outage is handled inside the route so it cannot cost points.
-        score: async () => {
-          const attempt = attemptRef.current
-          if (!attempt) throw new Error('The recording was not saved, so it cannot be scored.')
-          await scoreAttempt(attempt.attemptId)
-        },
-      }
+            if (!uploadedRef.current) {
+              await uploadAudio(recording.blob, attempt.storagePath, recording.mimeType)
+              uploadedRef.current = true
+              assertUploadContinues()
+            }
+            if (!savedRef.current) {
+              await saveRecording(attempt.attemptId, attempt.storagePath, capture)
+              savedRef.current = true
+              assertUploadContinues()
+            }
+          },
+          transcribe: async () => {
+            const attempt = attemptRef.current
+            if (!attempt) {
+              throw new Error('The recording was not saved, so it cannot be transcribed.')
+            }
+            await transcribeAttempt(attempt.attemptId)
+          },
+          // The mechanical half is instant. The model call is the slow part, and a
+          // model outage is handled inside the route so it cannot cost points.
+          score: async () => {
+            const attempt = attemptRef.current
+            if (!attempt) throw new Error('The recording was not saved, so it cannot be scored.')
+            await scoreAttempt(attempt.attemptId)
+          },
+        }
 
-      const final = await runProcessingPipeline(steps, setProcessing)
-      const attempt = attemptRef.current
-      if (final.stage === 'done' && attempt && mountedRef.current) {
-        const resultHref = `/attempts/${attempt.attemptId}` as const
-        allowNextNavigation(resultHref)
-        router.replace(resultHref)
+        const final = await runProcessingPipeline(
+          steps,
+          (state) => {
+            if (mountedRef.current) setProcessing(state)
+          },
+          {
+            onTerminalFailure: async ({ state, error }) => {
+              const attempt = attemptRef.current
+              if (!attempt || state.failedStage === 'uploading' || isIntentionalAbort(error)) {
+                return
+              }
+              await persistAttemptFailure(attempt.attemptId, state.failedStage, state.stage)
+            },
+          },
+        )
+        const attempt = attemptRef.current
+        if (final.stage === 'done' && attempt && mountedRef.current) {
+          const resultHref = `/attempts/${attempt.attemptId}` as const
+          allowNextNavigation(resultHref)
+          router.replace(resultHref)
+        }
+      } finally {
+        pipelineRunningRef.current = false
       }
     },
     [allowNextNavigation, router, session],

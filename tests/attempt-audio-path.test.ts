@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { validateOwnedAttemptAudioPath } from '@/lib/attempts/audio-path'
+import {
+  validateOwnedAttemptAudioPath,
+  validateOwnedAttemptUploadPath,
+} from '@/lib/attempts/audio-path'
 
 const USER_ID = '10000000-0000-4000-8000-000000000001'
 const OTHER_USER_ID = '10000000-0000-4000-8000-000000000099'
@@ -95,6 +98,30 @@ describe('owned attempt audio paths', () => {
         attemptId: ATTEMPT_ID,
         audioPath: STORAGE_PATH,
         metrics: {},
+      }),
+    ).toBeNull()
+  })
+
+  it('recovers only an exact immutable upload path when audio_path is absent', () => {
+    expect(
+      validateOwnedAttemptUploadPath({
+        userId: USER_ID,
+        attemptId: ATTEMPT_ID,
+        metrics: uploadMetrics(),
+      }),
+    ).toEqual({ storagePath: STORAGE_PATH, mimeType: MIME_TYPE, snapshot: 'upload' })
+    expect(
+      validateOwnedAttemptUploadPath({
+        userId: USER_ID,
+        attemptId: ATTEMPT_ID,
+        metrics: { capture: { mime_type: MIME_TYPE } },
+      }),
+    ).toBeNull()
+    expect(
+      validateOwnedAttemptUploadPath({
+        userId: USER_ID,
+        attemptId: ATTEMPT_ID,
+        metrics: uploadMetrics(`${OTHER_USER_ID}/${ATTEMPT_ID}.webm`),
       }),
     ).toBeNull()
   })

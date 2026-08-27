@@ -130,6 +130,7 @@ function attempt(overrides: Record<string, unknown> = {}) {
     content_result: null,
     retry_of_attempt_id: null,
     status: 'done',
+    failure_code: null,
     ...overrides,
   }
 }
@@ -285,6 +286,34 @@ describe('owned attempt result loading', () => {
       )
     },
   )
+
+  it('renders an abandoned upload as unfinished without signing a possibly missing object', async () => {
+    const setup = client({
+      primary: {
+        data: attempt({
+          status: 'failed',
+          failure_code: 'client_upload_abandoned',
+          audio_path: PRIVATE_PATH,
+          score: null,
+          section_scores: null,
+          content_result: null,
+        }),
+        error: null,
+      },
+    })
+    mocks.createClient.mockResolvedValue(setup.supabase)
+
+    await renderPage()
+
+    expect(screen.getByText('Recording not saved')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Try this prompt again' })).toHaveAttribute(
+      'href',
+      `/record?retry=${ATTEMPT_ID}`,
+    )
+    expect(screen.getByRole('link', { name: 'Go to History' })).toHaveAttribute('href', '/history')
+    expect(setup.createSignedUrl).not.toHaveBeenCalled()
+    expect(mocks.readAttemptResult).not.toHaveBeenCalled()
+  })
 
   it.each([
     {
