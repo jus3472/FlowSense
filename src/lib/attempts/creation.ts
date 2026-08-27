@@ -7,6 +7,7 @@ import {
 } from '@/lib/practice/session'
 import type { LibraryPrompt } from '@/lib/prompts/selection'
 import type { AttemptMetrics } from '@/lib/types/metrics'
+import { isRetryableAttemptStatus } from '@/lib/attempts/lifecycle'
 
 interface StoredCreationSnapshot {
   id: string
@@ -83,12 +84,16 @@ export function customCreationSession(
   }
 }
 
-/** Retry metadata comes from the completed owned parent, never from browser claims. */
+/** Retry metadata comes from a settled owned parent, never from browser claims. */
 export function retryCreationSession(
   requested: CreateAttemptPayload,
   parent: unknown,
 ): PracticeSessionDescriptor | null {
-  if (!isRecord(parent) || parent.status !== 'done' || !matchesRetrySession(requested, parent)) {
+  if (
+    !isRecord(parent) ||
+    !isRetryableAttemptStatus(parent.status) ||
+    !matchesRetrySession(requested, parent)
+  ) {
     return null
   }
   return retrySessionFromAttempt(parent)

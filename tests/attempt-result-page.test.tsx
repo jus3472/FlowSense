@@ -105,6 +105,7 @@ function attempt(overrides: Record<string, unknown> = {}) {
     metrics: null,
     content_result: null,
     retry_of_attempt_id: null,
+    status: 'done',
     ...overrides,
   }
 }
@@ -201,6 +202,62 @@ afterEach(() => {
 })
 
 describe('owned attempt result loading', () => {
+  it('rejects a malformed route id before creating a Supabase client or querying attempts', async () => {
+    await expect(
+      AttemptPage({ params: Promise.resolve({ id: 'not-an-attempt-id' }) }),
+    ).rejects.toBe(NOT_FOUND)
+
+    expect(mocks.notFound).toHaveBeenCalledOnce()
+    expect(mocks.createClient).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['uploading', 'Your recording is still being saved.'],
+    ['transcribing', 'Your transcript is still being prepared.'],
+    ['scoring', 'Your response is still being scored.'],
+  ])('shows a refresh-only processing state for an active %s attempt', async (status, copy) => {
+    const setup = client({ primary: { data: attempt({ status }), error: null } })
+    mocks.createClient.mockResolvedValue(setup.supabase)
+
+    await renderPage()
+
+    expect(screen.getByText('Your response is processing')).toBeInTheDocument()
+    expect(screen.getByText(`${copy} Refresh to check again.`)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /try/i })).not.toBeInTheDocument()
+    expect(mocks.readAttemptResult).not.toHaveBeenCalled()
+    expect(setup.createSignedUrl).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh result' }))
+    expect(mocks.refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['failed', 'timed_out'])(
+    'offers a new recording for a terminal %s attempt',
+    async (status) => {
+      const setup = client({
+        primary: {
+          data: attempt({
+            status,
+            score: null,
+            section_scores: null,
+            content_result: null,
+          }),
+          error: null,
+        },
+      })
+      mocks.createClient.mockResolvedValue(setup.supabase)
+      mocks.readAttemptResult.mockReturnValueOnce({ kind: 'incomplete' })
+
+      await renderPage()
+
+      expect(screen.getByText('Not scored yet')).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Try this prompt again' })).toHaveAttribute(
+        'href',
+        `/record?retry=${ATTEMPT_ID}`,
+      )
+    },
+  )
+
   it.each([
     {
       label: 'returned query error',

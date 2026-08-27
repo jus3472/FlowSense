@@ -40,6 +40,19 @@ export function isAttemptStatus(value: unknown): value is AttemptStatus {
   return typeof value === 'string' && (ATTEMPT_STATUSES as readonly string[]).includes(value)
 }
 
+/** Only settled attempts can be used as the immutable parent of a new recording. */
+export function isRetryableAttemptStatus(
+  value: unknown,
+): value is Extract<AttemptStatus, 'done' | 'failed' | 'timed_out'> {
+  return value === 'done' || value === 'failed' || value === 'timed_out'
+}
+
+export function isActiveAttemptStatus(
+  value: unknown,
+): value is Extract<AttemptStatus, 'uploading' | 'transcribing' | 'scoring'> {
+  return value === 'uploading' || value === 'transcribing' || value === 'scoring'
+}
+
 /** Mirrors the database transition constraint for route-level fail-fast checks. */
 export function canTransitionAttempt(from: AttemptStatus, to: AttemptStatus): boolean {
   return TRANSITIONS[from].includes(to)

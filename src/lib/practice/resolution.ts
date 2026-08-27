@@ -7,6 +7,7 @@ import {
   type PracticeSessionDescriptor,
 } from '@/lib/practice/session'
 import type { LibraryPrompt } from '@/lib/prompts/selection'
+import { isRetryableAttemptStatus } from '@/lib/attempts/lifecycle'
 
 type SearchParam = string | string[] | undefined
 
@@ -51,6 +52,14 @@ export async function resolveRetrySession(
   const outcome = await loadAttempt(attemptId)
   if (outcome.status === 'failure') return { status: 'failure' }
   if (outcome.status === 'empty') return { status: 'unavailable' }
+
+  if (
+    typeof outcome.data !== 'object' ||
+    outcome.data === null ||
+    !isRetryableAttemptStatus(Reflect.get(outcome.data, 'status'))
+  ) {
+    return { status: 'unavailable' }
+  }
 
   const session = retrySessionFromAttempt(outcome.data)
   return session ? { status: 'ready', session } : { status: 'unavailable' }

@@ -77,6 +77,7 @@ describe('explicit practice-session resolution', () => {
         prompt_source: 'library',
         prompt_difficulty: 'beginner',
         metrics: { practice: { target_duration_seconds: 30 } },
+        status: 'done',
       }),
     )
 
@@ -95,6 +96,46 @@ describe('explicit practice-session resolution', () => {
     expect(loadAttempt).toHaveBeenCalledOnce()
     expect(loadAttempt).toHaveBeenCalledWith(ATTEMPT_ID)
   })
+
+  it.each(['done', 'failed', 'timed_out'] as const)(
+    'allows a %s owned parent to reach the recorder',
+    async (status) => {
+      const outcome = await resolveRetrySession(ATTEMPT_ID, async () =>
+        dataReady({
+          id: ATTEMPT_ID,
+          prompt_id: null,
+          prompt_text: PROMPT.text,
+          practice_mode: 'practice',
+          prompt_source: 'library',
+          prompt_difficulty: 'beginner',
+          metrics: { practice: { target_duration_seconds: 30 } },
+          status,
+        }),
+      )
+
+      expect(outcome.status).toBe('ready')
+    },
+  )
+
+  it.each(['uploading', 'transcribing', 'scoring', 'unknown', null] as const)(
+    'blocks a %s parent before rendering the recorder',
+    async (status) => {
+      await expect(
+        resolveRetrySession(ATTEMPT_ID, async () =>
+          dataReady({
+            id: ATTEMPT_ID,
+            prompt_id: null,
+            prompt_text: PROMPT.text,
+            practice_mode: 'practice',
+            prompt_source: 'library',
+            prompt_difficulty: 'beginner',
+            metrics: { practice: { target_duration_seconds: 30 } },
+            status,
+          }),
+        ),
+      ).resolves.toEqual({ status: 'unavailable' })
+    },
+  )
 
   it('distinguishes missing direct prompts from prompt-query failures', async () => {
     await expect(resolveLibraryPromptSession(PROMPT_ID, async () => dataEmpty())).resolves.toEqual({

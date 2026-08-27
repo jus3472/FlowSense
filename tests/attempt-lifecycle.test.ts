@@ -14,7 +14,9 @@ import {
   canRunTranscription,
   canTransitionAttempt,
   classifyAttemptRubric,
+  isActiveAttemptStatus,
   isAttemptStatus,
+  isRetryableAttemptStatus,
   shouldUseV2Assembler,
 } from '@/lib/attempts/lifecycle'
 import type { CreateAttemptPayload } from '@/lib/recording/attempt-payload'
@@ -67,6 +69,16 @@ describe('attempt lifecycle contract', () => {
     expect(canRunTranscription('uploading')).toBe(false)
     expect(canRunScoring('timed_out')).toBe(true)
     expect(canRunScoring('transcribing')).toBe(false)
+  })
+
+  it('allows retry parents only after their lifecycle has settled', () => {
+    expect(['done', 'failed', 'timed_out'].every(isRetryableAttemptStatus)).toBe(true)
+    expect(['uploading', 'transcribing', 'scoring'].some(isRetryableAttemptStatus)).toBe(false)
+    expect(isRetryableAttemptStatus('complete')).toBe(false)
+    expect(isRetryableAttemptStatus(null)).toBe(false)
+
+    expect(['uploading', 'transcribing', 'scoring'].every(isActiveAttemptStatus)).toBe(true)
+    expect(['done', 'failed', 'timed_out'].some(isActiveAttemptStatus)).toBe(false)
   })
 
   it('allows only v2 or explicit legacy metadata into a scoring implementation', () => {
@@ -129,7 +141,7 @@ describe('authoritative attempt creation', () => {
     expect(customCreationSession({ ...custom, difficulty: 'advanced' })).toBeNull()
   })
 
-  it('derives retries only from a completed owned parent snapshot', () => {
+  it('derives retries only from a settled owned parent snapshot', () => {
     const requested: CreateAttemptPayload = {
       ...LIBRARY_REQUEST,
       retryOfAttemptId: ATTEMPT_ID,
@@ -148,7 +160,22 @@ describe('authoritative attempt creation', () => {
       promptText: PROMPT.text,
       retryOfAttemptId: ATTEMPT_ID,
     })
-    expect(retryCreationSession(requested, { ...parent, status: 'scoring' })).toBeNull()
+    for (const status of ['failed', 'timed_out'] as const) {
+      expect(retryCreationSession(requested, { ...parent, status })).toMatchObject({
+        promptText: PROMPT.text,
+        retryOfAttemptId: ATTEMPT_ID,
+      })
+    }
+    for (const status of ['uploading', 'transcribing', 'scoring', 'unknown'] as const) {
+      expect(retryCreationSession(requested, { ...parent, status })).toBeNull()
+    }
+    expect(
+      retryCreationSession(requested, {
+        ...parent,
+        id: '50000000-0000-4000-8000-000000000005',
+      }),
+    ).toBeNull()
+    expect(retryCreationSession(requested, null)).toBeNull()
     expect(retryCreationSession({ ...requested, mode: 'interview' }, parent)).toBeNull()
   })
 
