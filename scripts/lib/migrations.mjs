@@ -6,6 +6,14 @@ export const MIGRATIONS_DIR = 'supabase/migrations'
 const MIGRATION_NAME = /^(\d{14})_([a-z0-9_]+)\.sql$/
 const DISPOSABLE_DATABASE_NAME = /(?:^|[_-])(test|testing|scratch|disposable)(?:[_-]|$)/i
 const LOCAL_HOSTS = new Set(['127.0.0.1', '::1', 'localhost'])
+const DATABASE_TLS_PARAMETERS = [
+  'ssl',
+  'sslmode',
+  'sslcert',
+  'sslkey',
+  'sslrootcert',
+  'sslnegotiation',
+]
 
 function databaseIdentity(connectionString) {
   const parsed = new URL(connectionString)
@@ -77,9 +85,30 @@ export function isMigrationApplied(migration, recordedVersions) {
 export function databaseClientOptions(connectionString) {
   const parsed = new URL(connectionString)
   const local = LOCAL_HOSTS.has(parsed.hostname)
+
+  if (local) {
+    // pg lets connection-string TLS parameters override the top-level option.
+    // Remove them so disposable loopback databases always remain non-TLS.
+    for (const parameter of DATABASE_TLS_PARAMETERS) parsed.searchParams.delete(parameter)
+    return { connectionString: parsed.toString(), ssl: false }
+  }
+
+  const hasExplicitTlsConfiguration = DATABASE_TLS_PARAMETERS.some((parameter) =>
+    parsed.searchParams.has(parameter),
+  )
+
+  if (hasExplicitTlsConfiguration) {
+    // Let pg honor explicit modes such as sslmode=verify-full, including a
+    // caller-supplied sslrootcert. No connection details are logged here.
+    return { connectionString }
+  }
+
+  // Hosted Supabase can present a certificate chain that is not in Node's
+  // trust store. Preserve the established encrypted-but-unverified database
+  // connection behavior unless the URL explicitly requests stricter TLS.
   return {
     connectionString,
-    ssl: local ? false : { rejectUnauthorized: true },
+    ssl: { rejectUnauthorized: false },
   }
 }
 

@@ -1,12 +1,19 @@
 import { readFileSync } from 'node:fs'
+import pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import {
   applyMigration,
   assertDisposableDatabaseUrl,
   compareMigrationLedger,
+  databaseClientOptions,
   loadMigrations,
   parseMigrationName,
 } from '../scripts/lib/migrations.mjs'
+
+function resolvedSsl(connectionString: string) {
+  const client = new pg.Client(databaseClientOptions(connectionString))
+  return Reflect.get(client, 'ssl')
+}
 
 describe('migration tooling', () => {
   it('parses timestamp and full-stem migration identifiers', () => {
@@ -89,6 +96,31 @@ describe('migration tooling', () => {
           'postgresql://different-password@LOCALHOST/flowsense_migration_test?sslmode=require',
       }),
     ).toThrow('refuse to use SUPABASE_DB_URL')
+  })
+
+  it('disables TLS for loopback migration databases even when the URL requests it', () => {
+    const options = databaseClientOptions(
+      'postgresql://postgres@localhost:5432/flowsense_migration_test?sslmode=verify-full',
+    )
+
+    expect(options.ssl).toBe(false)
+    expect(new URL(options.connectionString).searchParams.has('sslmode')).toBe(false)
+    expect(resolvedSsl(options.connectionString)).toBe(false)
+  })
+
+  it('uses encrypted Supabase-compatible TLS by default without claiming CA verification', () => {
+    const ssl = resolvedSsl('postgresql://postgres@db.project.supabase.co:5432/postgres')
+
+    expect(ssl).toEqual({ rejectUnauthorized: false })
+  })
+
+  it('honors an explicit strict remote TLS mode', () => {
+    const ssl = resolvedSsl(
+      'postgresql://postgres@db.project.supabase.co:5432/postgres?sslmode=verify-full',
+    )
+
+    expect(ssl).toEqual({})
+    expect(ssl).not.toHaveProperty('rejectUnauthorized', false)
   })
 
   it('keeps the preflight executable read only', () => {
