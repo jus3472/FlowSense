@@ -8,7 +8,7 @@ export const MICROPHONE_BLOCKED_TITLE = 'Microphone access is blocked'
 const STEPS = [
   'Open the site settings from the icon at the left of the address bar.',
   'Set Microphone to Allow.',
-  'Reload this page and try again.',
+  'Return to FlowSense and choose Try again.',
 ]
 
 interface MicrophoneRecoveryProps {
@@ -26,7 +26,7 @@ export function MicrophoneRecovery({ onRetry, retrying, children }: MicrophoneRe
   return (
     <div className="flex flex-col gap-4">
       <p className="text-muted text-base">
-        Your browser is set to block the microphone for this site. You can change it in 3 steps.
+        FlowSense could not access your microphone. Allow microphone access, then try again.
       </p>
       <ol className="flex flex-col gap-3">
         {STEPS.map((line, index) => (

@@ -32,6 +32,7 @@ import {
 } from '@/lib/recording/audio-sampler'
 import { assessCaptureReadiness } from '@/lib/recording/capture-readiness'
 import { countdownSecondsFor } from '@/lib/recording/countdown'
+import { acquireMicrophone, stopMediaStream } from '@/lib/recording/microphone'
 import {
   INITIAL_PROCESSING_STATE,
   describeError,
@@ -99,15 +100,7 @@ export function RecordFlow({ session }: RecordFlowProps) {
     sampler?.close()
     const stream = streamRef.current
     streamRef.current = null
-    if (stream) {
-      for (const track of stream.getTracks()) {
-        try {
-          track.stop()
-        } catch {
-          // The browser already ended this track during teardown.
-        }
-      }
-    }
+    if (stream) stopMediaStream(stream)
   }, [])
 
   const cancelCaptureForHistoryTraversal = useCallback(() => {
@@ -249,7 +242,7 @@ export function RecordFlow({ session }: RecordFlowProps) {
 
     let stream: MediaStream
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream = await acquireMicrophone(() => navigator.mediaDevices.getUserMedia({ audio: true }))
     } catch (error) {
       if (mountedRef.current) {
         const name = error instanceof DOMException ? error.name : ''
@@ -265,7 +258,7 @@ export function RecordFlow({ session }: RecordFlowProps) {
 
     requestingMicrophoneRef.current = false
     if (!mountedRef.current) {
-      for (const track of stream.getTracks()) track.stop()
+      stopMediaStream(stream)
       return
     }
 
