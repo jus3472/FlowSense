@@ -1,4 +1,4 @@
-/** Scores over time with a quiet band at the average. No axes, no chrome. */
+/** Scores on the currently loaded history page with a quiet band at that page's average. */
 export function TrendChart({ scores, average }: { scores: number[]; average: number }) {
   if (scores.length < 2) return null
 
@@ -14,14 +14,14 @@ export function TrendChart({ scores, average }: { scores: number[]; average: num
   return (
     <div className="bg-surface rounded-card flex flex-col gap-3 p-6">
       <div className="flex items-baseline justify-between gap-4">
-        <h2 className="text-muted text-sm font-medium">Scores over time</h2>
-        <p className="numeric text-muted text-xs">average {Math.round(average)}</p>
+        <h2 className="text-muted text-sm font-medium">Scores on this page</h2>
+        <p className="numeric text-muted text-xs">page average {Math.round(average)}</p>
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         preserveAspectRatio="none"
         role="img"
-        aria-label={`Scores over time, averaging ${Math.round(average)} out of 100`}
+        aria-label={`Scores on this page, averaging ${Math.round(average)} out of 100`}
         className="h-[72px] w-full"
       >
         <rect x="0" y={bandTop} width={width} height={bandHeight} className="fill-accent-soft" />
