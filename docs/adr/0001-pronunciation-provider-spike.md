@@ -6,11 +6,13 @@ Accepted for a non-production evaluation harness only. Azure Speech Pronunciatio
 
 ## Decision
 
-Use a provider-neutral contract before any vendor adapter. The candidate adapter targets Azure Speech Pronunciation Assessment behind a server-only boundary, with no production route, credential, SDK, or scoring integration in this task.
+Use a provider-neutral contract before any vendor adapter. The guarded runtime targets Azure Speech Pronunciation Assessment behind a server-only boundary and uses the documented short-audio REST endpoint only for WAV PCM 16 kHz mono or OGG Opus recordings no longer than 30 seconds. FlowSense commonly stores WebM or MP4 and may record longer responses; those attempts remain explicitly not checked. This task adds no transcoding and no production pronunciation deductions.
+
+The initial runtime locale is conservatively limited to `en-US`. Its request uses Comprehensive dimension because the REST response exposes word error types only in that dimension, with phoneme granularity and without enabling prosody or content assessment. Aggregate dimensions returned alongside the required word evidence are ignored. Provider words are sequence-aligned to the stored reference transcript; insertions, omissions, and substitutions remain lexical outcomes rather than pronunciation findings.
 
 Intelligibility is not a provider field in the contract. Fixture expectations may state paired-audio ground truth, such as an intelligible accent case, but an adapter cannot declare a word intelligible or use that assertion as evidence.
 
-Azure is the selected target because its official documentation describes both scripted assessment with reference text and unscripted assessment without one, plus word and phoneme evidence where supported. Its Speech SDK is the expected initial integration fit; any HTTP fallback must be verified against the current official REST documentation before implementation. Azure pricing follows Speech to Text baseline pricing for accuracy, fluency, completeness, and miscue, while prosody is an add-on. Audio and reference text are sensitive response data and require a retention, region, processor, and user-consent review before live use.
+Azure is the selected target because its official documentation describes both scripted assessment with reference text and unscripted assessment without one, plus word and phoneme evidence where supported. The guarded implementation uses a directly mockable HTTP transport verified against the official short-audio REST documentation. Azure pricing follows Speech to Text baseline pricing for accuracy, fluency, completeness, and miscue, while prosody is an add-on. Audio and reference text are sensitive response data and require a retention, region, processor, and user-consent review before live use.
 
 The normalized contract keeps word and phoneme timings nullable. A future adapter must verify Azure offset and duration semantics against paired audio. Speechace documents word extents for mapping sounds to letters, not a substitute for confirmed audio timings.
 

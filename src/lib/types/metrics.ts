@@ -1,4 +1,5 @@
 import type { TranscriptWord } from '@/lib/deepgram/parse'
+import type { PronunciationEvaluation } from '@/lib/pronunciation/contracts'
 
 export interface AmplitudeSample {
   t_ms: number
@@ -48,4 +49,5 @@ export interface AttemptMetrics {
   transcript?: TranscriptMetrics
   delivery?: DeliveryBlock
   practice?: { additional_context?: string }
+  pronunciation?: PronunciationEvaluation
 }

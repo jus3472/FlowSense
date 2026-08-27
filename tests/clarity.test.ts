@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { TranscriptWord } from '@/lib/deepgram/parse'
 import { analyseClarity } from '@/lib/scoring/v2/clarity'
 import type { CaptureMetrics } from '@/lib/types/metrics'
+import type { PronunciationEvaluation } from '@/lib/pronunciation/contracts'
 import { amplitudeTimeline } from './helpers/transcript'
 
 const DURATION_MS = 8_000
@@ -47,6 +48,44 @@ function captureFor(
 }
 
 const HIGH_CONFIDENCE = Array.from({ length: 8 }, () => 0.95)
+
+function pronunciation(changes: Partial<PronunciationEvaluation> = {}): PronunciationEvaluation {
+  return {
+    contractVersion: 'v1',
+    provider: {
+      id: 'azure-speech',
+      model: 'short-audio',
+      version: 'rest-v1',
+      locale: 'en-US',
+    },
+    status: 'completed',
+    words: [
+      {
+        referenceWord: 'word0',
+        recognizedWord: 'word0',
+        startMs: 750,
+        endMs: 1_100,
+        lexicalOutcome: 'match',
+        pronunciationAccuracy: 0.72,
+        pronunciationAvailability: 'available',
+        phonemeAvailability: 'available',
+        phonemes: [{ expected: 'w', recognized: null, accuracy: 0.7, startMs: null, endMs: null }],
+        stressProsody: {
+          availability: 'not_checked',
+          stressAccuracy: null,
+          prosodyAccuracy: null,
+          detail: null,
+        },
+        warning: null,
+      },
+    ],
+    unsupportedWords: [],
+    warnings: [],
+    error: null,
+    eligibleForDeductions: false,
+    ...changes,
+  }
+}
 
 describe('v2 clarity intelligibility evaluator', () => {
   it('scores a sufficiently supported high-confidence transcript', () => {
@@ -277,5 +316,70 @@ describe('v2 clarity intelligibility evaluator', () => {
       ...result.warnings,
     ].join(' ')
     expect(copy).not.toMatch(/personality|you lack confidence|not confident/i)
+  })
+})
+
+describe('pronunciation evidence-only clarity overlay', () => {
+  it.each([
+    ['missing', undefined, 'missing'],
+    [
+      'failed',
+      pronunciation({
+        status: 'failed',
+        words: [],
+        error: { code: 'outage', message: 'Provider was unavailable.', retryable: true },
+      }),
+      'failed',
+    ],
+    ['unsupported', pronunciation({ status: 'not_checked', words: [] }), 'not_checked'],
+    ['malformed', { status: 'completed' }, 'malformed'],
+  ])('preserves the v1 decision for %s evidence', (_label, evidence, expectedStatus) => {
+    const recognizedWords = words(HIGH_CONFIDENCE)
+    const baseline = analyseClarity(recognizedWords, captureFor(recognizedWords))
+    const result = analyseClarity(recognizedWords, captureFor(recognizedWords), evidence)
+    expect({
+      availability: result.availability,
+      status: result.status,
+      component: result.component,
+      deductions: result.deductions,
+    }).toEqual({
+      availability: baseline.availability,
+      status: baseline.status,
+      component: baseline.component,
+      deductions: baseline.deductions,
+    })
+    expect(result.measurements.pronunciation_status).toBe(expectedStatus)
+  })
+
+  it('adds concrete informational counts and bounded word and sound evidence only', () => {
+    const recognizedWords = words(HIGH_CONFIDENCE)
+    const baseline = analyseClarity(recognizedWords, captureFor(recognizedWords))
+    const result = analyseClarity(recognizedWords, captureFor(recognizedWords), pronunciation())
+    expect(result.measurements).toMatchObject({
+      pronunciation_status: 'completed',
+      pronunciation_assessed_word_count: 1,
+      pronunciation_matched_word_count: 1,
+      pronunciation_phoneme_evidence_count: 1,
+    })
+    expect(result.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'azure_pronunciation',
+          quote: 'word0',
+          start: 0.75,
+          end: 1.1,
+          detail: 'Word-level sound evidence was available for "word0".',
+        }),
+        expect.objectContaining({
+          quote: 'word0',
+          detail: 'Sound evidence for "w" in "word0" was available.',
+        }),
+      ]),
+    )
+    expect(result.component).toBe(baseline.component)
+    expect(result.status).toBe(baseline.status)
+    expect(result.availability).toBe(baseline.availability)
+    expect(result.deductions).toEqual(baseline.deductions)
+    expect(JSON.stringify(result)).not.toMatch(/mispronounced|intelligible|accent|native/i)
   })
 })

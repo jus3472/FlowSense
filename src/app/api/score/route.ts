@@ -7,7 +7,9 @@ import {
   buildContentUserPrompt,
   buildRewriteRetryPrompt,
 } from '@/lib/deepseek/prompt'
-import { deepseekApiKey } from '@/lib/env/server'
+import { azureSpeechConfig, deepseekApiKey } from '@/lib/env/server'
+import { createAzurePronunciationProvider } from '@/lib/pronunciation/azure'
+import { collectPronunciationEvidence } from '@/lib/pronunciation/orchestrate'
 import { SCORE_VERSION, assembleScore } from '@/lib/scoring/assemble'
 import { notCheckedContent, type Dispute } from '@/lib/scoring/content'
 import { runContentCheck } from '@/lib/scoring/run-content'
@@ -29,6 +31,7 @@ import { evaluateFluency } from '@/lib/scoring/v2/fluency'
 import { createClient } from '@/lib/supabase/server'
 import type { TranscriptWord } from '@/lib/deepgram/parse'
 import type { AttemptMetrics } from '@/lib/types/metrics'
+import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 
 /** The model call is the slow half. Mechanical metrics take milliseconds. */
 export const maxDuration = 60
@@ -90,9 +93,10 @@ export async function POST(request: Request) {
   const { data: attempt, error: readError } = await supabase
     .from('attempts')
     .select(
-      'id, prompt_text, transcript, duration_ms, metrics, score, section_scores, content_result, practice_mode, rubric_version',
+      'id, prompt_text, audio_path, transcript, duration_ms, metrics, score, section_scores, content_result, practice_mode, rubric_version',
     )
     .eq('id', attemptId)
+    .eq('user_id', user.id)
     .maybeSingle()
 
   if (readError) return apiError(readError.message, 500)
@@ -120,13 +124,23 @@ export async function POST(request: Request) {
   }
 
   if (attempt.rubric_version === 'v2' && isPracticeMode(attempt.practice_mode)) {
+    const azureConfig = azureSpeechConfig()
+    const pronunciationPromise = collectPronunciationEvidence({
+      config: azureConfig,
+      provider: azureConfig ? createAzurePronunciationProvider(azureConfig) : null,
+      audioPath: attempt.audio_path,
+      capture,
+      transcript,
+      transcriptWords,
+      download: (path) => supabase.storage.from(RECORDINGS_BUCKET).download(path),
+    })
     let provider: V2ContentDetectorProvider
     try {
       provider = contentDetectorFromModel(createDeepSeekModel(deepseekApiKey()))
     } catch (error) {
       provider = unavailableProvider(error)
     }
-    const content = await runV2ContentEvaluation({
+    const contentPromise = runV2ContentEvaluation({
       provider,
       mode: attempt.practice_mode,
       prompt: attempt.prompt_text,
@@ -135,11 +149,12 @@ export async function POST(request: Request) {
       unreliableTranscriptSpans: unreliableSpans(transcript, transcriptWords),
       timeoutMs: MODEL_TIMEOUT_MS,
     })
+    const [pronunciation, content] = await Promise.all([pronunciationPromise, contentPromise])
     const assembled = assembleV2Score({
       mode: attempt.practice_mode,
       fluency: evaluateFluency({ capture, words: transcriptWords, transcript }),
       delivery: evaluateDelivery(capture),
-      clarity: analyseClarity(transcriptWords, capture),
+      clarity: analyseClarity(transcriptWords, capture, pronunciation),
       content,
     })
     const nextMetrics = {
@@ -149,6 +164,7 @@ export async function POST(request: Request) {
         content,
         scored_at: new Date().toISOString(),
       },
+      ...(pronunciation ? { pronunciation } : {}),
     }
     const { error: saveError } = await supabase
       .from('attempts')
@@ -159,6 +175,7 @@ export async function POST(request: Request) {
         content_result: JSON.parse(JSON.stringify(content)),
       })
       .eq('id', attemptId)
+      .eq('user_id', user.id)
     if (saveError) return apiError(`The score could not be saved: ${saveError.message}`, 500)
 
     return NextResponse.json({
