@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { RequestTimeoutError } from '@/lib/net/fetch-with-timeout'
-import { isTerminal, runProcessingPipeline, type ProcessingState } from '@/lib/recording/processing'
+import {
+  isIntentionalAbort,
+  isTerminal,
+  runProcessingPipeline,
+  type ProcessingState,
+} from '@/lib/recording/processing'
 
 function record() {
   const states: ProcessingState[] = []
@@ -123,6 +128,66 @@ describe('runProcessingPipeline', () => {
     expect(last).toBeDefined()
     expect(isTerminal(last?.stage ?? 'uploading')).toBe(true)
   })
+
+  it('awaits failure persistence before exposing the terminal retry state', async () => {
+    const { states, onState } = record()
+    let finishPersistence: (() => void) | undefined
+    const onTerminalFailure = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishPersistence = resolve
+        }),
+    )
+    const failure = new Error('The transcript could not be made.')
+    const pipeline = runProcessingPipeline(
+      {
+        upload: noop,
+        transcribe: async () => Promise.reject(failure),
+        score: noop,
+      },
+      onState,
+      { onTerminalFailure },
+    )
+
+    await vi.waitFor(() => expect(onTerminalFailure).toHaveBeenCalledOnce())
+    expect(states.map((state) => state.stage)).toEqual(['uploading', 'transcribing'])
+    expect(onTerminalFailure).toHaveBeenCalledWith({
+      state: {
+        stage: 'failed',
+        failedStage: 'transcribing',
+        message: 'The transcript could not be made.',
+      },
+      error: failure,
+    })
+
+    finishPersistence?.()
+    await expect(pipeline).resolves.toMatchObject({ stage: 'failed' })
+    expect(states.at(-1)?.stage).toBe('failed')
+  })
+
+  it('keeps the original terminal state when failure persistence also rejects', async () => {
+    const final = await runProcessingPipeline(
+      {
+        upload: noop,
+        transcribe: async () => {
+          throw new Error('Original failure.')
+        },
+        score: noop,
+      },
+      () => {},
+      {
+        onTerminalFailure: async () => {
+          throw new Error('Persistence failed.')
+        },
+      },
+    )
+
+    expect(final).toMatchObject({
+      stage: 'failed',
+      failedStage: 'transcribing',
+      message: 'Original failure.',
+    })
+  })
 })
 
 describe('isTerminal', () => {
@@ -133,5 +198,13 @@ describe('isTerminal', () => {
     expect(isTerminal('done')).toBe(true)
     expect(isTerminal('failed')).toBe(true)
     expect(isTerminal('timed_out')).toBe(true)
+  })
+})
+
+describe('isIntentionalAbort', () => {
+  it('distinguishes navigation cancellation from a timeout', () => {
+    expect(isIntentionalAbort(new DOMException('Navigation', 'AbortError'))).toBe(true)
+    expect(isIntentionalAbort(new RequestTimeoutError('Scoring your answer', 75_000))).toBe(false)
+    expect(isIntentionalAbort(new Error('Connection failed.'))).toBe(false)
   })
 })

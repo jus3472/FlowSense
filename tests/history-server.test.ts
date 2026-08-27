@@ -23,6 +23,7 @@ interface FakeAttempt {
   prompt_source: PromptSource | null
   retry_of_attempt_id: string | null
   status: AttemptStatus
+  failure_code: string | null
 }
 
 interface Operation {
@@ -42,6 +43,7 @@ function attempt(index: number, over: Partial<FakeAttempt> = {}): FakeAttempt {
     prompt_source: 'library',
     retry_of_attempt_id: null,
     status: 'done',
+    failure_code: null,
     ...over,
   }
 }
@@ -69,6 +71,10 @@ class FakeQuery implements PromiseLike<{ data: FakeAttempt[] | null; error: unkn
 
   not(column: string, operator: string, value: unknown): this {
     return this.add('not', column, operator, value)
+  }
+
+  in(column: string, values: readonly unknown[]): this {
+    return this.add('in', column, values)
   }
 
   or(filters: string): this {
@@ -122,6 +128,10 @@ class FakeQuery implements PromiseLike<{ data: FakeAttempt[] | null; error: unkn
         output = output.filter((row) => row.score !== null)
       if (operation.method === 'not' && column === 'retry_of_attempt_id')
         output = output.filter((row) => row.retry_of_attempt_id !== null)
+      if (operation.method === 'in')
+        output = output.filter((row) =>
+          (value as readonly unknown[]).includes(row[column as keyof FakeAttempt]),
+        )
       if (operation.method === 'or' && value === undefined) {
         const filters = String(column)
         if (filters.includes('practice_mode'))
@@ -229,7 +239,7 @@ describe('history server loading', () => {
       expect(retry.data.entries.map((entry) => entry.id)).toEqual(['attempt-099'])
   })
 
-  it('includes done legacy, v2, and partial rows but excludes every other lifecycle status', async () => {
+  it('lists terminal rows, excludes active work, and hides stale terminal scores', async () => {
     const setup = fakeSupabase([
       attempt(1, {
         score: 61,
@@ -248,8 +258,18 @@ describe('history server loading', () => {
       attempt(4, { status: 'uploading', score: 99 }),
       attempt(5, { status: 'transcribing', section_scores: { stale: true } }),
       attempt(6, { status: 'scoring', score: 98, section_scores: { stale: true } }),
-      attempt(7, { status: 'failed', score: 97, section_scores: { stale: true } }),
-      attempt(8, { status: 'timed_out', score: 96, section_scores: { stale: true } }),
+      attempt(7, {
+        status: 'failed',
+        score: 97,
+        section_scores: { stale: true },
+        failure_code: 'client_upload_abandoned',
+      }),
+      attempt(8, {
+        status: 'timed_out',
+        score: 96,
+        section_scores: { stale: true },
+        failure_code: 'client_scoring_timeout',
+      }),
       attempt(9, { user_id: 'user-2' }),
       attempt(10, { status: 'done', score: null, section_scores: null }),
     ])
@@ -261,10 +281,26 @@ describe('history server loading', () => {
     if (result.status !== 'ready') throw new Error('expected ready history')
     expect(result.data.entries.map((entry) => [entry.id, entry.score, entry.resultKind])).toEqual([
       ['attempt-010', null, 'partial'],
+      ['attempt-008', null, undefined],
+      ['attempt-007', null, undefined],
       ['attempt-003', null, 'partial'],
       ['attempt-002', 81, 'v2'],
       ['attempt-001', 61, 'legacy'],
     ])
+    expect(
+      result.data.entries
+        .filter((entry) => entry.status !== 'done')
+        .map((entry) => [entry.id, entry.status, entry.failureCode]),
+    ).toEqual([
+      ['attempt-008', 'timed_out', 'client_scoring_timeout'],
+      ['attempt-007', 'failed', 'client_upload_abandoned'],
+    ])
+    expect(result.data.scoreSummary.points.map((point) => point.attemptId)).not.toContain(
+      'attempt-007',
+    )
+    expect(result.data.scoreSummary.points.map((point) => point.attemptId)).not.toContain(
+      'attempt-008',
+    )
 
     const general = await loadHistoryPage(setup.client, 'user-1', {
       metadata: 'general',
@@ -273,6 +309,8 @@ describe('history server loading', () => {
     if (general.status !== 'ready') throw new Error('expected ready general history')
     expect(general.data.entries.map((entry) => entry.id)).toEqual([
       'attempt-010',
+      'attempt-008',
+      'attempt-007',
       'attempt-003',
       'attempt-002',
       'attempt-001',
@@ -417,5 +455,35 @@ describe('history server loading', () => {
           operation.method === 'select' && String(operation.args[0]).includes('section_scores'),
       )
     expect(cohortSelect?.args[0]).toBe('id, created_at, score, section_scores, practice_mode')
+  })
+
+  it('keeps the score cohort strictly done-only when failures contain stale scores', async () => {
+    const setup = fakeSupabase([
+      attempt(1, { score: 60, section_scores: legacySectionSnapshot as unknown as Json }),
+      attempt(2, {
+        status: 'failed',
+        score: 100,
+        section_scores: legacySectionSnapshot as unknown as Json,
+        failure_code: 'client_upload_abandoned',
+      }),
+      attempt(3, {
+        status: 'timed_out',
+        score: 99,
+        section_scores: legacySectionSnapshot as unknown as Json,
+        failure_code: 'client_scoring_timeout',
+      }),
+    ])
+
+    const result = await loadHistoryPage(setup.client, 'user-1', {
+      metadata: 'all',
+      page: 1,
+    })
+    if (result.status !== 'ready') throw new Error('expected ready history')
+    expect(result.data.entries.map((entry) => [entry.id, entry.score])).toEqual([
+      ['attempt-003', null],
+      ['attempt-002', null],
+      ['attempt-001', 60],
+    ])
+    expect(result.data.scoreSummary.points.map((point) => point.attemptId)).toEqual(['attempt-001'])
   })
 })

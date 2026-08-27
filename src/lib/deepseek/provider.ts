@@ -111,18 +111,13 @@ export function createDeepSeekModel(apiKey: string, model = DEEPSEEK_MODEL): Con
               temperature: 0,
             }),
           },
-          { label: 'Checking your content', timeoutMs },
+          { label: 'Checking your content', timeoutMs, discardNonOkBody: true },
         )
       } catch (error) {
         throw reportContentProviderFailure(error, model)
       }
 
       if (!response.ok) {
-        try {
-          await response.body?.cancel()
-        } catch {
-          // Releasing the response is best effort and must not replace the safe failure.
-        }
         throw reportContentProviderFailure(
           new ContentProviderFailure('http_error', model, response.status),
           model,

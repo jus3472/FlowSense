@@ -91,6 +91,7 @@ function legacyAttempt() {
     practice_mode: 'practice',
     rubric_version: null,
     status: 'scoring',
+    failure_code: null,
     created_at: '2026-08-27T12:00:00.000Z',
   }
 }

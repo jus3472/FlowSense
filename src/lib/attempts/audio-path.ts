@@ -55,3 +55,18 @@ export function validateOwnedAttemptAudioPath(input: {
     ? { storagePath: audioPath, mimeType, snapshot }
     : null
 }
+
+/** New upload cleanup never falls back to mutable legacy capture metadata. */
+export function validateOwnedAttemptUploadPath(input: {
+  userId: string
+  attemptId: string
+  metrics: unknown
+}): OwnedAttemptAudioPath | null {
+  const { metrics } = input
+  if (!isRecord(metrics) || !isRecord(metrics.upload)) return null
+  const owned = validateOwnedAttemptAudioPath({
+    ...input,
+    audioPath: metrics.upload.storage_path,
+  })
+  return owned?.snapshot === 'upload' ? owned : null
+}

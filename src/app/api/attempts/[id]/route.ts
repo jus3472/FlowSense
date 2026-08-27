@@ -1,8 +1,16 @@
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { apiError } from '@/lib/api/responses'
-import { validateOwnedAttemptAudioPath } from '@/lib/attempts/audio-path'
-import { ATTEMPT_FAILURE_CODES, canFinalizeAttemptUpload } from '@/lib/attempts/lifecycle'
+import {
+  validateOwnedAttemptAudioPath,
+  validateOwnedAttemptUploadPath,
+} from '@/lib/attempts/audio-path'
+import {
+  ATTEMPT_FAILURE_CODES,
+  canFinalizeAttemptUpload,
+  isActiveAttemptStatus,
+  type AttemptStatus,
+} from '@/lib/attempts/lifecycle'
 import {
   authenticatedAttemptContext,
   logAttemptDiagnostic,
@@ -35,6 +43,45 @@ async function recordingExists(
   return { exists: (data ?? []).some((object) => object.name === fileName), failed: false }
 }
 
+type DeletionClaim =
+  | { status: 'ready'; attemptStatus: 'done' }
+  | {
+      status: 'ready'
+      attemptStatus: Extract<AttemptStatus, 'failed' | 'timed_out'>
+    }
+  | { status: 'stale' }
+  | { status: 'failure' }
+
+async function claimAttemptDeletion(
+  admin: NonNullable<Awaited<ReturnType<typeof authenticatedAttemptContext>>>['admin'],
+  userId: string,
+  attemptId: string,
+  attemptStatus: Extract<AttemptStatus, 'done' | 'failed' | 'timed_out'>,
+  failureCode: string | null,
+): Promise<DeletionClaim> {
+  if (attemptStatus === 'done') {
+    return { status: 'ready', attemptStatus }
+  }
+  if (failureCode === ATTEMPT_FAILURE_CODES.deletionInProgress) {
+    return { status: 'ready', attemptStatus }
+  }
+
+  const base = admin
+    .from('attempts')
+    .update({ failure_code: ATTEMPT_FAILURE_CODES.deletionInProgress })
+    .eq('id', attemptId)
+    .eq('user_id', userId)
+    .eq('status', attemptStatus)
+  const matched =
+    failureCode === null ? base.is('failure_code', null) : base.eq('failure_code', failureCode)
+  const { data, error } = await matched.select('id').maybeSingle()
+  if (error) {
+    logAttemptDiagnostic('claim_attempt_deletion', 'attempt_delete_claim_failed', attemptId, error)
+    return { status: 'failure' }
+  }
+  return data ? { status: 'ready', attemptStatus } : { status: 'stale' }
+}
+
 /** Verifies the uploaded object and advances the owned attempt to transcription. */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -57,7 +104,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const { data: attempt, error: readError } = await admin
     .from('attempts')
-    .select('id, audio_path, duration_ms, metrics, status')
+    .select('id, audio_path, duration_ms, metrics, status, failure_code')
     .eq('id', id)
     .eq('user_id', userId)
     .maybeSingle()
@@ -66,6 +113,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return apiError('The recording details could not be saved.', 500)
   }
   if (!attempt) return apiError('That attempt does not exist.', 404)
+  if (attempt.failure_code === ATTEMPT_FAILURE_CODES.clientUploadAbandoned) {
+    return apiError('That recording request was already closed.', 409)
+  }
 
   const ownedAudio = validateOwnedAttemptAudioPath({
     userId,
@@ -140,7 +190,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
   const { data: attempt, error: readError } = await admin
     .from('attempts')
-    .select('id, audio_path, metrics')
+    .select('id, audio_path, metrics, status, failure_code')
     .eq('id', id)
     .eq('user_id', userId)
     .maybeSingle()
@@ -149,32 +199,57 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     return apiError('The response could not be deleted.', 500)
   }
   if (!attempt) return apiError('That attempt does not exist.', 404)
+  if (isActiveAttemptStatus(attempt.status)) {
+    return apiError('That response is still processing and cannot be deleted yet.', 409)
+  }
 
-  if (attempt.audio_path) {
-    const ownedAudio = validateOwnedAttemptAudioPath({
-      userId,
-      attemptId: attempt.id,
-      audioPath: attempt.audio_path,
-      metrics: attempt.metrics,
-    })
-    if (!ownedAudio) {
-      logAttemptDiagnostic('delete_recording', ATTEMPT_FAILURE_CODES.recordingPathInvalid, id)
-      return apiError('The saved recording path could not be verified.', 409)
-    }
+  const ownedAudio = attempt.audio_path
+    ? validateOwnedAttemptAudioPath({
+        userId,
+        attemptId: attempt.id,
+        audioPath: attempt.audio_path,
+        metrics: attempt.metrics,
+      })
+    : validateOwnedAttemptUploadPath({
+        userId,
+        attemptId: attempt.id,
+        metrics: attempt.metrics,
+      })
+  if (attempt.audio_path && !ownedAudio) {
+    logAttemptDiagnostic('delete_recording', ATTEMPT_FAILURE_CODES.recordingPathInvalid, id)
+    return apiError('The saved recording path could not be verified.', 409)
+  }
+
+  const claim = await claimAttemptDeletion(admin, userId, id, attempt.status, attempt.failure_code)
+  if (claim.status === 'failure') return apiError('The response could not be deleted.', 500)
+  if (claim.status === 'stale') {
+    return apiError('That response changed before it could be deleted.', 409)
+  }
+
+  if (ownedAudio) {
     const { error } = await admin.storage.from(RECORDINGS_BUCKET).remove([ownedAudio.storagePath])
     if (error) {
-      logAttemptDiagnostic('delete_recording', 'recording_delete_failed', id, error)
-      return apiError('The response could not be deleted.', 500)
+      // Bulk deletion is intended to be idempotent. If Storage reports an
+      // error after another delete already removed this exact object, finishing
+      // the claimed row deletion is still safe.
+      const presence = await recordingExists(admin, userId, ownedAudio.storagePath)
+      if (presence.failed || presence.exists) {
+        logAttemptDiagnostic('delete_recording', 'recording_delete_failed', id, error)
+        return apiError('The response could not be deleted.', 500)
+      }
     }
   }
 
-  const { data, error } = await admin
+  let deleteQuery = admin
     .from('attempts')
     .delete()
     .eq('id', id)
     .eq('user_id', userId)
-    .select('id')
-    .maybeSingle()
+    .eq('status', claim.attemptStatus)
+  if (claim.attemptStatus !== 'done') {
+    deleteQuery = deleteQuery.eq('failure_code', ATTEMPT_FAILURE_CODES.deletionInProgress)
+  }
+  const { data, error } = await deleteQuery.select('id').maybeSingle()
   if (error || !data) {
     logAttemptDiagnostic('delete_attempt', 'attempt_delete_failed', id, error)
     return apiError('The response could not be deleted.', error ? 500 : 409)

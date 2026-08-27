@@ -3,11 +3,14 @@ import { describe, expect, it } from 'vitest'
 
 const ROUTES = [
   'src/app/api/attempts/route.ts',
+  'src/app/api/attempts/abandon/route.ts',
   'src/app/api/attempts/[id]/route.ts',
   'src/app/api/attempts/[id]/disputes/route.ts',
   'src/app/api/transcribe/route.ts',
   'src/app/api/score/route.ts',
 ]
+
+const EXISTING_ATTEMPT_ROUTES = ROUTES.slice(2)
 
 describe('server-owned attempt boundary', () => {
   it('authenticates every mutation route before using the admin data boundary', () => {
@@ -19,7 +22,7 @@ describe('server-owned attempt boundary', () => {
   })
 
   it('keeps every existing-attempt mutation explicitly user scoped', () => {
-    for (const path of ROUTES.slice(1)) {
+    for (const path of EXISTING_ATTEMPT_ROUTES) {
       const source = readFileSync(path, 'utf8')
       expect(source, path).toContain(".eq('user_id', userId)")
     }
@@ -27,18 +30,22 @@ describe('server-owned attempt boundary', () => {
 
   it('selects the rubric on the server and enforces the idempotency key', () => {
     const createRoute = readFileSync('src/app/api/attempts/route.ts', 'utf8')
+    const creationServer = readFileSync('src/lib/attempts/creation-server.ts', 'utf8')
     const browserApi = readFileSync('src/lib/recording/api.ts', 'utf8')
-    expect(createRoute).toContain('rubric_version: RUBRIC_VERSION')
-    expect(createRoute).toContain(".eq('client_request_id', payload.clientRequestId)")
-    expect(createRoute).toContain(".eq('active', true)")
-    expect(createRoute).toContain('retryCreationSession(payload, parent)')
-    expect(createRoute).toContain('metrics, status')
+    expect(creationServer).toContain('rubric_version: RUBRIC_VERSION')
+    expect(creationServer).toContain(".eq('client_request_id', payload.clientRequestId)")
+    expect(creationServer).toContain(".eq('active', true)")
+    expect(creationServer).toContain('retryCreationSession(payload, parent)')
+    expect(creationServer).toContain('metrics, status')
     expect(browserApi).toContain('requestIdsBySession')
     expect(browserApi).toContain('clientRequestId = requestIdForSession(session)')
-    expect(createRoute.indexOf(".eq('client_request_id', payload.clientRequestId)")).toBeLessThan(
-      createRoute.indexOf('const resolved = await authoritativeSession'),
-    )
-    expect(createRoute).toContain('storedAttemptReuse(existingResult.data')
+    expect(
+      creationServer.indexOf(".eq('client_request_id', payload.clientRequestId)"),
+    ).toBeLessThan(creationServer.indexOf('const resolved = await authoritativeSession'))
+    expect(creationServer).toContain('storedAttemptReuse(stored, payload')
+    expect(createRoute).toContain("intent: 'uploading'")
+    expect(createRoute).toContain("result.status === 'abandoned'")
+    expect(createRoute).toContain('attemptId: result.value.attemptId')
   })
 
   it('validates an exact owned path before every service-role storage operation', () => {

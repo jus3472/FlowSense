@@ -49,6 +49,7 @@ function attempt(status: string, overrides: Record<string, unknown> = {}) {
     metrics: completedMetrics(),
     transcript: TRANSCRIPT,
     status,
+    failure_code: null,
     ...overrides,
   }
 }
@@ -108,9 +109,33 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 describe('transcription retry lifecycle', () => {
+  it.each(['failed', 'timed_out'] as const)(
+    'rejects a %s attempt whose recording upload was abandoned',
+    async (status) => {
+      const setup = adminFor({
+        data: attempt(status, { failure_code: 'client_upload_abandoned' }),
+        error: null,
+      })
+      mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+      const provider = vi.fn()
+      vi.stubGlobal('fetch', provider)
+
+      const response = await POST(request())
+
+      expect(response.status).toBe(409)
+      await expect(response.json()).resolves.toEqual({
+        error: 'That recording was not saved and cannot be transcribed.',
+      })
+      expect(mocks.transitionOwnedAttempt).not.toHaveBeenCalled()
+      expect(provider).not.toHaveBeenCalled()
+      expect(setup.download).not.toHaveBeenCalled()
+    },
+  )
+
   it.each(['failed', 'timed_out'] as const)(
     'atomically resumes a completed %s transcription at scoring without Deepgram',
     async (status) => {
@@ -226,5 +251,88 @@ describe('transcription retry lifecycle', () => {
 
     expect(response.status).toBe(409)
     expect(provider).not.toHaveBeenCalled()
+  })
+
+  it('keeps the provider deadline active while a successful response body stalls', async () => {
+    vi.useFakeTimers()
+    const setup = adminFor({
+      data: attempt('transcribing', {
+        transcript: null,
+        metrics: { upload: { storage_path: AUDIO_PATH, mime_type: 'audio/webm;codecs=opus' } },
+      }),
+      error: null,
+    })
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+    let providerStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      providerStarted = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: string, init?: RequestInit) => {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            init?.signal?.addEventListener(
+              'abort',
+              () => controller.error(new DOMException('Aborted', 'AbortError')),
+              { once: true },
+            )
+          },
+        })
+        providerStarted()
+        return new Response(body, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
+    const pending = POST(request())
+    await started
+    await vi.advanceTimersByTimeAsync(25_000)
+    const response = await pending
+
+    expect(response.status).toBe(504)
+    expect(mocks.markOwnedAttemptFailure).toHaveBeenCalledExactlyOnceWith(
+      setup.admin,
+      USER_ID,
+      ATTEMPT_ID,
+      ['transcribing'],
+      'timed_out',
+      'transcription_timeout',
+    )
+  })
+
+  it('fails safely when a successful provider response contains truncated JSON', async () => {
+    const setup = adminFor({
+      data: attempt('transcribing', {
+        transcript: null,
+        metrics: { upload: { storage_path: AUDIO_PATH, mime_type: 'audio/webm;codecs=opus' } },
+      }),
+      error: null,
+    })
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response('{"results":', {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      ),
+    )
+
+    const response = await POST(request())
+
+    expect(response.status).toBe(502)
+    expect(mocks.markOwnedAttemptFailure).toHaveBeenCalledExactlyOnceWith(
+      setup.admin,
+      USER_ID,
+      ATTEMPT_ID,
+      ['transcribing'],
+      'failed',
+      'transcription_invalid_response',
+    )
   })
 })

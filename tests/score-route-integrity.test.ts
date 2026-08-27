@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   authenticatedAttemptContext: vi.fn(),
   collectPronunciationEvidence: vi.fn(),
   computeMechanical: vi.fn(),
+  deepSeekComplete: vi.fn(),
   isLegacyRecheckSnapshot: vi.fn(),
   markOwnedAttemptFailure: vi.fn(),
   runContentCheckSafely: vi.fn(),
@@ -32,7 +33,7 @@ vi.mock('@/lib/attempts/legacy-recheck', () => ({
 }))
 
 vi.mock('@/lib/deepseek/provider', () => ({
-  createDeepSeekModel: vi.fn(() => ({ name: 'deepseek', complete: vi.fn() })),
+  createDeepSeekModel: vi.fn(() => ({ name: 'deepseek', complete: mocks.deepSeekComplete })),
 }))
 
 vi.mock('@/lib/env/server', () => ({
@@ -73,6 +74,7 @@ vi.mock('@/lib/scoring/v2/content/evaluate', () => ({
 
 import { POST } from '@/app/api/score/route'
 import { ATTEMPT_FAILURE_CODES } from '@/lib/attempts/lifecycle'
+import type { SafeContentCheckInput } from '@/lib/scoring/run-content'
 import { v2Snapshot } from './helpers/result-snapshots'
 
 const ATTEMPT_ID = '10000000-0000-4000-8000-000000000001'
@@ -197,6 +199,7 @@ function attempt(overrides: Record<string, unknown> = {}) {
     practice_mode: null,
     rubric_version: null,
     status: 'done',
+    failure_code: null,
     created_at: '2026-08-27T12:00:00.000Z',
     ...overrides,
   }
@@ -298,6 +301,7 @@ beforeEach(() => {
   mocks.markOwnedAttemptFailure.mockResolvedValue(undefined)
   mocks.transitionOwnedAttempt.mockResolvedValue(true)
   mocks.collectPronunciationEvidence.mockResolvedValue(null)
+  mocks.deepSeekComplete.mockResolvedValue('{}')
   mocks.computeMechanical.mockReturnValue({
     metrics: {},
     pauses: [],
@@ -329,9 +333,30 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 describe('score route database integrity', () => {
+  it.each(['failed', 'timed_out'] as const)(
+    'rejects a %s attempt whose recording upload was abandoned',
+    async (status) => {
+      const setup = adminClient({
+        attempt: attempt({ status, failure_code: ATTEMPT_FAILURE_CODES.clientUploadAbandoned }),
+      })
+      mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+
+      const response = await POST(scoreRequest())
+
+      expect(response.status).toBe(409)
+      await expect(response.json()).resolves.toEqual({
+        error: 'That recording was not saved and cannot be scored.',
+      })
+      expect(mocks.transitionOwnedAttempt).not.toHaveBeenCalled()
+      expect(mocks.runContentCheckSafely).not.toHaveBeenCalled()
+      expect(mocks.runV2ContentEvaluation).not.toHaveBeenCalled()
+    },
+  )
+
   it('stops a legacy recheck when the owned dispute query fails', async () => {
     mocks.isLegacyRecheckSnapshot.mockReturnValue(true)
     const setup = adminClient({
@@ -385,6 +410,82 @@ describe('score route database integrity', () => {
     expect(setup.attempts.update).toHaveBeenCalledTimes(1)
     expect(setup.updateTrace.filters).toContainEqual({ column: 'id', value: ATTEMPT_ID })
     expect(setup.updateTrace.filters).toContainEqual({ column: 'user_id', value: USER_ID })
+  })
+
+  it('passes the shared provider timeout through the route work budget', async () => {
+    const setup = adminClient({ attempt: attempt({ status: 'scoring' }) })
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+    mocks.runContentCheckSafely.mockImplementationOnce(async (input: SafeContentCheckInput) => {
+      const model = input.createModel()
+      await model.complete(input.request)
+      return { model, parsed: {}, error: null, calls: 1, tighten: null }
+    })
+
+    const response = await POST(scoreRequest())
+
+    expect(response.status).toBe(200)
+    expect(mocks.deepSeekComplete).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ timeoutMs: 30_000 }),
+    )
+    const scoreInput = mocks.runContentCheckSafely.mock.calls[0]?.[0] as SafeContentCheckInput
+    expect(
+      scoreInput.rewriteRequest?.({ previous: 'draft', mustNotAppear: [], targetWords: 4 })
+        .timeoutMs,
+    ).toBe(30_000)
+  })
+
+  it('starts the work budget before auth and database setup to retain persistence headroom', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(100_000)
+    const setup = adminClient({ attempt: attempt({ status: 'scoring' }) })
+    mocks.authenticatedAttemptContext.mockImplementationOnce(async () => {
+      vi.setSystemTime(125_000)
+      return { userId: USER_ID, admin: setup.admin }
+    })
+    mocks.runContentCheckSafely.mockImplementationOnce(async (input: SafeContentCheckInput) => {
+      const model = input.createModel()
+      await model.complete(input.request)
+      return { model, parsed: {}, error: null, calls: 1, tighten: null }
+    })
+
+    const response = await POST(scoreRequest())
+
+    expect(response.status).toBe(200)
+    expect(mocks.deepSeekComplete).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ timeoutMs: 25_000 }),
+    )
+  })
+
+  it('finishes v2 scoring when optional pronunciation work exhausts the shared budget', async () => {
+    vi.useFakeTimers()
+    let pronunciationStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      pronunciationStarted = resolve
+    })
+    mocks.collectPronunciationEvidence.mockImplementationOnce(() => {
+      pronunciationStarted()
+      return new Promise(() => undefined)
+    })
+    const setup = adminClient({
+      attempt: attempt({ practice_mode: 'practice', rubric_version: 'v2', status: 'scoring' }),
+    })
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+
+    const pending = POST(scoreRequest())
+    await started
+    await vi.advanceTimersByTimeAsync(50_000)
+    const response = await pending
+
+    expect(response.status).toBe(200)
+    expect(mocks.assembleV2Score).toHaveBeenCalledTimes(1)
+    expect(mocks.transitionOwnedAttempt).toHaveBeenCalledWith(
+      setup.admin,
+      USER_ID,
+      ATTEMPT_ID,
+      ['scoring'],
+      'done',
+      expect.any(Object),
+    )
   })
 
   it('makes forged and duplicate historical rows inert during a legacy recheck', async () => {

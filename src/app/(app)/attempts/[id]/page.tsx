@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ErrorState } from '@/components/ui/error-state'
 import {
+  ATTEMPT_FAILURE_CODES,
   isActiveAttemptStatus,
   isRetryableAttemptStatus,
   type AttemptStatus,
@@ -91,6 +92,28 @@ function processingResult(promptText: string, status: keyof typeof PROCESSING_DE
   )
 }
 
+function abandonedUploadResult(promptText: string, attemptId: string) {
+  return (
+    <div className="flex flex-col gap-8">
+      <h1 className="text-foreground text-xl font-semibold">{promptText}</h1>
+      <Card>
+        <EmptyState
+          title="Recording not saved"
+          description="This recording did not finish saving. Try the same prompt again, or delete this entry from History."
+        />
+      </Card>
+      <div className="flex flex-col gap-3">
+        <ButtonLink href={`/record?retry=${attemptId}`} size="lg" fullWidth>
+          Try this prompt again
+        </ButtonLink>
+        <ButtonLink href="/history" variant="ghost" fullWidth>
+          Go to History
+        </ButtonLink>
+      </div>
+    </div>
+  )
+}
+
 export default async function AttemptPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   if (!isUuid(id)) notFound()
@@ -106,7 +129,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     attemptResponse = await supabase
       .from('attempts')
       .select(
-        'id, prompt_text, transcript, duration_ms, audio_path, created_at, score, section_scores, metrics, content_result, retry_of_attempt_id, status',
+        'id, prompt_text, transcript, duration_ms, audio_path, created_at, score, section_scores, metrics, content_result, retry_of_attempt_id, status, failure_code',
       )
       .eq('id', id)
       .eq('user_id', user.id)
@@ -130,6 +153,9 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
   if (!isRetryableAttemptStatus(attempt.status)) {
     logAttemptDiagnostic('load_attempt_result', 'attempt_status_invalid', attempt.id)
     return resultLoadError()
+  }
+  if (attempt.failure_code === ATTEMPT_FAILURE_CODES.clientUploadAbandoned) {
+    return abandonedUploadResult(attempt.prompt_text, attempt.id)
   }
 
   let audioUrl: string | null = null

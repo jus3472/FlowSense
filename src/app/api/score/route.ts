@@ -33,6 +33,11 @@ import { surfacesToDelete } from '@/lib/scoring/tighten'
 import { analyseFillers } from '@/lib/scoring/fillers'
 import { buildTokens } from '@/lib/scoring/tokens'
 import {
+  contentModelWithinBudget,
+  createWorkBudget,
+  settleWithinWorkBudget,
+} from '@/lib/scoring/work-budget'
+import {
   assembleV2Score,
   isPracticeMode,
   shouldReuseStoredV2Score,
@@ -46,13 +51,12 @@ import { evaluateFluency } from '@/lib/scoring/v2/fluency'
 import type { TranscriptWord } from '@/lib/deepgram/parse'
 import type { AttemptMetrics } from '@/lib/types/metrics'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
+import { SCORING_PROVIDER_TIMEOUT_MS, SCORING_WORK_BUDGET_MS } from '@/lib/recording/timeouts'
 import { isUuid } from '@/lib/practice/session'
 import { readAttemptResult } from '@/lib/results/attempt-result'
 
 /** The model call is the slow half. Mechanical metrics take milliseconds. */
 export const maxDuration = 60
-
-const MODEL_TIMEOUT_MS = 30_000
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -107,6 +111,9 @@ function unavailableProvider(error: unknown): V2ContentDetectorProvider {
 }
 
 export async function POST(request: Request) {
+  // Start the shared budget at route entry. Provider work cannot consume the
+  // persistence headroom after authentication and database setup have run.
+  const workBudget = createWorkBudget(SCORING_WORK_BUDGET_MS)
   const context = await authenticatedAttemptContext()
   if (!context) return apiError('Your session ended. Log in and try again.', 401)
   const { userId, admin } = context
@@ -124,7 +131,7 @@ export async function POST(request: Request) {
   const { data: attempt, error: readError } = await admin
     .from('attempts')
     .select(
-      'id, prompt_text, audio_path, transcript, duration_ms, metrics, score, section_scores, content_result, practice_mode, rubric_version, status, created_at',
+      'id, prompt_text, audio_path, transcript, duration_ms, metrics, score, section_scores, content_result, practice_mode, rubric_version, status, failure_code, created_at',
     )
     .eq('id', attemptId)
     .eq('user_id', userId)
@@ -135,6 +142,12 @@ export async function POST(request: Request) {
     return apiError('The score could not be computed.', 500)
   }
   if (!attempt) return apiError('That attempt does not exist.', 404)
+  if (
+    (attempt.status === 'failed' || attempt.status === 'timed_out') &&
+    attempt.failure_code === ATTEMPT_FAILURE_CODES.clientUploadAbandoned
+  ) {
+    return apiError('That recording was not saved and cannot be scored.', 409)
+  }
 
   const storedResultInput = {
     id: attempt.id,
@@ -254,18 +267,24 @@ export async function POST(request: Request) {
         )
       }
       const azureConfig = azureSpeechConfig()
-      const pronunciationPromise = collectPronunciationEvidence({
-        config: azureConfig,
-        provider: azureConfig ? createAzurePronunciationProvider(azureConfig) : null,
-        audioPath: ownedAudio?.storagePath ?? null,
-        capture,
-        transcript,
-        transcriptWords,
-        download: (path) => admin.storage.from(RECORDINGS_BUCKET).download(path),
-      })
+      const pronunciationPromise = settleWithinWorkBudget(
+        collectPronunciationEvidence({
+          config: azureConfig,
+          provider: azureConfig ? createAzurePronunciationProvider(azureConfig) : null,
+          audioPath: ownedAudio?.storagePath ?? null,
+          capture,
+          transcript,
+          transcriptWords,
+          download: (path) => admin.storage.from(RECORDINGS_BUCKET).download(path),
+        }),
+        workBudget,
+        null,
+      )
       let provider: V2ContentDetectorProvider
       try {
-        provider = contentDetectorFromModel(createDeepSeekModel(deepseekApiKey()))
+        provider = contentDetectorFromModel(
+          contentModelWithinBudget(createDeepSeekModel(deepseekApiKey()), workBudget),
+        )
       } catch (error) {
         provider = unavailableProvider(error)
       }
@@ -276,7 +295,7 @@ export async function POST(request: Request) {
         transcript,
         mechanicallyCounted: mechanicalSpans(transcript, transcriptWords),
         unreliableTranscriptSpans: unreliableSpans(transcript, transcriptWords),
-        timeoutMs: MODEL_TIMEOUT_MS,
+        timeoutMs: SCORING_PROVIDER_TIMEOUT_MS,
       })
       const [pronunciation, content] = await Promise.all([pronunciationPromise, contentPromise])
       const assembled = assembleV2Score({
@@ -407,15 +426,20 @@ export async function POST(request: Request) {
       error: contentError,
       tighten,
     } = await runContentCheckSafely({
-      createModel: () => createDeepSeekModel(deepseekApiKey()),
-      request: { system: CONTENT_SYSTEM_PROMPT, user: userPrompt, timeoutMs: MODEL_TIMEOUT_MS },
+      createModel: () =>
+        contentModelWithinBudget(createDeepSeekModel(deepseekApiKey()), workBudget),
+      request: {
+        system: CONTENT_SYSTEM_PROMPT,
+        user: userPrompt,
+        timeoutMs: SCORING_PROVIDER_TIMEOUT_MS,
+      },
       transcript,
       countedText: mechanical.statistics.counted_items.map((item) => item.text),
       countedTokens,
       rewriteRequest: ({ previous, mustNotAppear, targetWords }) => ({
         system: REWRITE_SYSTEM_PROMPT,
         user: buildRewriteRetryPrompt({ transcript, previous, mustNotAppear, targetWords }),
-        timeoutMs: MODEL_TIMEOUT_MS,
+        timeoutMs: SCORING_PROVIDER_TIMEOUT_MS,
       }),
     })
 
