@@ -23,8 +23,8 @@ set
       then 'done'
     else 'timed_out'
   end,
-  status_changed_at = now(),
-  finished_at = now(),
+  status_changed_at = created_at,
+  finished_at = created_at,
   failure_code = case
     when score is not null
       or section_scores is not null

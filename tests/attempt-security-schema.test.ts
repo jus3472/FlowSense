@@ -22,6 +22,8 @@ describe('attempt security foundation migration', () => {
     expect(migration).toMatch(/section_scores is not null\s+or content_result is not null/)
     expect(migration).toContain("else 'timed_out'")
     expect(migration).toContain("else 'legacy_incomplete'")
+    expect(migration).toContain('status_changed_at = created_at')
+    expect(migration).toContain('finished_at = created_at')
   })
 
   it('removes direct attempt mutations while preserving owner reads and server access', () => {

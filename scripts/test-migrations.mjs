@@ -12,6 +12,7 @@ const USERS = {
   owner: '20000000-0000-4000-8000-000000000002',
   other: '30000000-0000-4000-8000-000000000003',
 }
+const LEGACY_CREATED_AT = '2024-02-03T04:05:06.000Z'
 
 loadEnvFile('.env.local')
 
@@ -400,9 +401,9 @@ async function runUpgrade(migrations) {
   const legacyDone = await client.query(
     `insert into public.attempts (
        user_id, prompt_id, prompt_text, transcript, duration_ms, score,
-       section_scores, metrics, content_result
+       section_scores, metrics, content_result, created_at
      ) values ($1, $2, 'Legacy prompt snapshot', 'Legacy transcript', 42000, 73,
-       $3::jsonb, $4::jsonb, $5::jsonb)
+       $3::jsonb, $4::jsonb, $5::jsonb, $6::timestamptz)
      returning id`,
     [
       USERS.owner,
@@ -410,6 +411,7 @@ async function runUpgrade(migrations) {
       JSON.stringify({ content: 35, delivery: 38 }),
       JSON.stringify({ capture: { duration_ms: 42000 } }),
       JSON.stringify({ status: 'completed' }),
+      LEGACY_CREATED_AT,
     ],
   )
   const legacyIncomplete = await client.query(
@@ -431,7 +433,7 @@ async function runUpgrade(migrations) {
 
   const preserved = await client.query(
     `select id, prompt_text, transcript, duration_ms, score, section_scores, metrics,
-       content_result, status, failure_code, finished_at
+       content_result, created_at, status, failure_code, status_changed_at, finished_at
      from public.attempts
      where id = any($1::uuid[])
      order by id`,
@@ -444,6 +446,12 @@ async function runUpgrade(migrations) {
   assert(
     done.prompt_text === 'Legacy prompt snapshot' && done.transcript === 'Legacy transcript',
     'upgrade: legacy prompt or transcript snapshot changed',
+  )
+  assert(
+    done.created_at.toISOString() === LEGACY_CREATED_AT &&
+      done.status_changed_at.toISOString() === LEGACY_CREATED_AT &&
+      done.finished_at.toISOString() === LEGACY_CREATED_AT,
+    'upgrade: historical lifecycle timestamps did not preserve created_at',
   )
   assert(
     incomplete?.status === 'timed_out' && incomplete.failure_code === 'legacy_incomplete',
