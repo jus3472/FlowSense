@@ -24,7 +24,7 @@ export function MarketingFooter() {
         <div className="flex flex-wrap items-center justify-between gap-4 pt-6">
           <Wordmark />
           <p className="text-muted text-sm">
-            Already have an account? <TextLink href="/login">Log in</TextLink>
+            Already have an account? <TextLink href="/login?mode=login">Log in</TextLink>
           </p>
         </div>
       </div>

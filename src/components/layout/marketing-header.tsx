@@ -9,7 +9,7 @@ export function MarketingHeader() {
           <Wordmark />
         </Link>
         <Link
-          href="/login"
+          href="/login?mode=login"
           className="text-foreground hover:bg-surface-sunken flex min-h-11 items-center rounded-full px-4 text-sm font-medium transition duration-150 ease-out"
         >
           Log in

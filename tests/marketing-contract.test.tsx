@@ -74,5 +74,8 @@ describe('public marketing contract', () => {
       'href',
       '/login',
     )
+    for (const link of screen.getAllByRole('link', { name: 'Log in' })) {
+      expect(link).toHaveAttribute('href', '/login?mode=login')
+    }
   })
 })

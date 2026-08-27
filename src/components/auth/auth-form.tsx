@@ -25,8 +25,8 @@ const COPY: Record<AuthMode, { heading: string; body: string; submit: string; pe
   },
 }
 
-export function AuthForm() {
-  const [mode, setMode] = useState<AuthMode>('signup')
+export function AuthForm({ initialMode = 'signup' }: { initialMode?: AuthMode }) {
+  const [mode, setMode] = useState<AuthMode>(initialMode)
   const [clientErrors, setClientErrors] = useState<FieldErrors>({})
   const [state, formAction, pending] = useActionState(authenticate, initialAuthFormState)
 
