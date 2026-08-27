@@ -35,6 +35,10 @@ export default async function HomePage() {
     logHomeDataFailure('profile_preferences', 'query', profileResult.error)
   }
   const historyFailed = responseResult.status === 'failure'
+  const historyErrorDescription =
+    responseResult.status === 'failure' && responseResult.reason === 'invalid_response'
+      ? 'Your saved response summary could not be read. Try loading it again.'
+      : 'The connection to your account failed. Your recordings are safe.'
   const responseData = responseResult.status === 'ready' ? responseResult.data : null
   const recommendedOutcome = await pickPreferredPracticePrompt(
     practiceModePriority(areas),
@@ -78,10 +82,7 @@ export default async function HomePage() {
       </ButtonLink>
 
       {historyFailed ? (
-        <ErrorState
-          title="Your responses did not load"
-          description="The connection to your account failed. Your recordings are safe."
-        >
+        <ErrorState title="Your responses did not load" description={historyErrorDescription}>
           <RetryButton />
         </ErrorState>
       ) : (

@@ -7,7 +7,7 @@ import { CONTENT_POINTS } from '@/lib/scoring/content'
 export interface HomeLatestResponse {
   attemptId: string
   score: number | null
-  summary: string
+  summary: string | null
 }
 
 export interface HomeResponseData {
@@ -39,6 +39,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function finiteNumberOrNull(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isFinite(value))
+}
+
+function validStoredOverallScore(value: number | null): value is number {
+  return value !== null && value >= 0 && value <= 100
 }
 
 function parseCompletedAttempt(value: unknown): HomeCompletedAttemptRow | null {
@@ -84,7 +88,12 @@ function compareNewestFirst(left: HomeCompletedAttemptRow, right: HomeCompletedA
   return createdAtOrder !== 0 ? createdAtOrder : right.id.localeCompare(left.id)
 }
 
-function readHomeResult(attempt: HomeCompletedAttemptRow): HomeLatestResponse | null {
+interface ReadHomeResult {
+  latest: HomeLatestResponse | null
+  trendCohort: string | null
+}
+
+function readHomeResult(attempt: HomeCompletedAttemptRow): ReadHomeResult {
   const result = readAttemptResult({
     id: attempt.id,
     promptText: attempt.prompt_text,
@@ -100,33 +109,50 @@ function readHomeResult(attempt: HomeCompletedAttemptRow): HomeLatestResponse | 
 
   if (result.kind === 'v2') {
     return {
-      attemptId: attempt.id,
-      score: result.payload.total_earned_points,
-      summary: v2OverallTakeaway(result.payload),
+      latest: {
+        attemptId: attempt.id,
+        score: result.payload.total_earned_points,
+        summary: v2OverallTakeaway(result.payload),
+      },
+      trendCohort: `v2:${result.payload.version}:${result.payload.rubric_version}`,
     }
   }
   if (result.kind === 'legacy') {
     return {
-      attemptId: attempt.id,
-      score: result.attempt.score,
-      summary: summariseAttempt(
-        result.attempt.score,
-        largestDeduction(
-          result.attempt.metrics,
-          result.attempt.sections.content.checks,
-          CONTENT_POINTS,
+      latest: {
+        attemptId: attempt.id,
+        score: result.attempt.score,
+        summary: summariseAttempt(
+          result.attempt.score,
+          largestDeduction(
+            result.attempt.metrics,
+            result.attempt.sections.content.checks,
+            CONTENT_POINTS,
+          ),
         ),
-      ),
+      },
+      trendCohort: 'legacy',
     }
   }
-  return null
+
+  // Lifecycle backfill marked historical score-only rows done. Their stored
+  // overall remains authoritative even when no supported detail snapshot can
+  // be decoded. Keep the owned link and number, but do not invent a summary or
+  // connect that number to a scoring cohort.
+  if (validStoredOverallScore(attempt.score)) {
+    return {
+      latest: { attemptId: attempt.id, score: attempt.score, summary: null },
+      trendCohort: null,
+    }
+  }
+  return { latest: null, trendCohort: null }
 }
 
 /**
  * Builds every response-derived Home value from one newest-first snapshot.
  * Stored snapshots are interpreted at the shared result boundary and are never
- * recalculated. A malformed latest row is shown as unavailable, not replaced
- * by an older row that could be mistaken for the latest response.
+ * recalculated. An undecodable latest row keeps only a validated standalone
+ * overall; without one it is unavailable rather than replaced by an older row.
  */
 export function buildHomeResponseData(rows: unknown): HomeResponseData | null {
   if (!Array.isArray(rows)) return null
@@ -141,9 +167,19 @@ export function buildHomeResponseData(rows: unknown): HomeResponseData | null {
 
   const newest = attempts[0] ?? null
   const results = attempts.map(readHomeResult)
-  const latest = results[0] ?? null
+  const latestResult = results[0] ?? null
+  const latest = latestResult?.latest ?? null
+  const trendCohort = latestResult?.trendCohort ?? null
   const scores = results
-    .flatMap((result) => (result && result.score !== null ? [result.score] : []))
+    .flatMap((result) => {
+      const score = result.latest?.score
+      return trendCohort !== null &&
+        result.trendCohort === trendCohort &&
+        score !== null &&
+        score !== undefined
+        ? [score]
+        : []
+    })
     .reverse()
 
   return {

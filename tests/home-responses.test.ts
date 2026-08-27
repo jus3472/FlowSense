@@ -225,19 +225,56 @@ describe('Home response display model', () => {
     expect(result?.scores).toEqual([100])
   })
 
-  it('does not turn a malformed or score-only latest row into a result link or trend point', () => {
+  it('keeps a historical score-only attempt linkable without inventing detail or a trend', () => {
     const result = buildHomeResponseData([
       row('older-valid', { created_at: '2026-08-26T12:00:00.000Z' }),
-      row('malformed-latest', {
+      row('score-only-latest', {
         created_at: '2026-08-27T12:00:00.000Z',
-        score: 99,
-        section_scores: { version: 'v2.score.1' },
+        score: 67,
+        section_scores: null,
       }),
+    ])
+
+    expect(result?.latest).toEqual({ attemptId: 'score-only-latest', score: 67, summary: null })
+    expect(result?.latestUnavailable).toBe(false)
+    expect(result?.scores).toEqual([])
+  })
+
+  it('keeps an unsupported-version overall linkable but outside the trend cohort', () => {
+    const unsupported = { ...v2Snapshot(), version: 'v3.score.1', rubric_version: 'v3' }
+    const result = buildHomeResponseData([
+      row('unsupported', { score: 72, section_scores: unsupported }),
+      row('older-v2', { created_at: '2026-08-26T12:00:00.000Z' }),
+    ])
+
+    expect(result?.latest).toEqual({ attemptId: 'unsupported', score: 72, summary: null })
+    expect(result?.latestUnavailable).toBe(false)
+    expect(result?.scores).toEqual([])
+  })
+
+  it('shows malformed stored data without an overall score as unavailable', () => {
+    const result = buildHomeResponseData([
+      row('malformed', { section_scores: { version: 'v2.score.1' } }),
     ])
 
     expect(result?.latest).toBeNull()
     expect(result?.latestUnavailable).toBe(true)
-    expect(result?.scores).toEqual([81])
+    expect(result?.scores).toEqual([])
+  })
+
+  it('draws scores only within the latest compatible result cohort', () => {
+    const result = buildHomeResponseData([
+      row('new-v2'),
+      row('older-v2', { created_at: '2026-08-26T12:00:00.000Z' }),
+      legacyRow('legacy', { created_at: '2026-08-25T12:00:00.000Z' }),
+      row('future', {
+        created_at: '2026-08-24T12:00:00.000Z',
+        score: 92,
+        section_scores: { ...v2Snapshot(), version: 'v3.score.1', rubric_version: 'v3' },
+      }),
+    ])
+
+    expect(result?.scores).toEqual([81, 81])
   })
 
   it('uses id as the deterministic tie-break and returns no stale state after deletion', () => {
@@ -248,6 +285,11 @@ describe('Home response display model', () => {
     ])
 
     expect(result?.latest?.attemptId).toBe('20000000-0000-4000-8000-000000000002')
+
+    const afterDeletion = buildHomeResponseData([
+      row('older-surviving', { created_at: '2026-08-26T12:00:00.000Z' }),
+    ])
+    expect(afterDeletion?.latest?.attemptId).toBe('older-surviving')
     expect(buildHomeResponseData([])).toEqual({
       latest: null,
       latestUnavailable: false,
