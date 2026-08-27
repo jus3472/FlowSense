@@ -75,8 +75,9 @@ when a retry is necessary. Run it deliberately.
 ## Scoring calibration
 
 `npm run check:scoring-calibration` runs generated, local-only evaluator fixtures against checked-in
-v2 baselines. It makes no provider or network calls. Baselines are never rewritten by the command;
-after reviewing an intentional rubric or evaluator change, update the versioned expectations in
+v2 baselines. It prints each case's overall and category result, lists stable-path differences, and
+exits nonzero on drift. It makes no provider or network calls and never rewrites baselines. After
+reviewing an intentional rubric or evaluator change, update the versioned expectations manually in
 `src/lib/scoring/v2/calibration.ts` in the same review as the scoring change.
 The unclear-pronunciation and intelligible second-language-accent fixtures carry normalized
 evidence only, with `eligibleForDeductions=false`. They do not assess native similarity or deduct

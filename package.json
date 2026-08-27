@@ -18,7 +18,7 @@
     "inspect:scores": "node scripts/inspect-scores.mjs",
     "inspect:rewrites": "node --experimental-transform-types scripts/inspect-rewrites.mjs",
     "check:pronunciation-harness": "node scripts/run-pronunciation-harness.mjs",
-    "check:scoring-calibration": "node scripts/run-scoring-calibration.mjs"
+    "check:scoring-calibration": "vite-node --config scripts/vite.calibration.config.ts scripts/run-scoring-calibration.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",
