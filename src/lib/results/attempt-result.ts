@@ -5,7 +5,8 @@ import {
   type DeliveryMetricName,
   type MetricResult,
 } from '@/lib/scoring/mechanical'
-import { isV2ScorePayload, type V2ScorePayload } from '@/lib/scoring/v2/assemble'
+import type { V2ScorePayload } from '@/lib/scoring/v2/assemble'
+import { decodeStoredSectionSnapshot, type LegacySectionSnapshot } from '@/lib/results/snapshot'
 import type { AttemptMetrics } from '@/lib/types/metrics'
 import type { AttemptView } from '@/lib/results/types'
 
@@ -26,7 +27,12 @@ export type ReadAttemptResult =
   | { kind: 'legacy'; attempt: AttemptView }
   | { kind: 'v2'; payload: V2ScorePayload }
   | { kind: 'incomplete' }
-  | { kind: 'unsupported' }
+  | {
+      kind: 'unsupported_version'
+      scoreVersion: string | null
+      rubricVersion: string | null
+    }
+  | { kind: 'malformed' }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -48,23 +54,6 @@ function isLegacyMetric(value: unknown): value is MetricResult {
     finiteNumber(value.raw) &&
     finiteNumber(value.component) &&
     (typeof value.label === 'string' || value.label === null)
-  )
-}
-
-function isLegacySections(value: unknown): value is AttemptView['sections'] {
-  if (!isRecord(value) || !isRecord(value.content) || !isRecord(value.delivery)) return false
-  const { content, delivery } = value
-  if (!finiteNumber(content.earned) || !finiteNumber(content.max) || !isRecord(content.checks))
-    return false
-  if (!finiteNumber(delivery.earned) || !finiteNumber(delivery.max) || !isRecord(delivery.metrics))
-    return false
-  const checks = content.checks
-  const metrics = delivery.metrics
-  return (
-    exactKeys(checks, CHECK_NAMES) &&
-    CHECK_NAMES.every((name) => finiteNumber(checks[name])) &&
-    exactKeys(metrics, Object.keys(DELIVERY_POINTS)) &&
-    Object.values(metrics).every(finiteNumber)
   )
 }
 
@@ -206,10 +195,12 @@ function isLegacyMetrics(value: unknown): value is AttemptMetrics {
   )
 }
 
-function legacyAttempt(input: StoredAttemptResultInput): AttemptView | null {
+function legacyAttempt(
+  input: StoredAttemptResultInput,
+  sections: LegacySectionSnapshot,
+): AttemptView | null {
   if (
     !finiteNumber(input.score) ||
-    !isLegacySections(input.sectionScores) ||
     !isLegacyMetrics(input.metrics) ||
     !isLegacyContent(input.contentResult)
   ) {
@@ -228,7 +219,7 @@ function legacyAttempt(input: StoredAttemptResultInput): AttemptView | null {
     createdAt: input.createdAt,
     audioUrl: input.audioUrl,
     score: input.score,
-    sections: input.sectionScores,
+    sections,
     metrics: delivery.metrics as Record<DeliveryMetricName, MetricResult>,
     statistics: delivery.statistics as AttemptView['statistics'],
     pauses: delivery.pauses as AttemptView['pauses'],
@@ -242,17 +233,22 @@ function legacyAttempt(input: StoredAttemptResultInput): AttemptView | null {
  * wins over row metadata: old rows can carry v2 metadata with a legacy score.
  */
 export function readAttemptResult(input: StoredAttemptResultInput): ReadAttemptResult {
-  if (isV2ScorePayload(input.sectionScores)) return { kind: 'v2', payload: input.sectionScores }
+  const snapshot = decodeStoredSectionSnapshot(input.sectionScores)
+  if (snapshot.kind === 'v2') return { kind: 'v2', payload: snapshot.payload }
+  if (snapshot.kind === 'unsupported_version') return snapshot
+  if (snapshot.kind === 'malformed') return { kind: 'malformed' }
 
-  const legacy = legacyAttempt(input)
-  if (legacy) return { kind: 'legacy', attempt: legacy }
+  if (snapshot.kind === 'legacy') {
+    const legacy = legacyAttempt(input, snapshot.sections)
+    return legacy ? { kind: 'legacy', attempt: legacy } : { kind: 'malformed' }
+  }
 
   if (input.score === null && input.sectionScores === null && input.contentResult === null) {
     return { kind: 'incomplete' }
   }
   const hasStoredResult =
     input.sectionScores !== null || input.contentResult !== null || input.score !== null
-  return { kind: hasStoredResult ? 'unsupported' : 'incomplete' }
+  return { kind: hasStoredResult ? 'malformed' : 'incomplete' }
 }
 
 export function legacyAttemptForHome(input: StoredAttemptResultInput): AttemptView | null {

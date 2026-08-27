@@ -1,5 +1,6 @@
 import { SKILL_CATEGORIES, type PracticeMode, type SkillCategory } from '@/lib/practice/contracts'
-import { isV2ScorePayload, type V2ScorePayload } from '@/lib/scoring/v2/assemble'
+import { decodeStoredSectionSnapshot } from '@/lib/results/snapshot'
+import type { V2ScorePayload } from '@/lib/scoring/v2/assemble'
 
 export const RECENT_PROGRESS_WINDOW_DAYS = 7
 export const LONGER_HISTORY_WINDOW_DAYS = 28
@@ -43,6 +44,11 @@ export interface ProgressAggregation {
     input: number
     validV2: number
     selectedCohort: number
+    legacy: number
+    incomplete: number
+    malformed: number
+    unsupportedVersion: number
+    excludedMode: number
     excludedInvalid: number
     excludedIncompatible: number
   }
@@ -137,13 +143,8 @@ function windowFor(attempts: readonly AcceptedAttempt[]): ProgressWindow {
       SKILL_CATEGORIES.map((category) => {
         const categoryPoints = points((attempt) => {
           const result = attempt.payload.categories[category]
-          return result.status === 'scored' && result.earned_points !== null
-            ? pointFor(
-                attempt,
-                result.component !== null
-                  ? result.component * 100
-                  : (result.earned_points / result.max_points) * 100,
-              )
+          return result.status === 'scored' && result.component !== null
+            ? pointFor(attempt, result.component * 100)
             : null
         })
         return [category, series(categoryPoints)]
@@ -159,7 +160,7 @@ function exactCohort(left: ProgressCohort, right: ProgressCohort): boolean {
 /**
  * Aggregates only one exact stored score-version and rubric-version cohort.
  * Modes remain an optional filter. Category values are normalized to 0 through 100
- * from their stored component (or earned/max fallback), never raw weights.
+ * from their stored component, never recalculated from current rubric weights.
  */
 export function aggregateV2Progress(
   input: readonly ProgressAttemptInput[],
@@ -168,22 +169,43 @@ export function aggregateV2Progress(
   const now = options.now.getTime()
   if (!Number.isFinite(now)) throw new Error('Progress aggregation requires a valid current time.')
 
-  let excludedInvalid = 0
+  let validV2 = 0
+  let legacy = 0
+  let incomplete = 0
+  let malformed = 0
+  let unsupportedVersion = 0
+  let excludedMode = 0
   const accepted: AcceptedAttempt[] = []
   for (const item of input) {
     const time = validDate(item.createdAt)
-    if (
-      typeof item.id !== 'string' ||
-      item.id.length === 0 ||
-      time === null ||
-      time > now ||
-      !isV2ScorePayload(item.sectionScores)
-    ) {
-      excludedInvalid += 1
+    if (typeof item.id !== 'string' || item.id.length === 0 || time === null || time > now) {
+      malformed += 1
       continue
     }
-    const payload = item.sectionScores
-    if (options.mode && payload.mode !== options.mode) continue
+    const snapshot = decodeStoredSectionSnapshot(item.sectionScores)
+    if (snapshot.kind === 'none') {
+      incomplete += 1
+      continue
+    }
+    if (snapshot.kind === 'legacy') {
+      legacy += 1
+      continue
+    }
+    if (snapshot.kind === 'unsupported_version') {
+      unsupportedVersion += 1
+      continue
+    }
+    if (snapshot.kind === 'malformed') {
+      malformed += 1
+      continue
+    }
+
+    validV2 += 1
+    const payload = snapshot.payload
+    if (options.mode && payload.mode !== options.mode) {
+      excludedMode += 1
+      continue
+    }
     accepted.push({
       id: item.id,
       createdAt: item.createdAt,
@@ -209,9 +231,14 @@ export function aggregateV2Progress(
     cohort: selected,
     counts: {
       input: input.length,
-      validV2: accepted.length,
+      validV2,
       selectedCohort: selectedAttempts.length,
-      excludedInvalid,
+      legacy,
+      incomplete,
+      malformed,
+      unsupportedVersion,
+      excludedMode,
+      excludedInvalid: incomplete + malformed + unsupportedVersion,
       excludedIncompatible,
     },
     windows: {

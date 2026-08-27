@@ -8,6 +8,7 @@ import {
 } from '@/lib/progress/aggregation'
 import { V2_SCORE_PAYLOAD_VERSION, type V2ScorePayload } from '@/lib/scoring/v2/assemble'
 import { rubricFor } from '@/lib/scoring/v2/rubrics'
+import { legacySectionSnapshot } from './helpers/result-snapshots'
 
 const NOW = new Date('2026-08-26T12:00:00.000Z')
 
@@ -169,10 +170,27 @@ describe('v2 progress aggregation', () => {
     expect(result.windows.recent.categories.fluency.state).toBe('insufficient_data')
   })
 
+  it('treats a legacy-only account as a valid empty v2 cohort', () => {
+    const result = aggregateV2Progress(
+      [
+        {
+          id: 'legacy',
+          createdAt: '2026-08-24T12:00:00.000Z',
+          sectionScores: legacySectionSnapshot,
+        },
+      ],
+      { now: NOW },
+    )
+
+    expect(result.cohort).toBeNull()
+    expect(result.counts).toMatchObject({ input: 1, legacy: 1, validV2: 0 })
+    expect(result.windows.all.attemptCount).toBe(0)
+  })
+
   it('rejects legacy, malformed, future, and incompatible score-version snapshots safely', () => {
     const valid = score('practice', 'valid', '2026-08-25T12:00:00.000Z')
-    const legacy: ProgressAttemptInput = {
-      id: 'legacy',
+    const malformed: ProgressAttemptInput = {
+      id: 'malformed',
       createdAt: '2026-08-24T12:00:00.000Z',
       sectionScores: { content: { earned: 50 }, delivery: { earned: 50 } },
     }
@@ -182,13 +200,15 @@ describe('v2 progress aggregation', () => {
       sectionScores: { ...(valid.sectionScores as V2ScorePayload), version: 'v3.score.1' },
     }
     const future = score('practice', 'future', '2026-08-27T12:00:00.000Z')
-    const result = aggregateV2Progress([legacy, unsupported, future, valid], { now: NOW })
+    const result = aggregateV2Progress([malformed, unsupported, future, valid], { now: NOW })
 
     expect(result.counts).toMatchObject({
       input: 4,
       validV2: 1,
       selectedCohort: 1,
       excludedInvalid: 3,
+      malformed: 2,
+      unsupportedVersion: 1,
     })
     expect(result.windows.all.overall.state).toBe('insufficient_data')
   })
@@ -203,5 +223,24 @@ describe('v2 progress aggregation', () => {
 
     expect(result.windows.all.overall.points).toEqual([])
     expect(result.counts.excludedIncompatible).toBe(2)
+  })
+
+  it('fails a structurally incomplete current snapshot closed', () => {
+    const complete = score('practice', 'complete', '2026-08-25T12:00:00.000Z')
+    const payload = complete.sectionScores as V2ScorePayload
+    const categories = Object.fromEntries(
+      SKILL_CATEGORIES.filter((category) => category !== 'delivery').map((category) => [
+        category,
+        payload.categories[category],
+      ]),
+    )
+
+    const result = aggregateV2Progress(
+      [{ ...complete, sectionScores: { ...payload, categories } }],
+      { now: NOW },
+    )
+
+    expect(result.counts).toMatchObject({ validV2: 0, malformed: 1 })
+    expect(result.windows.all.attemptCount).toBe(0)
   })
 })

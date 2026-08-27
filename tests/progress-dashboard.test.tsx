@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
 import { readFileSync } from 'node:fs'
+import type { ComponentProps } from 'react'
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { ProgressDashboard } from '@/components/progress/progress-dashboard'
 import { ProgressTrend } from '@/components/progress/progress-trend'
-import type { ProgressSeries } from '@/lib/progress/aggregation'
+import { aggregateV2Progress, type ProgressSeries } from '@/lib/progress/aggregation'
 import { parseProgressMode, selectCategory } from '@/lib/progress/display'
 import {
   recentRetryComparisons,
@@ -18,6 +20,11 @@ import {
   type V2ScorePayload,
 } from '@/lib/scoring/v2/assemble'
 import { rubricFor } from '@/lib/scoring/v2/rubrics'
+import { legacySectionSnapshot, progressAttempt, v2Snapshot } from './helpers/result-snapshots'
+
+vi.mock('next/link', () => ({
+  default: ({ href, ...props }: ComponentProps<'a'>) => <a href={String(href)} {...props} />,
+}))
 
 const NOW = new Date('2026-08-26T12:00:00.000Z')
 
@@ -157,5 +164,84 @@ describe('progress dashboard helpers', () => {
     const menu = readFileSync('src/components/layout/overflow-menu.tsx', 'utf8')
     expect(menu).toContain("'/progress' as Route")
     expect(menu).toMatch(/role="menuitem"[\s\S]*?>\s*Progress\s*<\/Link>/)
+  })
+
+  it('renders zero-attempt and legacy-only accounts as valid empty states', () => {
+    const empty = aggregateV2Progress([], { now: NOW })
+    const { rerender } = render(
+      <ProgressDashboard dashboard={{ progress: empty, retryComparisons: [] }} />,
+    )
+
+    expect(screen.getByText('No practice results yet')).toBeInTheDocument()
+    expect(screen.queryByText('Progress is unavailable')).not.toBeInTheDocument()
+
+    const legacyOnly = aggregateV2Progress(
+      [progressAttempt('legacy', '2026-08-25T12:00:00.000Z', legacySectionSnapshot)],
+      { now: NOW },
+    )
+    rerender(<ProgressDashboard dashboard={{ progress: legacyOnly, retryComparisons: [] }} />)
+
+    expect(screen.getByText('No compatible progress yet')).toBeInTheDocument()
+    expect(screen.queryByText('Progress is unavailable')).not.toBeInTheDocument()
+  })
+
+  it('renders a truthful limited state and all category trends for one partial result', () => {
+    const progress = aggregateV2Progress(
+      [
+        progressAttempt(
+          'partial',
+          '2026-08-25T12:00:00.000Z',
+          v2Snapshot({ notCheckedCategory: 'grammar' }),
+        ),
+      ],
+      { now: NOW },
+    )
+    render(<ProgressDashboard dashboard={{ progress, retryComparisons: [] }} />)
+
+    expect(screen.getByText('Some trends need more data')).toBeInTheDocument()
+    expect(
+      screen.getByText('Each trend appears after two compatible checked results.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Category trends' })).toBeInTheDocument()
+    for (const label of ['Fluency', 'Clarity', 'Vocabulary', 'Grammar', 'Structure', 'Delivery']) {
+      expect(screen.getByRole('heading', { name: label })).toBeInTheDocument()
+    }
+    expect(screen.getByText('Recent practice: 1 response in 7 days.')).toBeInTheDocument()
+  })
+
+  it('renders compatible retry arrows with neutral noise wording', () => {
+    const parent = progressAttempt(
+      'parent',
+      '2026-08-20T12:00:00.000Z',
+      v2Snapshot({ component: 0.8 }),
+    )
+    const retry = progressAttempt(
+      'retry',
+      '2026-08-25T12:00:00.000Z',
+      v2Snapshot({ component: 0.81 }),
+      'parent',
+    )
+    const attempts = [parent, retry]
+    const progress = aggregateV2Progress(attempts, { now: NOW })
+    const retryComparisons = recentRetryComparisons(attempts, { now: NOW })
+    render(<ProgressDashboard dashboard={{ progress, retryComparisons }} />)
+
+    expect(screen.getByRole('heading', { name: 'Recent retries' })).toBeInTheDocument()
+    expect(screen.getAllByText(/→/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Small score difference').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/improved|worse/i)).not.toBeInTheDocument()
+  })
+
+  it('does not add a second main landmark inside the app layout main', () => {
+    const progress = aggregateV2Progress([], { now: NOW })
+    const { container } = render(
+      <ProgressDashboard dashboard={{ progress, retryComparisons: [] }} />,
+    )
+    const pageSource = readFileSync('src/app/(app)/progress/page.tsx', 'utf8')
+    const dashboardSource = readFileSync('src/components/progress/progress-dashboard.tsx', 'utf8')
+
+    expect(container.querySelector('main')).toBeNull()
+    expect(pageSource).not.toMatch(/<main\b/)
+    expect(dashboardSource).not.toMatch(/<main\b/)
   })
 })
