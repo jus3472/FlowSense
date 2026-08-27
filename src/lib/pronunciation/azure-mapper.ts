@@ -58,8 +58,7 @@ function parseAzureWord(value: unknown, audioDurationMs: number): AzureWord | nu
   if (!isRecord(value) || typeof value.Word !== 'string' || value.Word.trim().length === 0) {
     return null
   }
-  const assessment = isRecord(value.PronunciationAssessment) ? value.PronunciationAssessment : null
-  const rawErrorType = assessment?.ErrorType ?? 'None'
+  const rawErrorType = value.ErrorType
   if (
     typeof rawErrorType !== 'string' ||
     !AZURE_ERROR_TYPES.includes(rawErrorType as AzureErrorType)
@@ -67,8 +66,8 @@ function parseAzureWord(value: unknown, audioDurationMs: number): AzureWord | nu
     return null
   }
   const errorType = rawErrorType as AzureErrorType
-  const accuracy = assessment ? finiteScore(assessment.AccuracyScore) : null
-  if (assessment && 'AccuracyScore' in assessment && accuracy === null) return null
+  const accuracy = finiteScore(value.AccuracyScore)
+  if (accuracy === null) return null
 
   const offset = finiteTicks(value.Offset)
   const duration = finiteTicks(value.Duration)
@@ -96,10 +95,7 @@ function parseAzureWord(value: unknown, audioDurationMs: number): AzureWord | nu
     ) {
       return null
     }
-    const phonemeAssessment = isRecord(rawPhoneme.PronunciationAssessment)
-      ? rawPhoneme.PronunciationAssessment
-      : null
-    const phonemeAccuracy = phonemeAssessment ? finiteScore(phonemeAssessment.AccuracyScore) : null
+    const phonemeAccuracy = finiteScore(rawPhoneme.AccuracyScore)
     if (phonemeAccuracy === null) return null
     phonemes.push({
       expected: rawPhoneme.Phoneme,
@@ -265,7 +261,10 @@ export function mapAzurePronunciationResponse(
   request: PronunciationAssessmentRequest,
 ): PronunciationParseResult {
   if (!requestWordsAreValid(request)) return malformed('The reference word timings were invalid.')
-  if (!isRecord(payload) || !Array.isArray(payload.NBest) || payload.NBest.length === 0) {
+  if (!isRecord(payload) || payload.RecognitionStatus !== 'Success') {
+    return malformed('Azure recognition did not succeed.')
+  }
+  if (!Array.isArray(payload.NBest) || payload.NBest.length === 0) {
     return malformed('Azure response did not contain a result.')
   }
   const best = payload.NBest[0]

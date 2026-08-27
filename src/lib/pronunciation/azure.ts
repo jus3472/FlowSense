@@ -23,15 +23,22 @@ export interface AzureTransport {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>
 }
 
+export function canonicalAzureContentType(contentType: string): string | null {
+  const compact = contentType.trim().toLocaleLowerCase('en-US').replaceAll(' ', '')
+  if (compact === 'audio/ogg;codecs=opus') return 'audio/ogg; codecs=opus'
+  if (compact === 'audio/wav;codecs=audio/pcm;samplerate=16000') {
+    return 'audio/wav; codecs=audio/pcm; samplerate=16000'
+  }
+  return null
+}
+
 export function isAzureLocaleSupported(locale: string): boolean {
   return AZURE_SUPPORTED_LOCALES.includes(locale as (typeof AZURE_SUPPORTED_LOCALES)[number])
 }
 
 export function isAzureAudioSupported(contentType: string, durationMs: number): boolean {
-  const normalized = contentType.trim().toLowerCase()
   return (
-    (normalized === AZURE_SUPPORTED_AUDIO_TYPES[0] ||
-      normalized === AZURE_SUPPORTED_AUDIO_TYPES[1]) &&
+    canonicalAzureContentType(contentType) !== null &&
     Number.isFinite(durationMs) &&
     durationMs > 0 &&
     durationMs <= AZURE_MAX_AUDIO_DURATION_MS
@@ -79,6 +86,8 @@ export function buildAzureRequest(
   request: PronunciationAssessmentRequest,
   audio: ArrayBuffer,
 ): { url: string; init: RequestInit } {
+  const contentType = canonicalAzureContentType(request.audio.contentType)
+  if (!contentType) throw new Error('Unsupported Azure audio content type.')
   const params = new URLSearchParams({
     language: config.locale,
     format: 'detailed',
@@ -88,7 +97,7 @@ export function buildAzureRequest(
       ReferenceText: request.referenceText ?? '',
       GradingSystem: 'HundredMark',
       Granularity: 'Phoneme',
-      Dimension: 'Basic',
+      Dimension: 'Comprehensive',
       EnableMiscue: true,
     }),
   ).toString('base64')
@@ -97,7 +106,8 @@ export function buildAzureRequest(
     init: {
       method: 'POST',
       headers: {
-        'Content-Type': request.audio.contentType,
+        Accept: 'application/json',
+        'Content-Type': contentType,
         'Ocp-Apim-Subscription-Key': config.key,
         'Pronunciation-Assessment': assessment,
       },

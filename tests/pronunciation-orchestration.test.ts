@@ -81,6 +81,12 @@ describe('pronunciation score orchestration', () => {
     expect(scenario.calls()).toEqual({ provider: 1, download: 1 })
   })
 
+  it('accepts the recorder-style OGG MIME before private download', async () => {
+    const scenario = input({ capture: { ...capture, mime_type: 'audio/ogg;codecs=opus' } })
+    expect(await collectPronunciationEvidence(scenario.value)).toEqual(normalized)
+    expect(scenario.calls()).toEqual({ provider: 1, download: 1 })
+  })
+
   it('does nothing when configuration is missing', async () => {
     const scenario = input({ config: null })
     expect(await collectPronunciationEvidence(scenario.value)).toBeNull()

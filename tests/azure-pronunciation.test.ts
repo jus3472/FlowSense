@@ -25,24 +25,30 @@ const request: PronunciationAssessmentRequest = {
 
 function azureResponse(words = request.recognizedWords) {
   return {
+    RecognitionStatus: 'Success',
+    Offset: 700_000,
+    Duration: 18_000_000,
+    DisplayText: 'FlowSense helps speakers.',
     NBest: [
       {
-        PronunciationAssessment: {
-          PronScore: 71,
-          FluencyScore: 12,
-          CompletenessScore: 99,
-          ProsodyScore: 20,
-          ContentAssessment: { Topic: 0 },
-        },
+        AccuracyScore: 71,
+        FluencyScore: 12,
+        CompletenessScore: 99,
+        ProsodyScore: 20,
+        PronScore: 71,
+        NativeSimilarityScore: 100,
+        Dialect: 'provider-only',
+        ContentAssessment: { Topic: 0 },
         Words: words.map((word, index) => ({
           Word: word.word,
           Offset: (word.startMs ?? 0) * 10_000,
           Duration: ((word.endMs ?? 0) - (word.startMs ?? 0)) * 10_000,
-          PronunciationAssessment: { AccuracyScore: 90 - index * 5, ErrorType: 'None' },
+          AccuracyScore: 90 - index * 5,
+          ErrorType: 'None',
           Phonemes: [
             {
               Phoneme: 'x',
-              PronunciationAssessment: { AccuracyScore: 80 },
+              AccuracyScore: 80,
             },
           ],
         })),
@@ -63,8 +69,9 @@ function azureWord(
     ...(errorType === 'Omission'
       ? {}
       : { Offset: startMs * 10_000, Duration: (endMs - startMs) * 10_000 }),
-    PronunciationAssessment: { AccuracyScore: accuracyScore, ErrorType: errorType },
-    Phonemes: [{ Phoneme: 'x', PronunciationAssessment: { AccuracyScore: 80 } }],
+    AccuracyScore: accuracyScore,
+    ErrorType: errorType,
+    Phonemes: [{ Phoneme: 'x', AccuracyScore: 80 }],
   }
 }
 
@@ -74,6 +81,8 @@ describe('Azure pronunciation adapter', () => {
       true,
     )
     expect(isAzureAudioSupported('audio/ogg; codecs=opus', 1_000)).toBe(true)
+    expect(isAzureAudioSupported('audio/ogg;codecs=opus', 1_000)).toBe(true)
+    expect(isAzureAudioSupported('audio/wav', 1_000)).toBe(false)
     expect(isAzureAudioSupported('audio/webm', 1_000)).toBe(false)
     expect(isAzureAudioSupported('audio/wav; codecs=audio/pcm; samplerate=16000', 30_001)).toBe(
       false,
@@ -131,6 +140,7 @@ describe('Azure pronunciation adapter', () => {
     expect(built.url).toContain('language=en-US')
     expect(built.url).not.toContain('private-key')
     expect(built.init.headers).toMatchObject({
+      Accept: 'application/json',
       'Content-Type': request.audio.contentType,
       'Ocp-Apim-Subscription-Key': 'private-key',
     })
@@ -141,12 +151,28 @@ describe('Azure pronunciation adapter', () => {
     expect(assessment).toMatchObject({
       ReferenceText: request.referenceText,
       Granularity: 'Phoneme',
-      Dimension: 'Basic',
+      Dimension: 'Comprehensive',
     })
     expect(assessment).not.toHaveProperty('EnableProsodyAssessment')
     expect(assessment).not.toHaveProperty('ContentAssessment')
     expect(assessment).not.toHaveProperty('NativeSimilarity')
     expect(assessment).not.toHaveProperty('Dialect')
+  })
+
+  it('canonicalizes recorder-style OGG MIME for the Azure request', () => {
+    const built = buildAzureRequest(
+      {
+        endpoint: 'https://eastus.cognitiveservices.azure.com',
+        key: 'private-key',
+        locale: 'en-US',
+      },
+      { ...request, audio: { ...request.audio, contentType: 'audio/ogg;codecs=opus' } },
+      new ArrayBuffer(4),
+    )
+    expect(built.init.headers).toMatchObject({
+      Accept: 'application/json',
+      'Content-Type': 'audio/ogg; codecs=opus',
+    })
   })
 
   it('maps Azure ticks to bounded word evidence and excludes aggregate fields', () => {
@@ -169,11 +195,14 @@ describe('Azure pronunciation adapter', () => {
     expect(parsed.value).not.toHaveProperty('CompletenessScore')
     expect(parsed.value).not.toHaveProperty('ProsodyScore')
     expect(parsed.value).not.toHaveProperty('ContentAssessment')
+    expect(parsed.value).not.toHaveProperty('NativeSimilarityScore')
+    expect(parsed.value).not.toHaveProperty('Dialect')
   })
 
   it('aligns an insertion in the middle without shifting later words', () => {
     const parsed = mapAzurePronunciationResponse(
       {
+        RecognitionStatus: 'Success',
         NBest: [
           {
             Words: [
@@ -206,6 +235,7 @@ describe('Azure pronunciation adapter', () => {
   it('aligns an explicit durationless omission in the middle', () => {
     const parsed = mapAzurePronunciationResponse(
       {
+        RecognitionStatus: 'Success',
         NBest: [
           {
             Words: [
@@ -236,6 +266,7 @@ describe('Azure pronunciation adapter', () => {
   it('separates a true substitution from same-word low sound accuracy', () => {
     const substitution = mapAzurePronunciationResponse(
       {
+        RecognitionStatus: 'Success',
         NBest: [
           {
             Words: [
@@ -250,6 +281,7 @@ describe('Azure pronunciation adapter', () => {
     )
     const sameWord = mapAzurePronunciationResponse(
       {
+        RecognitionStatus: 'Success',
         NBest: [
           {
             Words: [
@@ -276,10 +308,13 @@ describe('Azure pronunciation adapter', () => {
   })
 
   it('fails closed for malformed, contradictory, and out-of-range provider output', () => {
-    expect(mapAzurePronunciationResponse({ NBest: [] }, request).ok).toBe(false)
+    expect(
+      mapAzurePronunciationResponse({ RecognitionStatus: 'Success', NBest: [] }, request).ok,
+    ).toBe(false)
     expect(
       mapAzurePronunciationResponse(
         {
+          RecognitionStatus: 'Success',
           NBest: azureResponse().NBest.map((entry) => ({
             ...entry,
             Words: [{ ...entry.Words[0], Offset: 9_000_000_000 }],
@@ -291,6 +326,7 @@ describe('Azure pronunciation adapter', () => {
     expect(
       mapAzurePronunciationResponse(
         {
+          RecognitionStatus: 'Success',
           NBest: azureResponse().NBest.map((entry) => ({
             ...entry,
             Words: [{ ...entry.Words[0], Duration: -1 }],
@@ -302,7 +338,7 @@ describe('Azure pronunciation adapter', () => {
     const malformedAccuracy = azureResponse()
     const malformedWord = malformedAccuracy.NBest[0]?.Words[0]
     if (!malformedWord) throw new Error('Fixture word was missing.')
-    malformedWord.PronunciationAssessment = { AccuracyScore: 120, ErrorType: 'None' }
+    malformedWord.AccuracyScore = 120
     expect(mapAzurePronunciationResponse(malformedAccuracy, request).ok).toBe(false)
     const nonmonotonic = azureResponse()
     const second = nonmonotonic.NBest[0]?.Words[1]
@@ -315,7 +351,8 @@ describe('Azure pronunciation adapter', () => {
     const response = azureResponse()
     const first = response.NBest[0]?.Words[0]
     if (!first) throw new Error('Fixture word was missing.')
-    first.PronunciationAssessment = { ErrorType: 'Unknown', AccuracyScore: 99 }
+    first.ErrorType = 'Unknown'
+    first.AccuracyScore = 99
     const parsed = mapAzurePronunciationResponse(response, request)
     expect(parsed.ok).toBe(true)
     if (!parsed.ok) return
@@ -325,6 +362,23 @@ describe('Azure pronunciation adapter', () => {
       pronunciationAvailability: 'unsupported',
     })
     expect(parsed.value.unsupportedWords).toEqual(['FlowSense'])
+  })
+
+  it('rejects non-success and nested SDK-shaped responses', () => {
+    expect(
+      mapAzurePronunciationResponse({ RecognitionStatus: 'NoMatch', NBest: [] }, request).ok,
+    ).toBe(false)
+    const nested = azureResponse()
+    const first = nested.NBest[0]?.Words[0]
+    if (!first) throw new Error('Fixture word was missing.')
+    const accuracy = first.AccuracyScore
+    const errorType = first.ErrorType
+    Reflect.deleteProperty(first, 'AccuracyScore')
+    Reflect.deleteProperty(first, 'ErrorType')
+    Object.assign(first, {
+      PronunciationAssessment: { AccuracyScore: accuracy, ErrorType: errorType },
+    })
+    expect(mapAzurePronunciationResponse(nested, request).ok).toBe(false)
   })
 
   it('returns explicit not_checked for unsupported audio before transport', async () => {
@@ -415,6 +469,14 @@ describe('Azure pronunciation adapter', () => {
       fetch: async () => new Response('not-json', { status: 200 }),
     })
     expect(malformed).toMatchObject({ status: 'failed', error: { code: 'malformed_response' } })
+
+    const noMatch = await assessAzurePronunciation(config, request, new ArrayBuffer(2), {
+      fetch: async () => new Response(JSON.stringify({ RecognitionStatus: 'NoMatch', NBest: [] })),
+    })
+    expect(noMatch).toMatchObject({
+      status: 'failed',
+      error: { code: 'malformed_response' },
+    })
 
     const success = await assessAzurePronunciation(config, request, new ArrayBuffer(2), {
       fetch: async () => new Response(JSON.stringify(azureResponse())),
