@@ -23,8 +23,18 @@ vi.mock('@/lib/attempts/server', () => ({ logAttemptDiagnostic: mocks.logAttempt
 vi.mock('@/lib/results/attempt-result', () => ({ readAttemptResult: mocks.readAttemptResult }))
 
 vi.mock('@/components/results/results-view', () => ({
-  ResultsView: ({ attempt }: { attempt: { audioUrl: string | null } }) => (
-    <div data-audio={attempt.audioUrl ?? 'none'} data-testid="legacy-result">
+  ResultsView: ({
+    attempt,
+    initialDisputes,
+  }: {
+    attempt: { audioUrl: string | null }
+    initialDisputes: Array<{ note_type: string; quote: string | null }>
+  }) => (
+    <div
+      data-audio={attempt.audioUrl ?? 'none'}
+      data-disputes={JSON.stringify(initialDisputes)}
+      data-testid="legacy-result"
+    >
       Legacy result
     </div>
   ),
@@ -75,6 +85,17 @@ const THROWN_ERROR = Object.assign(new Error(PRIVATE_ERROR_MESSAGE), {
   code: 'NETWORK_ERROR',
   privatePath: PRIVATE_PATH,
 })
+const LEGACY_CONTENT = {
+  status: 'checked' as const,
+  checks: {
+    answered: { passed: false, quote: 'Exact stored quote' },
+    explained: { passed: true, quote: null },
+    word_choice: { passed: true, quote: null },
+    logical_order: { passed: true, quote: null },
+    no_repetition: { passed: true, quote: null },
+  },
+  extra_spans: [{ text: 'exact stored span' }],
+}
 
 interface QueryResponse {
   data: Record<string, unknown> | null
@@ -187,7 +208,10 @@ beforeEach(() => {
   mocks.readAttemptResult.mockImplementation(
     (input: { sectionScores: unknown; audioUrl: string | null }) => {
       if (input.sectionScores === 'legacy') {
-        return { kind: 'legacy', attempt: { audioUrl: input.audioUrl } }
+        return {
+          kind: 'legacy',
+          attempt: { audioUrl: input.audioUrl, content: LEGACY_CONTENT },
+        }
       }
       if (input.sectionScores === 'v2-partial') {
         return { kind: 'v2', payload: { fixture: 'Partial v2 result' } }
@@ -317,6 +341,51 @@ describe('owned attempt result loading', () => {
     expect(screen.getByTestId(testId)).toHaveAttribute('data-audio', 'none')
     expect(setup.createSignedUrl).not.toHaveBeenCalled()
     expect(mocks.logAttemptDiagnostic).not.toHaveBeenCalled()
+  })
+
+  it('passes only exact unique stored legacy findings to the result renderer', async () => {
+    const setup = client({
+      primary: { data: attempt({ section_scores: 'legacy' }), error: null },
+      disputes: {
+        data: [
+          { note_type: 'answered', quote: 'Exact stored quote' },
+          { note_type: 'answered', quote: 'Exact stored quote' },
+          { note_type: 'explained', quote: null },
+          { note_type: 'answered', quote: 'mismatched quote' },
+          { note_type: 'answered', quote: null },
+          { note_type: 'word_choice_span', quote: 'forged span' },
+          { note_type: 'word_choice_span', quote: 'exact stored span' },
+        ],
+        error: null,
+      },
+    })
+    mocks.createClient.mockResolvedValue(setup.supabase)
+
+    await renderPage()
+
+    expect(screen.getByTestId('legacy-result')).toHaveAttribute(
+      'data-disputes',
+      JSON.stringify([
+        { note_type: 'answered', quote: 'Exact stored quote' },
+        { note_type: 'word_choice_span', quote: 'exact stored span' },
+      ]),
+    )
+  })
+
+  it('never loads v2-linked note rows into a result renderer', async () => {
+    const setup = client({
+      primary: { data: attempt({ section_scores: 'v2' }), error: null },
+      disputes: {
+        data: [{ note_type: 'answered', quote: null }],
+        error: null,
+      },
+    })
+    mocks.createClient.mockResolvedValue(setup.supabase)
+
+    await renderPage()
+
+    expect(screen.getByTestId('v2-result')).toBeInTheDocument()
+    expect(setup.supabase.from).not.toHaveBeenCalledWith('note_feedback')
   })
 
   it.each([

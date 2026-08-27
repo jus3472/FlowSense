@@ -456,6 +456,205 @@ async function assertAttemptSecurity(label) {
   }
 }
 
+async function assertNoteFeedbackSecurity(label) {
+  const privileges = await client.query(`
+    select privilege_type
+    from information_schema.role_table_grants
+    where table_schema = 'public'
+      and table_name = 'note_feedback'
+      and grantee = 'authenticated'
+    order by privilege_type
+  `)
+  assert(
+    JSON.stringify(privileges.rows.map((row) => row.privilege_type)) === '["SELECT"]',
+    `${label}: authenticated note-feedback privileges must be SELECT only`,
+  )
+
+  const policies = await client.query(`
+    select cmd
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'note_feedback'
+    order by cmd
+  `)
+  assert(
+    JSON.stringify(policies.rows.map((row) => row.cmd)) === '["SELECT"]',
+    `${label}: note feedback must retain only the owner SELECT policy`,
+  )
+
+  const checkedLegacyContent = JSON.stringify({
+    status: 'checked',
+    checks: {
+      answered: { passed: false, quote: null },
+      explained: { passed: false, quote: 'exact stored quote' },
+      logical_order: { passed: true, quote: null },
+    },
+    extra_spans: [{ text: 'exact stored span', category: 'imprecise' }],
+  })
+  const ownerAttempt = await client.query(
+    `insert into public.attempts (
+       user_id, prompt_text, score, section_scores, content_result, status, finished_at
+     ) values ($1, 'Owner dispute snapshot', 42, '{"content":{},"delivery":{}}'::jsonb,
+       $2::jsonb, 'done', now())
+     returning id, score, section_scores, content_result`,
+    [USERS.owner, checkedLegacyContent],
+  )
+  const otherAttempt = await client.query(
+    `insert into public.attempts (
+       user_id, prompt_text, score, section_scores, content_result, status, finished_at
+     ) values ($1, 'Other dispute snapshot', 42, '{"content":{},"delivery":{}}'::jsonb,
+       $2::jsonb, 'done', now())
+     returning id`,
+    [USERS.other, checkedLegacyContent],
+  )
+  const v2Attempt = await client.query(
+    `insert into public.attempts (
+       user_id, prompt_text, score, section_scores, content_result, status, finished_at
+     ) values ($1, 'Versioned dispute snapshot', 80,
+       '{"version":"v2.score.1","rubric_version":"v2"}'::jsonb,
+       $2::jsonb, 'done', now())
+     returning id`,
+    [USERS.owner, checkedLegacyContent],
+  )
+  const ownerNote = await client.query(
+    `insert into public.note_feedback (user_id, attempt_id, note_type, quote)
+     values ($1, $2, 'answered', null)
+     returning id`,
+    [USERS.owner, ownerAttempt.rows[0].id],
+  )
+  await client.query(
+    `insert into public.note_feedback (user_id, attempt_id, note_type, quote)
+     values ($1, $2, 'answered', null)`,
+    [USERS.other, otherAttempt.rows[0].id],
+  )
+
+  await setAuthenticatedUser(USERS.owner)
+  try {
+    const visible = await client.query('select id, user_id from public.note_feedback')
+    assert(
+      visible.rows.some((row) => row.id === ownerNote.rows[0].id) &&
+        visible.rows.every((row) => row.user_id === USERS.owner),
+      `${label}: authenticated note reads were not owner scoped`,
+    )
+    await expectPgError(
+      () =>
+        client.query(
+          `insert into public.note_feedback (user_id, attempt_id, note_type, quote)
+           values ($1, $2, 'forged', 'browser write')`,
+          [USERS.owner, ownerAttempt.rows[0].id],
+        ),
+      '42501',
+      `${label}: authenticated note insert`,
+    )
+    await expectPgError(
+      () =>
+        client.query(`update public.note_feedback set note_type = 'forged' where id = $1`, [
+          ownerNote.rows[0].id,
+        ]),
+      '42501',
+      `${label}: authenticated note update`,
+    )
+    await expectPgError(
+      () => client.query('delete from public.note_feedback where id = $1', [ownerNote.rows[0].id]),
+      '42501',
+      `${label}: authenticated note delete`,
+    )
+  } finally {
+    await resetRole()
+  }
+
+  await client.query('set role anon')
+  try {
+    await expectPgError(
+      () =>
+        client.query(
+          `insert into public.note_feedback (user_id, attempt_id, note_type)
+           values ($1, $2, 'forged')`,
+          [USERS.owner, ownerAttempt.rows[0].id],
+        ),
+      '42501',
+      `${label}: anonymous note insert`,
+    )
+  } finally {
+    await resetRole()
+  }
+
+  await client.query('set role service_role')
+  try {
+    const serviceInsert = await client.query(
+      `insert into public.note_feedback (user_id, attempt_id, note_type, quote)
+       values ($1, $2, 'explained', 'exact stored quote')
+       returning id`,
+      [USERS.owner, ownerAttempt.rows[0].id],
+    )
+    assert(serviceInsert.rowCount === 1, `${label}: service-role note insert failed`)
+    for (const invalid of [
+      { noteType: 'logical_order', quote: null, attemptId: ownerAttempt.rows[0].id },
+      { noteType: 'answered', quote: 'forged quote', attemptId: ownerAttempt.rows[0].id },
+      { noteType: 'explained', quote: null, attemptId: ownerAttempt.rows[0].id },
+      { noteType: 'word_choice_span', quote: 'forged span', attemptId: ownerAttempt.rows[0].id },
+      { noteType: 'answered', quote: null, attemptId: v2Attempt.rows[0].id },
+    ]) {
+      await expectPgError(
+        () =>
+          client.query(
+            `insert into public.note_feedback (user_id, attempt_id, note_type, quote)
+             values ($1, $2, $3, $4)`,
+            [USERS.owner, invalid.attemptId, invalid.noteType, invalid.quote],
+          ),
+        '23514',
+        `${label}: forged service-role note ${invalid.noteType}`,
+      )
+    }
+    await expectPgError(
+      () =>
+        client.query(`update public.note_feedback set quote = 'forged quote' where id = $1`, [
+          serviceInsert.rows[0].id,
+        ]),
+      '23514',
+      `${label}: forged service-role note update`,
+    )
+    const serviceUpdate = await client.query(
+      `update public.note_feedback
+       set note_type = 'word_choice_span', quote = 'exact stored span'
+       where id = $1
+       returning id`,
+      [serviceInsert.rows[0].id],
+    )
+    assert(serviceUpdate.rowCount === 1, `${label}: service-role note update failed`)
+    const serviceDelete = await client.query(
+      'delete from public.note_feedback where id = $1 returning id',
+      [serviceInsert.rows[0].id],
+    )
+    assert(serviceDelete.rowCount === 1, `${label}: service-role note delete failed`)
+    await expectPgError(
+      () =>
+        client.query(
+          `insert into public.note_feedback (user_id, attempt_id, note_type, quote)
+           values ($1, $2, 'answered', null)`,
+          [USERS.owner, ownerAttempt.rows[0].id],
+        ),
+      '23505',
+      `${label}: exact duplicate note`,
+    )
+  } finally {
+    await resetRole()
+  }
+
+  const snapshot = await client.query(
+    'select score, section_scores, content_result from public.attempts where id = $1',
+    [ownerAttempt.rows[0].id],
+  )
+  assert(
+    snapshot.rows[0]?.score === ownerAttempt.rows[0].score &&
+      JSON.stringify(snapshot.rows[0]?.section_scores) ===
+        JSON.stringify(ownerAttempt.rows[0].section_scores) &&
+      JSON.stringify(snapshot.rows[0]?.content_result) ===
+        JSON.stringify(ownerAttempt.rows[0].content_result),
+    `${label}: note writes changed the authoritative attempt snapshot`,
+  )
+}
+
 async function assertLifecycleAndIdempotency(label) {
   const requestId = '40000000-0000-4000-8000-000000000004'
   await client.query(
@@ -559,6 +758,7 @@ async function runFresh(migrations) {
   await assertPromptCoverage('fresh')
   await assertLifecycleAndIdempotency('fresh')
   await assertAttemptSecurity('fresh')
+  await assertNoteFeedbackSecurity('fresh')
   console.log('pass fresh migration chain')
 }
 
@@ -605,8 +805,67 @@ async function runUpgrade(migrations) {
      returning id`,
     [USERS.owner, JSON.stringify({ version: 'v2.score.1', total_earned_points: null })],
   )
+  const historicalDisputeAttempt = await client.query(
+    `insert into public.attempts (
+       user_id, prompt_text, score, section_scores, content_result
+     ) values ($1, 'Historical dispute snapshot', 65,
+       '{"content":{},"delivery":{}}'::jsonb,
+       $2::jsonb)
+     returning id`,
+    [
+      USERS.owner,
+      JSON.stringify({
+        status: 'checked',
+        checks: {
+          answered: { passed: false, quote: null },
+          explained: { passed: true, quote: null },
+        },
+        extra_spans: [{ text: 'kind of useful', category: 'imprecise' }],
+      }),
+    ],
+  )
+
+  await setAuthenticatedUser(USERS.owner)
+  try {
+    await client.query(
+      `insert into public.note_feedback (user_id, attempt_id, note_type, quote)
+       values
+         ($1, $2, 'answered', null),
+         ($1, $2, 'answered', null),
+         ($1, $2, 'answered', 'forged quote'),
+         ($1, $2, 'explained', null),
+         ($1, $2, 'word_choice_span', 'kind of useful'),
+         ($1, $2, 'word_choice_span', 'forged span'),
+         ($1, $3, 'answered', null)`,
+      [USERS.owner, historicalDisputeAttempt.rows[0].id, partial.rows[0].id],
+    )
+  } finally {
+    await resetRole()
+  }
   await applyAll(migrations.slice(6))
   await reapplyStorageHardening(migrations, 'upgrade')
+
+  const deduplicatedNotes = await client.query(
+    `select note_type, quote, count(*)::integer as count
+     from public.note_feedback
+     where user_id = $1 and attempt_id = $2
+     group by note_type, quote
+     order by note_type, quote`,
+    [USERS.owner, historicalDisputeAttempt.rows[0].id],
+  )
+  assert(
+    JSON.stringify(deduplicatedNotes.rows) ===
+      JSON.stringify([
+        { note_type: 'answered', quote: null, count: 1 },
+        { note_type: 'word_choice_span', quote: 'kind of useful', count: 1 },
+      ]),
+    'upgrade: invalid or duplicate historical notes were not repaired',
+  )
+  const v2Notes = await client.query(
+    'select count(*)::integer as count from public.note_feedback where attempt_id = $1',
+    [partial.rows[0].id],
+  )
+  assert(v2Notes.rows[0]?.count === 0, 'upgrade: a historical v2-linked dispute was retained')
 
   const preserved = await client.query(
     `select id, prompt_text, transcript, duration_ms, score, section_scores, metrics,
@@ -656,13 +915,14 @@ async function runUpgrade(migrations) {
   await assertPromptCoverage('upgrade')
   await assertLifecycleAndIdempotency('upgrade')
   await assertAttemptSecurity('upgrade')
+  await assertNoteFeedbackSecurity('upgrade')
   console.log('pass original-four upgrade chain')
 }
 
 try {
   await client.connect()
   const migrations = loadMigrations()
-  assert(migrations.length >= 8, 'Expected the full migration chain including storage hardening.')
+  assert(migrations.length >= 9, 'Expected the full migration chain including note hardening.')
   await runFresh(migrations)
   await runUpgrade(migrations)
   console.log('Migration integration harness passed.')

@@ -49,9 +49,10 @@ vi.mock('@/lib/scoring/assemble', () => ({
   assembleScore: mocks.assembleScore,
 }))
 
-vi.mock('@/lib/scoring/mechanical', () => ({
-  computeMechanical: mocks.computeMechanical,
-}))
+vi.mock('@/lib/scoring/mechanical', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/scoring/mechanical')>()
+  return { ...actual, computeMechanical: mocks.computeMechanical }
+})
 
 vi.mock('@/lib/scoring/run-content', () => ({
   runContentCheckSafely: mocks.runContentCheckSafely,
@@ -168,7 +169,15 @@ function adminClient(options: AdminOptions) {
     },
   }
 
-  return { admin, attempts, attemptReadTraces, disputeTrace, updateTrace, updateValues }
+  return {
+    admin,
+    attempts,
+    disputes,
+    attemptReadTraces,
+    disputeTrace,
+    updateTrace,
+    updateValues,
+  }
 }
 
 function attempt(overrides: Record<string, unknown> = {}) {
@@ -191,6 +200,88 @@ function attempt(overrides: Record<string, unknown> = {}) {
     created_at: '2026-08-27T12:00:00.000Z',
     ...overrides,
   }
+}
+
+function legacyNotCheckedAttempt() {
+  const deliveryPoints = {
+    fillers: 18,
+    mid_sentence_pauses: 14,
+    energy: 8,
+    pace: 6,
+    time_to_first_word: 4,
+  }
+  const contentPoints = {
+    answered: 14,
+    explained: 12,
+    word_choice: 12,
+    logical_order: 7,
+    no_repetition: 5,
+  }
+  const passing = {
+    passed: true,
+    severity: null,
+    quote: null,
+    observation: null,
+    suggestion: null,
+  }
+  return attempt({
+    score: 100,
+    section_scores: {
+      content: { earned: 50, max: 50, checks: contentPoints },
+      delivery: { earned: 50, max: 50, metrics: deliveryPoints },
+    },
+    metrics: {
+      capture: { duration_ms: 20_000, sample_interval_ms: 50, amplitude: [], pitch: [] },
+      transcript: { words: [] },
+      delivery: {
+        metrics: Object.fromEntries(
+          Object.entries(deliveryPoints).map(([name, points]) => [
+            name,
+            { points, max_points: points, raw: 0, component: 1, label: null },
+          ]),
+        ),
+        statistics: {
+          word_count: 4,
+          recording_ms: 20_000,
+          speaking_ms: 18_000,
+          clean_pause_count: 0,
+          mid_sentence_pause_count: 0,
+          total_silence_ms: 2_000,
+          leading_silence_ms: 0,
+          trailing_silence_ms: 0,
+          silence_ratio: 0.1,
+          longest_pause_ms: 500,
+          pace_variance: 0,
+          backtrack_count: 0,
+          backtrack_note: null,
+          counted_items: [],
+          repeated_phrases: [],
+          noise_floor: 0.01,
+          speech_level: 0.1,
+          speech_threshold: 0.02,
+        },
+        pauses: [],
+      },
+    },
+    content_result: {
+      status: 'not_checked',
+      model: null,
+      error: 'Content provider unavailable.',
+      checks: {
+        answered: { ...passing },
+        explained: { ...passing },
+        word_choice: { ...passing },
+        logical_order: { ...passing },
+        no_repetition: { ...passing },
+      },
+      extra_spans: [],
+      tightened: null,
+      tightened_outcome: 'none',
+      dropped: [],
+      points: contentPoints,
+      disputes_applied: 0,
+    },
+  })
 }
 
 function scoreRequest() {
@@ -296,6 +387,34 @@ describe('score route database integrity', () => {
     expect(setup.updateTrace.filters).toContainEqual({ column: 'user_id', value: USER_ID })
   })
 
+  it('makes forged and duplicate historical rows inert during a legacy recheck', async () => {
+    mocks.isLegacyRecheckSnapshot.mockReturnValue(true)
+    const setup = adminClient({
+      attempt: legacyNotCheckedAttempt(),
+      disputes: {
+        data: [
+          { note_type: 'explained', quote: null },
+          { note_type: 'answered', quote: 'mismatched quote' },
+          { note_type: 'answered', quote: null },
+          { note_type: 'word_choice_span', quote: 'forged span' },
+          { note_type: 'answered', quote: null },
+        ],
+        error: null,
+      },
+    })
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+    vi.spyOn(console, 'info').mockImplementation(() => undefined)
+
+    const response = await POST(scoreRequest())
+
+    expect(response.status).toBe(200)
+    expect(mocks.assembleScore).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ disputes: [] }),
+    )
+  })
+
   it('returns a valid concurrent v2 snapshot without overwriting it', async () => {
     const concurrent = v2Snapshot({ component: 0.7 })
     const setup = adminClient({
@@ -317,6 +436,7 @@ describe('score route database integrity', () => {
       content_status: 'checked',
     })
     expect(mocks.markOwnedAttemptFailure).not.toHaveBeenCalled()
+    expect(setup.disputes.select).not.toHaveBeenCalled()
     expect(setup.attemptReadTraces[1]?.filters).toEqual([
       { column: 'id', value: ATTEMPT_ID },
       { column: 'user_id', value: USER_ID },
