@@ -202,6 +202,15 @@ afterEach(() => {
 })
 
 describe('owned attempt result loading', () => {
+  it('rejects a malformed route id before creating a Supabase client or querying attempts', async () => {
+    await expect(
+      AttemptPage({ params: Promise.resolve({ id: 'not-an-attempt-id' }) }),
+    ).rejects.toBe(NOT_FOUND)
+
+    expect(mocks.notFound).toHaveBeenCalledOnce()
+    expect(mocks.createClient).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['uploading', 'Your recording is still being saved.'],
     ['transcribing', 'Your transcript is still being prepared.'],

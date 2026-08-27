@@ -15,6 +15,7 @@ import {
   type AttemptStatus,
 } from '@/lib/attempts/lifecycle'
 import { logAttemptDiagnostic } from '@/lib/attempts/server'
+import { isUuid } from '@/lib/practice/session'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { readAttemptResult } from '@/lib/results/attempt-result'
 import { compareRetryResults, loadRetryAncestorChain } from '@/lib/results/retry-comparison'
@@ -91,6 +92,7 @@ function processingResult(promptText: string, status: keyof typeof PROCESSING_DE
 
 export default async function AttemptPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+  if (!isUuid(id)) notFound()
 
   const supabase = await createClient()
   const {
