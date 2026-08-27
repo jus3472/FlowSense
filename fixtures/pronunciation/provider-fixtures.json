@@ -1,0 +1,229 @@
+[
+  {
+    "id": "lexical-match-unusual-pronunciation",
+    "expected": {
+      "parse": "ok",
+      "lexicalOutcome": "match",
+      "groundTruthIntelligibility": "intelligible",
+      "deductible": false
+    },
+    "response": {
+      "contractVersion": "v1",
+      "provider": {
+        "id": "azure-speech",
+        "model": "pronunciation-assessment",
+        "version": "spike",
+        "locale": "en-US"
+      },
+      "status": "completed",
+      "words": [
+        {
+          "referenceWord": "water",
+          "recognizedWord": "water",
+          "startMs": 0,
+          "endMs": 420,
+          "lexicalOutcome": "match",
+          "pronunciationAccuracy": 0.52,
+          "pronunciationAvailability": "available",
+          "phonemeAvailability": "available",
+          "phonemes": [
+            { "expected": "t", "recognized": "d", "accuracy": 0.3, "startMs": 130, "endMs": 190 }
+          ],
+          "stressProsody": {
+            "availability": "unsupported",
+            "stressAccuracy": null,
+            "prosodyAccuracy": null,
+            "detail": null
+          },
+          "warning": "Word matched. Accuracy is evidence only."
+        }
+      ],
+      "unsupportedWords": [],
+      "warnings": ["Do not infer a deduction from pronunciation evidence."],
+      "error": null,
+      "eligibleForDeductions": false
+    }
+  },
+  {
+    "id": "lexical-substitution",
+    "expected": { "parse": "ok", "lexicalOutcome": "substitution", "deductible": false },
+    "response": {
+      "contractVersion": "v1",
+      "provider": {
+        "id": "azure-speech",
+        "model": "pronunciation-assessment",
+        "version": "spike",
+        "locale": "en-US"
+      },
+      "status": "completed",
+      "words": [
+        {
+          "referenceWord": "ship",
+          "recognizedWord": "sheep",
+          "startMs": 0,
+          "endMs": 320,
+          "lexicalOutcome": "substitution",
+          "pronunciationAccuracy": null,
+          "pronunciationAvailability": "not_checked",
+          "phonemeAvailability": "not_checked",
+          "phonemes": [],
+          "stressProsody": {
+            "availability": "not_checked",
+            "stressAccuracy": null,
+            "prosodyAccuracy": null,
+            "detail": "Lexical substitution is separate from pronunciation."
+          },
+          "warning": "Do not relabel a substituted word as a pronunciation error."
+        }
+      ],
+      "unsupportedWords": [],
+      "warnings": ["Lexical and pronunciation outcomes are separate."],
+      "error": null,
+      "eligibleForDeductions": false
+    }
+  },
+  {
+    "id": "unsupported-word",
+    "expected": { "parse": "ok", "lexicalOutcome": "unsupported", "deductible": false },
+    "response": {
+      "contractVersion": "v1",
+      "provider": { "id": "speechace", "model": "text-v9", "version": "v9", "locale": "en-US" },
+      "status": "not_checked",
+      "words": [
+        {
+          "referenceWord": "FlowSense",
+          "recognizedWord": "FlowSense",
+          "startMs": 0,
+          "endMs": 600,
+          "lexicalOutcome": "unsupported",
+          "pronunciationAccuracy": null,
+          "pronunciationAvailability": "unsupported",
+          "phonemeAvailability": "unsupported",
+          "phonemes": [],
+          "stressProsody": {
+            "availability": "unsupported",
+            "stressAccuracy": null,
+            "prosodyAccuracy": null,
+            "detail": null
+          },
+          "warning": "Provider lexicon did not support this word."
+        }
+      ],
+      "unsupportedWords": ["FlowSense"],
+      "warnings": ["Unsupported words are not scored."],
+      "error": null,
+      "eligibleForDeductions": false
+    }
+  },
+  {
+    "id": "provider-outage",
+    "expected": { "parse": "ok", "status": "failed", "error": "outage" },
+    "response": {
+      "contractVersion": "v1",
+      "provider": {
+        "id": "azure-speech",
+        "model": "pronunciation-assessment",
+        "version": "spike",
+        "locale": "en-US"
+      },
+      "status": "failed",
+      "words": [],
+      "unsupportedWords": [],
+      "warnings": ["No pronunciation assessment was available."],
+      "error": { "code": "outage", "message": "Provider was unavailable.", "retryable": true },
+      "eligibleForDeductions": false
+    }
+  },
+  {
+    "id": "malformed-response",
+    "expected": { "parse": "error", "error": "malformed_response" },
+    "response": {
+      "contractVersion": "v1",
+      "provider": { "id": "azure-speech" },
+      "status": "completed"
+    }
+  },
+  {
+    "id": "missing-phoneme-support",
+    "expected": { "parse": "ok", "phonemeAvailability": "unsupported" },
+    "response": {
+      "contractVersion": "v1",
+      "provider": {
+        "id": "azure-speech",
+        "model": "pronunciation-assessment",
+        "version": "spike",
+        "locale": "fr-FR"
+      },
+      "status": "completed",
+      "words": [
+        {
+          "referenceWord": "bonjour",
+          "recognizedWord": "bonjour",
+          "startMs": 0,
+          "endMs": 550,
+          "lexicalOutcome": "match",
+          "pronunciationAccuracy": 0.82,
+          "pronunciationAvailability": "available",
+          "phonemeAvailability": "unsupported",
+          "phonemes": [],
+          "stressProsody": {
+            "availability": "unsupported",
+            "stressAccuracy": null,
+            "prosodyAccuracy": null,
+            "detail": "Provider did not return named phonemes for this locale."
+          },
+          "warning": null
+        }
+      ],
+      "unsupportedWords": [],
+      "warnings": ["Phoneme evidence was unavailable for this locale."],
+      "error": null,
+      "eligibleForDeductions": false
+    }
+  },
+  {
+    "id": "intelligible-accent",
+    "expected": {
+      "parse": "ok",
+      "lexicalOutcome": "match",
+      "groundTruthIntelligibility": "intelligible",
+      "deductible": false
+    },
+    "response": {
+      "contractVersion": "v1",
+      "provider": {
+        "id": "azure-speech",
+        "model": "pronunciation-assessment",
+        "version": "spike",
+        "locale": "en-IN"
+      },
+      "status": "completed",
+      "words": [
+        {
+          "referenceWord": "schedule",
+          "recognizedWord": "schedule",
+          "startMs": 0,
+          "endMs": 520,
+          "lexicalOutcome": "match",
+          "pronunciationAccuracy": 0.48,
+          "pronunciationAvailability": "available",
+          "phonemeAvailability": "available",
+          "phonemes": [
+            { "expected": "sk", "recognized": "sk", "accuracy": 0.9, "startMs": 0, "endMs": 80 }
+          ],
+          "stressProsody": {
+            "availability": "not_checked",
+            "stressAccuracy": null,
+            "prosodyAccuracy": null,
+            "detail": "No prosody conclusion."
+          },
+          "warning": "An accent difference is not a lexical error or deduction."
+        }
+      ],
+      "unsupportedWords": [],
+      "warnings": ["Do not use native-similarity aggregate scores."],
+      "error": null,
+      "eligibleForDeductions": false
+    }
+  }
+]
