@@ -638,6 +638,7 @@ describe('v2 provider behavior and prompt contract', () => {
   })
 
   it('does not retry provider outages', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const complete = vi
       .fn<V2ContentDetectorProvider['complete']>()
       .mockRejectedValue(new Error('upstream 500'))
@@ -649,7 +650,15 @@ describe('v2 provider behavior and prompt contract', () => {
     })
     expect(result.status).toBe('not_checked')
     expect(result.calls).toBe(1)
+    expect(result.warnings).toEqual(['The content provider was unavailable.'])
     expect(complete).toHaveBeenCalledTimes(1)
+    expect(warning).toHaveBeenCalledWith({
+      provider: 'deepseek',
+      model: 'fake-v2',
+      code: 'transport_error',
+      status: null,
+    })
+    warning.mockRestore()
   })
 
   it('does not call a provider for an empty prompt or transcript', async () => {

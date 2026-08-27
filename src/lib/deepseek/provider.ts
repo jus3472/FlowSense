@@ -1,7 +1,71 @@
-import { fetchWithTimeout } from '@/lib/net/fetch-with-timeout'
+import { fetchWithTimeout, RequestTimeoutError } from '@/lib/net/fetch-with-timeout'
 
 export const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 export const DEEPSEEK_MODEL = 'deepseek-v4-flash'
+export const CONTENT_PROVIDER_UNAVAILABLE_MESSAGE = 'The content provider was unavailable.'
+
+export type ContentProviderFailureCode =
+  'configuration_error' | 'http_error' | 'invalid_response' | 'timeout' | 'transport_error'
+
+export interface ContentProviderFailureDiagnostic {
+  provider: 'deepseek'
+  model: string
+  code: ContentProviderFailureCode
+  status: number | null
+}
+
+const SAFE_MODEL_PATTERN = /^[a-zA-Z0-9._:-]{1,80}$/
+
+function safeModelName(model: string): string {
+  const candidate = model.trim()
+  return SAFE_MODEL_PATTERN.test(candidate) ? candidate : 'unknown'
+}
+
+function safeHttpStatus(status: number | undefined): number | null {
+  return Number.isInteger(status) && status !== undefined && status >= 100 && status <= 599
+    ? status
+    : null
+}
+
+export class ContentProviderFailure extends Error {
+  readonly diagnostic: Readonly<ContentProviderFailureDiagnostic>
+
+  constructor(code: ContentProviderFailureCode, model: string, status?: number) {
+    super(CONTENT_PROVIDER_UNAVAILABLE_MESSAGE)
+    this.name = 'ContentProviderFailure'
+    // Do not attach the source error as a cause. Transport and configuration
+    // errors can echo request data or credentials when they are serialized.
+    this.diagnostic = Object.freeze({
+      provider: 'deepseek',
+      model: safeModelName(model),
+      code,
+      status: safeHttpStatus(status),
+    })
+  }
+}
+
+const reportedFailures = new WeakSet<ContentProviderFailure>()
+
+/** Logs the bounded diagnostic once, even when multiple failure boundaries see the same error. */
+export function reportContentProviderFailure(
+  error: unknown,
+  model: string,
+  fallbackCode: ContentProviderFailureCode = 'transport_error',
+): ContentProviderFailure {
+  const failure =
+    error instanceof ContentProviderFailure
+      ? error
+      : new ContentProviderFailure(
+          error instanceof RequestTimeoutError ? 'timeout' : fallbackCode,
+          model,
+        )
+
+  if (!reportedFailures.has(failure)) {
+    reportedFailures.add(failure)
+    console.warn(failure.diagnostic)
+  }
+  return failure
+}
 
 export interface ContentModelRequest {
   system: string
@@ -26,42 +90,63 @@ export function createDeepSeekModel(apiKey: string, model = DEEPSEEK_MODEL): Con
   return {
     name: model,
     async complete({ system, user, timeoutMs = 30_000 }) {
-      const response = await fetchWithTimeout(
-        `${DEEPSEEK_BASE_URL}/chat/completions`,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model,
-            messages: [
-              { role: 'system', content: system },
-              { role: 'user', content: user },
-            ],
-            // Verified against a live call: without this the model still emits a
-            // reasoning trace and bills the tokens. These calls return structured
-            // JSON and have no use for one.
-            thinking: { type: 'disabled' },
-            response_format: { type: 'json_object' },
-            temperature: 0,
-          }),
-        },
-        { label: 'Checking your content', timeoutMs },
-      )
+      let response: Response
+      try {
+        response = await fetchWithTimeout(
+          `${DEEPSEEK_BASE_URL}/chat/completions`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model,
+              messages: [
+                { role: 'system', content: system },
+                { role: 'user', content: user },
+              ],
+              // Verified against a live call: without this the model still emits a
+              // reasoning trace and bills the tokens. These calls return structured
+              // JSON and have no use for one.
+              thinking: { type: 'disabled' },
+              response_format: { type: 'json_object' },
+              temperature: 0,
+            }),
+          },
+          { label: 'Checking your content', timeoutMs },
+        )
+      } catch (error) {
+        throw reportContentProviderFailure(error, model)
+      }
 
       if (!response.ok) {
-        const detail = await response.text()
-        throw new Error(
-          `DeepSeek returned ${response.status}: ${detail.slice(0, 200) || 'no explanation'}`,
+        try {
+          await response.body?.cancel()
+        } catch {
+          // Releasing the response is best effort and must not replace the safe failure.
+        }
+        throw reportContentProviderFailure(
+          new ContentProviderFailure('http_error', model, response.status),
+          model,
         )
       }
 
-      const body: unknown = await response.json()
+      let body: unknown
+      try {
+        body = await response.json()
+      } catch {
+        throw reportContentProviderFailure(
+          new ContentProviderFailure('invalid_response', model, response.status),
+          model,
+        )
+      }
       const choice = isRecord(body) && Array.isArray(body.choices) ? body.choices[0] : undefined
       const message = isRecord(choice) ? choice.message : undefined
       const content = isRecord(message) ? message.content : undefined
 
       if (typeof content !== 'string' || content.trim().length === 0) {
-        throw new Error('DeepSeek returned no content.')
+        throw reportContentProviderFailure(
+          new ContentProviderFailure('invalid_response', model, response.status),
+          model,
+        )
       }
       return content
     },

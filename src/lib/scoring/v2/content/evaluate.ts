@@ -1,4 +1,8 @@
 import {
+  CONTENT_PROVIDER_UNAVAILABLE_MESSAGE,
+  reportContentProviderFailure,
+} from '@/lib/deepseek/provider'
+import {
   V2_CONTENT_DETECTOR_VERSION,
   type MechanicallyCountedSpan,
   type TranscriptEvidenceSpan,
@@ -395,14 +399,11 @@ export async function runV2ContentEvaluation(
       return { ...parseV2ContentResponse(raw, input), provider: input.provider.name, calls }
     } catch (error) {
       if (!(error instanceof V2ContentParseError)) {
-        return notChecked(
-          input.provider.name,
-          error instanceof Error ? error.message : 'Content provider failed.',
-          calls,
-        )
+        reportContentProviderFailure(error, input.provider.name)
+        return notChecked(input.provider.name, CONTENT_PROVIDER_UNAVAILABLE_MESSAGE, calls)
       }
       if (attempt === 1) return notChecked(input.provider.name, error.message, calls)
     }
   }
-  return notChecked(input.provider.name, 'Content provider failed.', calls)
+  return notChecked(input.provider.name, CONTENT_PROVIDER_UNAVAILABLE_MESSAGE, calls)
 }
