@@ -55,21 +55,32 @@ default.
 
 ## Commands
 
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Start the local development server |
-| `npm run build` | Create a production build |
-| `npm run lint` | Run ESLint |
-| `npm run typecheck` | Run strict TypeScript checking |
-| `npm run test` | Run the Vitest suite |
-| `npm run verify` | Run typecheck, lint, and tests |
-| `npm run db:push` | Apply migrations in `supabase/migrations` |
-| `npm run inspect:attempts` | Inspect stored capture timelines |
-| `npm run inspect:scores` | Inspect scored attempt breakdowns |
-| `npm run inspect:rewrites` | Audit stored tightened rewrites |
+| Command                             | Purpose                                     |
+| ----------------------------------- | ------------------------------------------- |
+| `npm run dev`                       | Start the local development server          |
+| `npm run build`                     | Create a production build                   |
+| `npm run lint`                      | Run ESLint                                  |
+| `npm run typecheck`                 | Run strict TypeScript checking              |
+| `npm run test`                      | Run the Vitest suite                        |
+| `npm run verify`                    | Run typecheck, lint, and tests              |
+| `npm run db:push`                   | Apply migrations in `supabase/migrations`   |
+| `npm run inspect:attempts`          | Inspect stored capture timelines            |
+| `npm run inspect:scores`            | Inspect scored attempt breakdowns           |
+| `npm run inspect:rewrites`          | Audit stored tightened rewrites             |
+| `npm run check:scoring-calibration` | Run generated v2 scoring calibration corpus |
 
 `npm run inspect:rewrites -- --write` updates stored rewrites and can call the content provider
 when a retry is necessary. Run it deliberately.
+
+## Scoring calibration
+
+`npm run check:scoring-calibration` runs generated, local-only evaluator fixtures against checked-in
+v2 baselines. It makes no provider or network calls. Baselines are never rewritten by the command;
+after reviewing an intentional rubric or evaluator change, update the versioned expectations in
+`src/lib/scoring/v2/calibration.ts` in the same review as the scoring change.
+The unclear-pronunciation and intelligible second-language-accent fixtures carry normalized
+evidence only, with `eligibleForDeductions=false`. They do not assess native similarity or deduct
+for an intelligible accent.
 
 ## Database and deployment
 
