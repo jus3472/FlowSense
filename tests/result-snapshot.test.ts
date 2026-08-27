@@ -156,6 +156,24 @@ describe('stored result snapshot decoder', () => {
     })
   })
 
+  it.each(['__proto__', 'constructor', 'prototype', 'toString', ''])(
+    'classifies the hostile version key %j as unsupported',
+    (key) => {
+      const supported = v2Snapshot()
+
+      expect(decodeStoredSectionSnapshot({ ...supported, version: key })).toEqual({
+        kind: 'unsupported_version',
+        scoreVersion: key,
+        rubricVersion: 'v2',
+      })
+      expect(decodeStoredSectionSnapshot({ ...supported, rubric_version: key })).toEqual({
+        kind: 'unsupported_version',
+        scoreVersion: 'v2.score.1',
+        rubricVersion: key,
+      })
+    },
+  )
+
   it('fails closed for malformed current or unversioned snapshots', () => {
     const supported = v2Snapshot()
     const missingCategory = { ...supported.categories }

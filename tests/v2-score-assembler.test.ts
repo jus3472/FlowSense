@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   assembleV2Score,
   hasStoredScorePayload,
+  isScorePayloadForDefinition,
   isV2ScorePayload,
   shouldReuseStoredV2Score,
   V2_SCORE_PAYLOAD_VERSION,
@@ -10,6 +11,7 @@ import type { ClarityResult } from '@/lib/scoring/v2/clarity'
 import type { V2ContentEvaluation } from '@/lib/scoring/v2/content/contracts'
 import type { DeliveryEvaluation } from '@/lib/scoring/v2/delivery'
 import type { FluencyEvaluation } from '@/lib/scoring/v2/fluency'
+import { CURRENT_SCORING_DEFINITION, type ScoringDefinition } from '@/lib/scoring/v2/registry'
 import { rubricFor } from '@/lib/scoring/v2/rubrics'
 
 function fluency(component = 0.5): FluencyEvaluation {
@@ -191,6 +193,47 @@ describe('v2 score assembler', () => {
       ).toEqual(expected[mode])
       expect(result.total_earned_points).toBe(50)
     }
+  })
+
+  it('validates a synthetic historical payload against its own frozen definition', () => {
+    const current = assemble('practice')
+    const currentPractice = CURRENT_SCORING_DEFINITION.modeRubrics.practice
+    const historicalPractice = Object.freeze({
+      ...currentPractice,
+      categories: Object.freeze({
+        ...currentPractice.categories,
+        fluency: Object.freeze({ ...currentPractice.categories.fluency, weight: 21 }),
+        clarity: Object.freeze({ ...currentPractice.categories.clarity, weight: 21 }),
+      }),
+    })
+    const historicalDefinition = Object.freeze({
+      scorePayloadVersion: 'v2.score.0',
+      rubricVersion: 'v2',
+      modeRubrics: Object.freeze({
+        ...CURRENT_SCORING_DEFINITION.modeRubrics,
+        practice: historicalPractice,
+      }),
+    }) satisfies ScoringDefinition
+    const historicalPayload = {
+      ...current,
+      version: 'v2.score.0',
+      total_earned_points: 51,
+      categories: {
+        ...current.categories,
+        fluency: { ...current.categories.fluency, max_points: 21 },
+        clarity: { ...current.categories.clarity, max_points: 21, earned_points: 11 },
+      },
+    }
+
+    expect(isScorePayloadForDefinition(historicalPayload, historicalDefinition)).toBe(true)
+    expect(isScorePayloadForDefinition(historicalPayload, CURRENT_SCORING_DEFINITION)).toBe(false)
+    expect(
+      isScorePayloadForDefinition(
+        { ...historicalPayload, rubric_version: 'future' },
+        historicalDefinition,
+      ),
+    ).toBe(false)
+    expect(isV2ScorePayload(historicalPayload)).toBe(false)
   })
 
   it('rounds each weighted category deterministically before summing', () => {

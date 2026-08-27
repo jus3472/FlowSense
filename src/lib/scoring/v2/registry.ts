@@ -8,10 +8,6 @@ export interface ScoringDefinition {
   readonly modeRubrics: Readonly<Record<PracticeMode, ModeRubricConfig>>
 }
 
-type ScoringDefinitionRegistry = Readonly<
-  Record<string, Readonly<Record<string, ScoringDefinition>>>
->
-
 /** The definition used only when assembling a new score. */
 export const CURRENT_SCORING_DEFINITION = Object.freeze({
   scorePayloadVersion: 'v2.score.1',
@@ -23,17 +19,28 @@ export const CURRENT_SCORING_DEFINITION = Object.freeze({
  * Historical scoring definitions are addressed by their exact persisted pair.
  * Never substitute CURRENT_SCORING_DEFINITION when a lookup misses.
  */
-export const SCORING_DEFINITION_REGISTRY: ScoringDefinitionRegistry = Object.freeze({
-  [CURRENT_SCORING_DEFINITION.scorePayloadVersion]: Object.freeze({
-    [CURRENT_SCORING_DEFINITION.rubricVersion]: CURRENT_SCORING_DEFINITION,
-  }),
-})
+export const SCORING_DEFINITIONS: readonly ScoringDefinition[] = Object.freeze([
+  CURRENT_SCORING_DEFINITION,
+])
+
+function definitionKey(scorePayloadVersion: string, rubricVersion: string): string {
+  return JSON.stringify([scorePayloadVersion, rubricVersion])
+}
+
+// This Map is private so callers cannot mutate the registry. Map lookup also
+// avoids inherited-property keys such as __proto__ and constructor.
+const DEFINITIONS_BY_PAIR = new Map(
+  SCORING_DEFINITIONS.map((definition) => [
+    definitionKey(definition.scorePayloadVersion, definition.rubricVersion),
+    definition,
+  ]),
+)
 
 export function scoringDefinitionFor(
   scorePayloadVersion: string,
   rubricVersion: string,
 ): ScoringDefinition | null {
-  return SCORING_DEFINITION_REGISTRY[scorePayloadVersion]?.[rubricVersion] ?? null
+  return DEFINITIONS_BY_PAIR.get(definitionKey(scorePayloadVersion, rubricVersion)) ?? null
 }
 
 export function supportsScoringDefinition(

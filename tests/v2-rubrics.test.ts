@@ -1,7 +1,7 @@
 import { PRACTICE_MODES, SKILL_CATEGORIES } from '@/lib/practice/contracts'
 import {
   CURRENT_SCORING_DEFINITION,
-  SCORING_DEFINITION_REGISTRY,
+  SCORING_DEFINITIONS,
   scoringDefinitionFor,
   supportsScoringDefinition,
 } from '@/lib/scoring/v2/registry'
@@ -66,7 +66,7 @@ describe('v2 scoring definitions', () => {
   it('resolves only the exact registered score and rubric pair', () => {
     expect(scoringDefinitionFor('v2.score.1', 'v2')).toBe(CURRENT_SCORING_DEFINITION)
     expect(supportsScoringDefinition('v2.score.1', 'v2')).toBe(true)
-    expect(SCORING_DEFINITION_REGISTRY['v2.score.1']?.v2).toBe(CURRENT_SCORING_DEFINITION)
+    expect(SCORING_DEFINITIONS).toEqual([CURRENT_SCORING_DEFINITION])
 
     expect(scoringDefinitionFor('v3.score.1', 'v2')).toBeNull()
     expect(scoringDefinitionFor('v2.score.1', 'v3')).toBeNull()
@@ -74,12 +74,22 @@ describe('v2 scoring definitions', () => {
     expect(supportsScoringDefinition('v2.score.1', 'v3')).toBe(false)
   })
 
+  it.each(['__proto__', 'constructor', 'prototype', 'toString', ''])(
+    'fails closed for the hostile registry key %j',
+    (key) => {
+      expect(scoringDefinitionFor(key, 'v2')).toBeNull()
+      expect(scoringDefinitionFor('v2.score.1', key)).toBeNull()
+      expect(scoringDefinitionFor(key, key)).toBeNull()
+      expect(supportsScoringDefinition(key, 'v2')).toBe(false)
+      expect(supportsScoringDefinition('v2.score.1', key)).toBe(false)
+    },
+  )
+
   it('freezes the registry, definition, rubrics, categories, and check lists', () => {
     const rubric = rubricFor('practice')
     const category = rubric.categories.fluency
 
-    expect(Object.isFrozen(SCORING_DEFINITION_REGISTRY)).toBe(true)
-    expect(Object.isFrozen(SCORING_DEFINITION_REGISTRY['v2.score.1'])).toBe(true)
+    expect(Object.isFrozen(SCORING_DEFINITIONS)).toBe(true)
     expect(Object.isFrozen(CURRENT_SCORING_DEFINITION)).toBe(true)
     expect(Object.isFrozen(CURRENT_SCORING_DEFINITION.modeRubrics)).toBe(true)
     expect(Object.isFrozen(MODE_RUBRICS)).toBe(true)
