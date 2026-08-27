@@ -17,8 +17,8 @@ export function MarketingFooter() {
           Your recordings stay in your account and you can delete any of them.
         </p>
         <p className="text-muted text-sm">
-          FlowSense measures how a response lands. It never comments on your accent, your grammar,
-          or the words you choose.
+          FlowSense measures one response across six categories. Feedback stays tied to concrete
+          evidence from that response.
         </p>
 
         <div className="flex flex-wrap items-center justify-between gap-4 pt-6">
