@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server'
 import { apiError } from '@/lib/api/responses'
-import { ATTEMPT_FAILURE_CODES, canRunScoring } from '@/lib/attempts/lifecycle'
+import { validateOwnedAttemptAudioPath } from '@/lib/attempts/audio-path'
+import {
+  ATTEMPT_FAILURE_CODES,
+  canRunScoring,
+  classifyAttemptRubric,
+} from '@/lib/attempts/lifecycle'
 import {
   authenticatedAttemptContext,
   logAttemptDiagnostic,
@@ -113,6 +118,25 @@ export async function POST(request: Request) {
   }
   if (!attempt) return apiError('That attempt does not exist.', 404)
 
+  const rubricKind = classifyAttemptRubric(attempt.rubric_version)
+  const v2Mode = isPracticeMode(attempt.practice_mode) ? attempt.practice_mode : null
+  if (rubricKind === 'unsupported' || (rubricKind === 'v2' && !v2Mode)) {
+    const isActive = ['uploading', 'transcribing', 'scoring'].includes(attempt.status)
+    if (isActive) {
+      await markOwnedAttemptFailure(
+        admin,
+        userId,
+        attemptId,
+        [attempt.status],
+        'failed',
+        rubricKind === 'unsupported'
+          ? ATTEMPT_FAILURE_CODES.unsupportedRubricVersion
+          : ATTEMPT_FAILURE_CODES.scoringInputInvalid,
+      )
+    }
+    return apiError('This attempt uses an unsupported scoring version.', 409)
+  }
+
   // A structurally valid v2 snapshot is immutable. Legacy snapshots remain on
   // the existing path so an explicit "Run the checks" retry can call its
   // content provider again after a prior not_checked result.
@@ -180,12 +204,25 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (attempt.rubric_version === 'v2' && isPracticeMode(attempt.practice_mode)) {
+    if (rubricKind === 'v2' && v2Mode) {
+      const ownedAudio = validateOwnedAttemptAudioPath({
+        userId,
+        attemptId,
+        audioPath: attempt.audio_path,
+        metrics,
+      })
+      if (attempt.audio_path && !ownedAudio) {
+        logAttemptDiagnostic(
+          'validate_pronunciation_recording_path',
+          ATTEMPT_FAILURE_CODES.recordingPathInvalid,
+          attemptId,
+        )
+      }
       const azureConfig = azureSpeechConfig()
       const pronunciationPromise = collectPronunciationEvidence({
         config: azureConfig,
         provider: azureConfig ? createAzurePronunciationProvider(azureConfig) : null,
-        audioPath: attempt.audio_path,
+        audioPath: ownedAudio?.storagePath ?? null,
         capture,
         transcript,
         transcriptWords,
@@ -199,7 +236,7 @@ export async function POST(request: Request) {
       }
       const contentPromise = runV2ContentEvaluation({
         provider,
-        mode: attempt.practice_mode,
+        mode: v2Mode,
         prompt: attempt.prompt_text,
         transcript,
         mechanicallyCounted: mechanicalSpans(transcript, transcriptWords),
@@ -208,7 +245,7 @@ export async function POST(request: Request) {
       })
       const [pronunciation, content] = await Promise.all([pronunciationPromise, contentPromise])
       const assembled = assembleV2Score({
-        mode: attempt.practice_mode,
+        mode: v2Mode,
         fluency: evaluateFluency({ capture, words: transcriptWords, transcript }),
         delivery: evaluateDelivery(capture),
         clarity: analyseClarity(transcriptWords, capture, pronunciation, transcript),

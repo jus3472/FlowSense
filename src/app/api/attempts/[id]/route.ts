@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { apiError } from '@/lib/api/responses'
+import { validateOwnedAttemptAudioPath } from '@/lib/attempts/audio-path'
 import { ATTEMPT_FAILURE_CODES, canFinalizeAttemptUpload } from '@/lib/attempts/lifecycle'
 import {
   authenticatedAttemptContext,
@@ -14,15 +15,6 @@ import type { AttemptMetrics } from '@/lib/types/metrics'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function storedUpload(metrics: unknown): AttemptMetrics['upload'] | null {
-  if (!isRecord(metrics) || !isRecord(metrics.upload)) return null
-  const storagePath = metrics.upload.storage_path
-  const mimeType = metrics.upload.mime_type
-  return typeof storagePath === 'string' && typeof mimeType === 'string'
-    ? { storage_path: storagePath, mime_type: mimeType }
-    : null
 }
 
 async function recordingExists(
@@ -74,13 +66,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
   if (!attempt) return apiError('That attempt does not exist.', 404)
 
-  const expected = storedUpload(attempt.metrics)
-  if (
-    !expected ||
-    audioPath !== expected.storage_path ||
-    capture.mime_type !== expected.mime_type ||
-    !audioPath.startsWith(`${userId}/${attempt.id}.`)
-  ) {
+  const ownedAudio = validateOwnedAttemptAudioPath({
+    userId,
+    attemptId: attempt.id,
+    audioPath,
+    metrics: attempt.metrics,
+  })
+  if (!ownedAudio || capture.mime_type !== ownedAudio.mimeType) {
     return apiError('The recording details did not match this attempt.', 400)
   }
 
@@ -96,7 +88,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return apiError('That attempt cannot accept recording details now.', 409)
   }
 
-  const presence = await recordingExists(admin, userId, audioPath)
+  const presence = await recordingExists(admin, userId, ownedAudio.storagePath)
   if (presence.failed) {
     await markOwnedAttemptFailure(
       admin,
@@ -128,7 +120,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     [attempt.status],
     'transcribing',
     {
-      audio_path: audioPath,
+      audio_path: ownedAudio.storagePath,
       duration_ms: capture.duration_ms,
       metrics: JSON.parse(JSON.stringify(metrics)),
     },
@@ -147,7 +139,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
   const { data: attempt, error: readError } = await admin
     .from('attempts')
-    .select('id, audio_path')
+    .select('id, audio_path, metrics')
     .eq('id', id)
     .eq('user_id', userId)
     .maybeSingle()
@@ -158,7 +150,17 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   if (!attempt) return apiError('That attempt does not exist.', 404)
 
   if (attempt.audio_path) {
-    const { error } = await admin.storage.from(RECORDINGS_BUCKET).remove([attempt.audio_path])
+    const ownedAudio = validateOwnedAttemptAudioPath({
+      userId,
+      attemptId: attempt.id,
+      audioPath: attempt.audio_path,
+      metrics: attempt.metrics,
+    })
+    if (!ownedAudio) {
+      logAttemptDiagnostic('delete_recording', ATTEMPT_FAILURE_CODES.recordingPathInvalid, id)
+      return apiError('The saved recording path could not be verified.', 409)
+    }
+    const { error } = await admin.storage.from(RECORDINGS_BUCKET).remove([ownedAudio.storagePath])
     if (error) {
       logAttemptDiagnostic('delete_recording', 'recording_delete_failed', id, error)
       return apiError('The response could not be deleted.', 500)

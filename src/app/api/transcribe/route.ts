@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { apiError } from '@/lib/api/responses'
+import { validateOwnedAttemptAudioPath } from '@/lib/attempts/audio-path'
 import {
   ATTEMPT_FAILURE_CODES,
   canRunTranscription,
@@ -76,10 +77,6 @@ export async function POST(request: Request) {
   if (!canRunTranscription(attempt.status)) {
     return apiError('That attempt is not ready to be transcribed.', 409)
   }
-  if (!attempt.audio_path) {
-    return apiError('The recording was not saved, so there is nothing to transcribe.', 400)
-  }
-
   if (attempt.status === 'failed' || attempt.status === 'timed_out') {
     const resumed = await transitionOwnedAttempt(
       admin,
@@ -91,9 +88,32 @@ export async function POST(request: Request) {
     if (!resumed) return apiError('That attempt could not resume transcription.', 409)
   }
 
+  const ownedAudio = validateOwnedAttemptAudioPath({
+    userId,
+    attemptId,
+    audioPath: attempt.audio_path,
+    metrics,
+  })
+  if (!ownedAudio) {
+    logAttemptDiagnostic(
+      'validate_recording_path',
+      ATTEMPT_FAILURE_CODES.recordingPathInvalid,
+      attemptId,
+    )
+    await markOwnedAttemptFailure(
+      admin,
+      userId,
+      attemptId,
+      ['transcribing'],
+      'failed',
+      ATTEMPT_FAILURE_CODES.recordingPathInvalid,
+    )
+    return apiError('The saved recording path could not be verified.', 409)
+  }
+
   const { data: audio, error: downloadError } = await admin.storage
     .from(RECORDINGS_BUCKET)
-    .download(attempt.audio_path)
+    .download(ownedAudio.storagePath)
   if (downloadError || !audio) {
     logAttemptDiagnostic(
       'download_recording',
@@ -112,7 +132,7 @@ export async function POST(request: Request) {
     return apiError('The saved recording could not be read.', 502)
   }
 
-  const contentType = metrics.capture?.mime_type ?? metrics.upload?.mime_type ?? 'audio/webm'
+  const contentType = ownedAudio.mimeType
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), DEEPGRAM_TIMEOUT_MS)
   const url = buildDeepgramUrl()

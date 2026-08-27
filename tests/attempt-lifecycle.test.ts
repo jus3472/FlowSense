@@ -4,8 +4,8 @@ import {
   customCreationSession,
   initialAttemptMetrics,
   libraryCreationSession,
-  matchesStoredAttemptCreation,
   retryCreationSession,
+  storedAttemptReuse,
 } from '@/lib/attempts/creation'
 import {
   ATTEMPT_STATUSES,
@@ -13,6 +13,7 @@ import {
   canRunScoring,
   canRunTranscription,
   canTransitionAttempt,
+  classifyAttemptRubric,
   isAttemptStatus,
 } from '@/lib/attempts/lifecycle'
 import type { CreateAttemptPayload } from '@/lib/recording/attempt-payload'
@@ -65,6 +66,14 @@ describe('attempt lifecycle contract', () => {
     expect(canRunTranscription('uploading')).toBe(false)
     expect(canRunScoring('timed_out')).toBe(true)
     expect(canRunScoring('transcribing')).toBe(false)
+  })
+
+  it('allows only v2 or explicit legacy metadata into a scoring implementation', () => {
+    expect(classifyAttemptRubric('v2')).toBe('v2')
+    expect(classifyAttemptRubric('v1')).toBe('legacy')
+    expect(classifyAttemptRubric(null)).toBe('legacy')
+    expect(classifyAttemptRubric('v3')).toBe('unsupported')
+    expect(classifyAttemptRubric(undefined)).toBe('unsupported')
   })
 })
 
@@ -134,7 +143,7 @@ describe('authoritative attempt creation', () => {
     expect(retryCreationSession({ ...requested, mode: 'interview' }, parent)).toBeNull()
   })
 
-  it('returns one exact storage path and detects conflicting idempotency reuse', () => {
+  it('reuses one immutable creation snapshot without resolving its current source', () => {
     const session = libraryCreationSession(LIBRARY_REQUEST, PROMPT)
     expect(session).not.toBeNull()
     if (!session) return
@@ -155,26 +164,91 @@ describe('authoritative attempt creation', () => {
     }
 
     expect(storagePath).toBe(`${USER_ID}/${ATTEMPT_ID}.webm`)
-    expect(matchesStoredAttemptCreation(stored, LIBRARY_REQUEST, session, storagePath, 'v2')).toBe(
-      true,
-    )
+    expect(storedAttemptReuse(stored, LIBRARY_REQUEST, USER_ID, 'v2')).toEqual({ storagePath })
     expect(
-      matchesStoredAttemptCreation(
+      storedAttemptReuse(
+        { ...stored, prompt_id: null, retry_of_attempt_id: null },
+        LIBRARY_REQUEST,
+        USER_ID,
+        'v2',
+      ),
+    ).toEqual({ storagePath })
+  })
+
+  it('reuses a stored retry after its parent foreign key becomes unavailable', () => {
+    const request: CreateAttemptPayload = {
+      ...LIBRARY_REQUEST,
+      retryOfAttemptId: ATTEMPT_ID,
+    }
+    const session = retryCreationSession(request, {
+      id: ATTEMPT_ID,
+      prompt_id: PROMPT_ID,
+      prompt_text: PROMPT.text,
+      practice_mode: 'practice',
+      prompt_source: 'library',
+      prompt_difficulty: 'beginner',
+      metrics: { practice: { target_duration_seconds: 30 } },
+      status: 'done',
+    })
+    expect(session).not.toBeNull()
+    if (!session) return
+
+    const retryId = '20000000-0000-4000-8000-000000000004'
+    const storagePath = attemptStoragePath(USER_ID, retryId, request.mimeType)
+    const stored = {
+      id: retryId,
+      prompt_id: null,
+      prompt_text: session.promptText,
+      duration_ms: request.durationMs,
+      practice_mode: session.mode,
+      prompt_source: session.source,
+      prompt_difficulty: session.difficulty,
+      rubric_version: 'v2',
+      retry_of_attempt_id: null,
+      client_request_id: request.clientRequestId,
+      metrics: initialAttemptMetrics(session, request.mimeType, storagePath),
+    }
+
+    expect(storedAttemptReuse(stored, request, USER_ID, 'v2')).toEqual({ storagePath })
+  })
+
+  it('rejects conflicting idempotency-key reuse', () => {
+    const session = libraryCreationSession(LIBRARY_REQUEST, PROMPT)
+    expect(session).not.toBeNull()
+    if (!session) return
+    const storagePath = attemptStoragePath(USER_ID, ATTEMPT_ID, LIBRARY_REQUEST.mimeType)
+    const stored = {
+      id: ATTEMPT_ID,
+      prompt_id: session.promptId,
+      prompt_text: session.promptText,
+      duration_ms: LIBRARY_REQUEST.durationMs,
+      practice_mode: session.mode,
+      prompt_source: session.source,
+      prompt_difficulty: session.difficulty,
+      rubric_version: 'v2',
+      retry_of_attempt_id: null,
+      client_request_id: REQUEST_ID,
+      metrics: initialAttemptMetrics(session, LIBRARY_REQUEST.mimeType, storagePath),
+    }
+
+    expect(
+      storedAttemptReuse(
         stored,
         { ...LIBRARY_REQUEST, durationMs: LIBRARY_REQUEST.durationMs + 1 },
-        session,
-        storagePath,
+        USER_ID,
         'v2',
       ),
-    ).toBe(false)
+    ).toBeNull()
     expect(
-      matchesStoredAttemptCreation(
-        stored,
-        { ...LIBRARY_REQUEST, mimeType: 'audio/mp4' },
-        session,
-        `${USER_ID}/${ATTEMPT_ID}.m4a`,
+      storedAttemptReuse(stored, { ...LIBRARY_REQUEST, mimeType: 'audio/mp4' }, USER_ID, 'v2'),
+    ).toBeNull()
+    expect(
+      storedAttemptReuse(
+        { ...stored, metrics: { ...stored.metrics, creation: undefined } },
+        LIBRARY_REQUEST,
+        USER_ID,
         'v2',
       ),
-    ).toBe(false)
+    ).toBeNull()
   })
 })

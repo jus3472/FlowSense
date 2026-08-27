@@ -34,6 +34,28 @@ describe('server-owned attempt boundary', () => {
     expect(createRoute).toContain('retryCreationSession(payload, parent)')
     expect(browserApi).toContain('requestIdsBySession')
     expect(browserApi).toContain('clientRequestId = requestIdForSession(session)')
+    expect(createRoute.indexOf(".eq('client_request_id', payload.clientRequestId)")).toBeLessThan(
+      createRoute.indexOf('const resolved = await authoritativeSession'),
+    )
+    expect(createRoute).toContain('storedAttemptReuse(existingResult.data')
+  })
+
+  it('validates an exact owned path before every service-role storage operation', () => {
+    const attemptRoute = readFileSync('src/app/api/attempts/[id]/route.ts', 'utf8')
+    const transcribeRoute = readFileSync('src/app/api/transcribe/route.ts', 'utf8')
+    const scoreRoute = readFileSync('src/app/api/score/route.ts', 'utf8')
+
+    for (const source of [attemptRoute, transcribeRoute, scoreRoute]) {
+      expect(source).toContain('validateOwnedAttemptAudioPath')
+    }
+    expect(attemptRoute).toContain('.remove([ownedAudio.storagePath])')
+    expect(attemptRoute).not.toContain('.remove([attempt.audio_path])')
+    expect(transcribeRoute).toContain('.download(ownedAudio.storagePath)')
+    expect(transcribeRoute).not.toContain('.download(attempt.audio_path)')
+    expect(scoreRoute).toContain('audioPath: ownedAudio?.storagePath ?? null')
+    expect(scoreRoute).toContain(
+      'analyseClarity(transcriptWords, capture, pronunciation, transcript)',
+    )
   })
 
   it('persists transcript quality and never logs raw provider bodies', () => {
@@ -53,5 +75,14 @@ describe('server-owned attempt boundary', () => {
     expect(scoreRoute).toContain(".eq('content_result->>status', 'not_checked')")
     expect(disputeRoute).not.toContain(".from('attempts')\n    .update")
     expect(disputeRoute).toContain("admin.from('note_feedback').insert")
+  })
+
+  it('rejects unknown rubric versions before v2 reuse or legacy dispatch', () => {
+    const scoreRoute = readFileSync('src/app/api/score/route.ts', 'utf8')
+    const guard = scoreRoute.indexOf("rubricKind === 'unsupported'")
+    expect(guard).toBeGreaterThan(-1)
+    expect(guard).toBeLessThan(scoreRoute.indexOf('if (shouldReuseStoredV2Score'))
+    expect(scoreRoute).toContain('ATTEMPT_FAILURE_CODES.unsupportedRubricVersion')
+    expect(scoreRoute).toContain("if (rubricKind === 'v2' && v2Mode)")
   })
 })

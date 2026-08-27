@@ -100,6 +100,10 @@ export function initialAttemptMetrics(
   storagePath: string,
 ): AttemptMetrics {
   return {
+    creation: {
+      prompt_id: session.promptId,
+      retry_of_attempt_id: session.retryOfAttemptId,
+    },
     practice: {
       target_duration_seconds: session.targetDurationSeconds,
       ...(session.additionalContext ? { additional_context: session.additionalContext } : {}),
@@ -108,32 +112,40 @@ export function initialAttemptMetrics(
   }
 }
 
-/** Prevents one idempotency key from being reused for a different logical recording. */
-export function matchesStoredAttemptCreation(
+export type StoredAttemptReuse = { storagePath: string } | null
+
+/** Resolves an idempotent replay only from the immutable stored creation snapshot. */
+export function storedAttemptReuse(
   stored: StoredCreationSnapshot,
   requested: CreateAttemptPayload,
-  session: PracticeSessionDescriptor,
-  storagePath: string,
+  userId: string,
   rubricVersion: string,
-): boolean {
-  if (!isRecord(stored.metrics)) return false
+): StoredAttemptReuse {
+  if (!isRecord(stored.metrics)) return null
   const practice = stored.metrics.practice
+  const creation = stored.metrics.creation
   const upload = stored.metrics.upload
-  if (!isRecord(practice) || !isRecord(upload)) return false
+  if (!isRecord(practice) || !isRecord(creation) || !isRecord(upload)) return null
+  if (typeof upload.storage_path !== 'string' || typeof upload.mime_type !== 'string') return null
+  const storagePath = attemptStoragePath(userId, stored.id, requested.mimeType)
 
-  return (
+  const matches =
     stored.client_request_id === requested.clientRequestId &&
-    stored.prompt_id === session.promptId &&
-    stored.prompt_text === session.promptText &&
+    stored.prompt_text === requested.promptText &&
     stored.duration_ms === requested.durationMs &&
-    stored.practice_mode === session.mode &&
-    stored.prompt_source === session.source &&
-    stored.prompt_difficulty === session.difficulty &&
+    stored.practice_mode === requested.mode &&
+    stored.prompt_source === requested.source &&
+    stored.prompt_difficulty === requested.difficulty &&
     stored.rubric_version === rubricVersion &&
-    stored.retry_of_attempt_id === session.retryOfAttemptId &&
-    practice.target_duration_seconds === session.targetDurationSeconds &&
-    (practice.additional_context ?? undefined) === session.additionalContext &&
+    creation.prompt_id === requested.promptId &&
+    creation.retry_of_attempt_id === requested.retryOfAttemptId &&
+    (stored.prompt_id === requested.promptId || stored.prompt_id === null) &&
+    (stored.retry_of_attempt_id === requested.retryOfAttemptId ||
+      stored.retry_of_attempt_id === null) &&
+    practice.target_duration_seconds === requested.targetDurationSeconds &&
+    (practice.additional_context ?? undefined) === requested.additionalContext &&
     upload.storage_path === storagePath &&
     upload.mime_type === requested.mimeType
-  )
+
+  return matches ? { storagePath } : null
 }

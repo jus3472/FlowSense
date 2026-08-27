@@ -45,6 +45,11 @@ export interface AttemptUploadMetrics {
   mime_type: string
 }
 
+export interface AttemptCreationMetrics {
+  prompt_id: string | null
+  retry_of_attempt_id: string | null
+}
+
 /** Everything the mechanical half computed, stored beside the raw capture. */
 export interface DeliveryBlock {
   metrics: unknown
@@ -60,6 +65,7 @@ export interface AttemptMetrics {
   transcript?: TranscriptMetrics
   delivery?: DeliveryBlock
   practice?: { target_duration_seconds?: number; additional_context?: string }
+  creation?: AttemptCreationMetrics
   upload?: AttemptUploadMetrics
   pronunciation?: PronunciationEvaluation
 }

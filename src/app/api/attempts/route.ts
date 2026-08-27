@@ -6,8 +6,8 @@ import {
   customCreationSession,
   initialAttemptMetrics,
   libraryCreationSession,
-  matchesStoredAttemptCreation,
   retryCreationSession,
+  storedAttemptReuse,
 } from '@/lib/attempts/creation'
 import {
   authenticatedAttemptContext,
@@ -86,18 +86,6 @@ export async function POST(request: Request) {
   if (!parsed.ok) return apiError(parsed.error, 400)
   const payload = parsed.value
 
-  const resolved = await authoritativeSession(admin, userId, payload)
-  if (resolved.failed) return apiError('The attempt could not be created.', 500)
-  if (!resolved.session) {
-    return apiError(
-      payload.retryOfAttemptId
-        ? 'That retry session is no longer available.'
-        : 'That prompt is no longer available.',
-      409,
-    )
-  }
-  const session = resolved.session
-
   const existingResult = await admin
     .from('attempts')
     .select(CREATION_COLUMNS)
@@ -114,20 +102,24 @@ export async function POST(request: Request) {
     return apiError('The attempt could not be created.', 500)
   }
   if (existingResult.data) {
-    const storagePath = attemptStoragePath(userId, existingResult.data.id, payload.mimeType)
-    if (
-      !matchesStoredAttemptCreation(
-        existingResult.data,
-        payload,
-        session,
-        storagePath,
-        RUBRIC_VERSION,
-      )
-    ) {
+    const reuse = storedAttemptReuse(existingResult.data, payload, userId, RUBRIC_VERSION)
+    if (!reuse) {
       return apiError('That recording request was already used for different details.', 409)
     }
-    return NextResponse.json({ attemptId: existingResult.data.id, storagePath })
+    return NextResponse.json({ attemptId: existingResult.data.id, storagePath: reuse.storagePath })
   }
+
+  const resolved = await authoritativeSession(admin, userId, payload)
+  if (resolved.failed) return apiError('The attempt could not be created.', 500)
+  if (!resolved.session) {
+    return apiError(
+      payload.retryOfAttemptId
+        ? 'That retry session is no longer available.'
+        : 'That prompt is no longer available.',
+      409,
+    )
+  }
+  const session = resolved.session
 
   const attemptId = randomUUID()
   const storagePath = attemptStoragePath(userId, attemptId, payload.mimeType)
@@ -162,9 +154,9 @@ export async function POST(request: Request) {
       .eq('client_request_id', payload.clientRequestId)
       .maybeSingle()
     if (raced.data) {
-      const racedPath = attemptStoragePath(userId, raced.data.id, payload.mimeType)
-      if (matchesStoredAttemptCreation(raced.data, payload, session, racedPath, RUBRIC_VERSION)) {
-        return NextResponse.json({ attemptId: raced.data.id, storagePath: racedPath })
+      const reuse = storedAttemptReuse(raced.data, payload, userId, RUBRIC_VERSION)
+      if (reuse) {
+        return NextResponse.json({ attemptId: raced.data.id, storagePath: reuse.storagePath })
       }
       return apiError('That recording request was already used for different details.', 409)
     }

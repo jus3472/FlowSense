@@ -13,6 +13,7 @@ export const ATTEMPT_FAILURE_CODES = {
   uploadMissing: 'upload_missing',
   uploadVerificationFailed: 'upload_verification_failed',
   recordingUnavailable: 'recording_unavailable',
+  recordingPathInvalid: 'recording_path_invalid',
   transcriptionTimeout: 'transcription_timeout',
   transcriptionUnavailable: 'transcription_unavailable',
   transcriptionRejected: 'transcription_rejected',
@@ -21,6 +22,7 @@ export const ATTEMPT_FAILURE_CODES = {
   scoringInputInvalid: 'scoring_input_invalid',
   scoringUnexpected: 'scoring_unexpected',
   scoringPersistenceFailed: 'scoring_persistence_failed',
+  unsupportedRubricVersion: 'unsupported_rubric_version',
 } as const
 
 export type AttemptFailureCode = (typeof ATTEMPT_FAILURE_CODES)[keyof typeof ATTEMPT_FAILURE_CODES]
@@ -53,6 +55,15 @@ export function canRunTranscription(status: AttemptStatus): boolean {
 
 export function canRunScoring(status: AttemptStatus): boolean {
   return status === 'scoring' || status === 'failed' || status === 'timed_out'
+}
+
+export type AttemptRubricKind = 'v2' | 'legacy' | 'unsupported'
+
+/** Only explicit v1/null metadata may use the historical scoring implementation. */
+export function classifyAttemptRubric(value: unknown): AttemptRubricKind {
+  if (value === 'v2') return 'v2'
+  if (value === null || value === 'v1') return 'legacy'
+  return 'unsupported'
 }
 
 export function terminalStatusForTimeout(timedOut: boolean): 'failed' | 'timed_out' {
