@@ -25,7 +25,8 @@ import { azureSpeechConfig, deepseekApiKey } from '@/lib/env/server'
 import { createAzurePronunciationProvider } from '@/lib/pronunciation/azure'
 import { collectPronunciationEvidence } from '@/lib/pronunciation/orchestrate'
 import { SCORE_VERSION, assembleScore } from '@/lib/scoring/assemble'
-import { notCheckedContent, type Dispute } from '@/lib/scoring/content'
+import { notCheckedContent } from '@/lib/scoring/content'
+import { validLegacyDisputes } from '@/lib/scoring/disputes'
 import { runContentCheckSafely } from '@/lib/scoring/run-content'
 import { computeMechanical } from '@/lib/scoring/mechanical'
 import { surfacesToDelete } from '@/lib/scoring/tighten'
@@ -46,6 +47,7 @@ import type { TranscriptWord } from '@/lib/deepgram/parse'
 import type { AttemptMetrics } from '@/lib/types/metrics'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { isUuid } from '@/lib/practice/session'
+import { readAttemptResult } from '@/lib/results/attempt-result'
 
 /** The model call is the slow half. Mechanical metrics take milliseconds. */
 export const maxDuration = 60
@@ -134,11 +136,7 @@ export async function POST(request: Request) {
   }
   if (!attempt) return apiError('That attempt does not exist.', 404)
 
-  const rubricKind = classifyAttemptRubric(attempt.rubric_version)
-  const v2Mode = isPracticeMode(attempt.practice_mode) ? attempt.practice_mode : null
-  const legacyRecheck = isLegacyRecheckSnapshot({
-    status: attempt.status,
-    rubricVersion: attempt.rubric_version,
+  const storedResultInput = {
     id: attempt.id,
     promptText: attempt.prompt_text,
     transcript: attempt.transcript,
@@ -149,6 +147,14 @@ export async function POST(request: Request) {
     sectionScores: attempt.section_scores,
     metrics: attempt.metrics,
     contentResult: attempt.content_result,
+  }
+  const storedResult = readAttemptResult(storedResultInput)
+  const rubricKind = classifyAttemptRubric(attempt.rubric_version)
+  const v2Mode = isPracticeMode(attempt.practice_mode) ? attempt.practice_mode : null
+  const legacyRecheck = isLegacyRecheckSnapshot({
+    ...storedResultInput,
+    status: attempt.status,
+    rubricVersion: attempt.rubric_version,
   })
   const runV2Assembler = shouldUseV2Assembler(rubricKind, Boolean(v2Mode), legacyRecheck)
   if (rubricKind === 'unsupported' || (rubricKind === 'v2' && !v2Mode && !legacyRecheck)) {
@@ -369,10 +375,16 @@ export async function POST(request: Request) {
       }
       return apiError('The score could not be computed.', 500)
     }
-    const disputes: Dispute[] = (disputeRead.data ?? []).map((row) => ({
+    const storedDisputes = (disputeRead.data ?? []).map((row) => ({
       note_type: row.note_type,
       quote: row.quote,
     }))
+    // New legacy attempts have no stored findings yet, and rechecks may only
+    // reuse notes that exactly match the authoritative stored legacy result.
+    const disputes =
+      storedResult.kind === 'legacy'
+        ? validLegacyDisputes(storedResult.attempt.content, storedDisputes)
+        : []
 
     const countedTokens = mechanical.statistics.counted_items.reduce(
       (sum, item) => sum + item.token_indices.length,

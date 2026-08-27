@@ -482,19 +482,39 @@ async function assertNoteFeedbackSecurity(label) {
     `${label}: note feedback must retain only the owner SELECT policy`,
   )
 
+  const checkedLegacyContent = JSON.stringify({
+    status: 'checked',
+    checks: {
+      answered: { passed: false, quote: null },
+      explained: { passed: false, quote: 'exact stored quote' },
+      logical_order: { passed: true, quote: null },
+    },
+    extra_spans: [{ text: 'exact stored span', category: 'imprecise' }],
+  })
   const ownerAttempt = await client.query(
     `insert into public.attempts (
        user_id, prompt_text, score, section_scores, content_result, status, finished_at
-     ) values ($1, 'Owner dispute snapshot', 42, '{"sentinel":true}'::jsonb,
-       '{"sentinel":true}'::jsonb, 'done', now())
+     ) values ($1, 'Owner dispute snapshot', 42, '{"content":{},"delivery":{}}'::jsonb,
+       $2::jsonb, 'done', now())
      returning id, score, section_scores, content_result`,
-    [USERS.owner],
+    [USERS.owner, checkedLegacyContent],
   )
   const otherAttempt = await client.query(
-    `insert into public.attempts (user_id, prompt_text, status, finished_at)
-     values ($1, 'Other dispute snapshot', 'done', now())
+    `insert into public.attempts (
+       user_id, prompt_text, score, section_scores, content_result, status, finished_at
+     ) values ($1, 'Other dispute snapshot', 42, '{"content":{},"delivery":{}}'::jsonb,
+       $2::jsonb, 'done', now())
      returning id`,
-    [USERS.other],
+    [USERS.other, checkedLegacyContent],
+  )
+  const v2Attempt = await client.query(
+    `insert into public.attempts (
+       user_id, prompt_text, score, section_scores, content_result, status, finished_at
+     ) values ($1, 'Versioned dispute snapshot', 80,
+       '{"version":"v2.score.1","rubric_version":"v2"}'::jsonb,
+       $2::jsonb, 'done', now())
+     returning id`,
+    [USERS.owner, checkedLegacyContent],
   )
   const ownerNote = await client.query(
     `insert into public.note_feedback (user_id, attempt_id, note_type, quote)
@@ -568,8 +588,37 @@ async function assertNoteFeedbackSecurity(label) {
       [USERS.owner, ownerAttempt.rows[0].id],
     )
     assert(serviceInsert.rowCount === 1, `${label}: service-role note insert failed`)
+    for (const invalid of [
+      { noteType: 'logical_order', quote: null, attemptId: ownerAttempt.rows[0].id },
+      { noteType: 'answered', quote: 'forged quote', attemptId: ownerAttempt.rows[0].id },
+      { noteType: 'explained', quote: null, attemptId: ownerAttempt.rows[0].id },
+      { noteType: 'word_choice_span', quote: 'forged span', attemptId: ownerAttempt.rows[0].id },
+      { noteType: 'answered', quote: null, attemptId: v2Attempt.rows[0].id },
+    ]) {
+      await expectPgError(
+        () =>
+          client.query(
+            `insert into public.note_feedback (user_id, attempt_id, note_type, quote)
+             values ($1, $2, $3, $4)`,
+            [USERS.owner, invalid.attemptId, invalid.noteType, invalid.quote],
+          ),
+        '23514',
+        `${label}: forged service-role note ${invalid.noteType}`,
+      )
+    }
+    await expectPgError(
+      () =>
+        client.query(`update public.note_feedback set quote = 'forged quote' where id = $1`, [
+          serviceInsert.rows[0].id,
+        ]),
+      '23514',
+      `${label}: forged service-role note update`,
+    )
     const serviceUpdate = await client.query(
-      `update public.note_feedback set quote = 'updated stored quote' where id = $1 returning id`,
+      `update public.note_feedback
+       set note_type = 'word_choice_span', quote = 'exact stored span'
+       where id = $1
+       returning id`,
       [serviceInsert.rows[0].id],
     )
     assert(serviceUpdate.rowCount === 1, `${label}: service-role note update failed`)

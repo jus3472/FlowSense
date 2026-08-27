@@ -19,6 +19,7 @@ import { isUuid } from '@/lib/practice/session'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { readAttemptResult } from '@/lib/results/attempt-result'
 import { compareRetryResults, loadRetryAncestorChain } from '@/lib/results/retry-comparison'
+import { validLegacyDisputes } from '@/lib/scoring/disputes'
 import { createClient } from '@/lib/supabase/server'
 import type { AttemptRow } from '@/lib/types/database'
 
@@ -333,10 +334,13 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
   return resultWithAudioStatus(
     <ResultsView
       attempt={result.attempt}
-      initialDisputes={(disputeRows ?? []).map((row) => ({
-        note_type: row.note_type,
-        quote: row.quote,
-      }))}
+      initialDisputes={validLegacyDisputes(
+        result.attempt.content,
+        (disputeRows ?? []).map((row) => ({
+          note_type: row.note_type,
+          quote: row.quote,
+        })),
+      )}
     />,
     audioUnavailable,
   )

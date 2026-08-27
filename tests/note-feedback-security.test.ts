@@ -30,9 +30,34 @@ describe('note feedback write boundary migration', () => {
     )
     expect(migration).toContain('note_feedback_exact_dispute_idx')
     expect(migration).toContain('nulls not distinct')
+    expect(migration).toContain("current_setting('server_version_num')::integer < 150000")
     expect(migration).toMatch(
       /delete from public\.note_feedback as duplicate[\s\S]+using public\.note_feedback as retained/,
     )
+  })
+
+  it('locks writes until cleanup, uniqueness, and trigger enforcement are installed', () => {
+    const lock = migration.indexOf('lock table public.note_feedback in share row exclusive mode')
+    const cleanup = migration.indexOf('delete from public.note_feedback as feedback')
+    const deduplicate = migration.indexOf('delete from public.note_feedback as duplicate')
+    const uniqueIndex = migration.indexOf('create unique index note_feedback_exact_dispute_idx')
+    const trigger = migration.indexOf('create trigger note_feedback_enforce_target')
+
+    expect(lock).toBeGreaterThan(-1)
+    expect(lock).toBeLessThan(cleanup)
+    expect(lock).toBeLessThan(deduplicate)
+    expect(lock).toBeLessThan(uniqueIndex)
+    expect(lock).toBeLessThan(trigger)
+  })
+
+  it('rejects forged service-role inserts and updates at a non-definer trigger boundary', () => {
+    expect(migration).toContain('create or replace function public.enforce_note_feedback_target()')
+    expect(migration).toContain('before insert or update on public.note_feedback')
+    expect(migration).toContain("attempt.status = 'done'")
+    expect(migration).toContain(
+      "raise exception 'note feedback must match an exact checked legacy finding'",
+    )
+    expect(migration).not.toMatch(/security definer/i)
   })
 
   it('removes historical rows that do not match an exact checked legacy finding', () => {
@@ -44,8 +69,7 @@ describe('note feedback write boundary migration', () => {
     expect(migration).toContain('feedback.user_id = attempt.user_id')
   })
 
-  it('does not create a bypass function or alter stored attempt snapshots', () => {
-    expect(migration).not.toMatch(/security definer/i)
+  it('does not alter stored attempt snapshots', () => {
     expect(migration).not.toMatch(/(?:update|delete from) public\.attempts/i)
   })
 })
