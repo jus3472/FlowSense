@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { RequestTimeoutError } from '@/lib/net/fetch-with-timeout'
-import type { ContentModel } from '@/lib/deepseek/provider'
+import { ContentProviderFailure, type ContentModel } from '@/lib/deepseek/provider'
 import {
   CONTENT_POINTS,
   applyDisputes,
@@ -340,6 +340,7 @@ describe('runContentCheck', () => {
 
   /** A timeout will not improve by asking again. */
   it('does not retry a timeout, and never throws', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const complete = vi
       .fn<ContentModel['complete']>()
       .mockRejectedValue(new RequestTimeoutError('Checking your content', 30_000))
@@ -350,20 +351,35 @@ describe('runContentCheck', () => {
     })
     expect(outcome.calls).toBe(1)
     expect(outcome.parsed).toBeNull()
-    expect(outcome.error).toMatch(/30 seconds/)
+    expect(outcome.error).toBe('The content provider was unavailable.')
+    expect(warning).toHaveBeenCalledWith({
+      provider: 'deepseek',
+      model: 'fake',
+      code: 'timeout',
+      status: null,
+    })
+    warning.mockRestore()
   })
 
   it('does not retry an HTTP failure', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const complete = vi
       .fn<ContentModel['complete']>()
-      .mockRejectedValue(new Error('DeepSeek returned 500: upstream error'))
+      .mockRejectedValue(new ContentProviderFailure('http_error', 'fake', 500))
     const outcome = await runContentCheck({
       model: model(complete),
       request,
       transcript: TRANSCRIPT,
     })
     expect(outcome.calls).toBe(1)
-    expect(outcome.error).toMatch(/500/)
+    expect(outcome.error).toBe('The content provider was unavailable.')
+    expect(warning).toHaveBeenCalledWith({
+      provider: 'deepseek',
+      model: 'fake',
+      code: 'http_error',
+      status: 500,
+    })
+    warning.mockRestore()
   })
 
   it('degrades to full content points on any failure', async () => {
@@ -376,6 +392,7 @@ describe('runContentCheck', () => {
   })
 
   it('keeps missing or invalid provider configuration inside the user-favoring boundary', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const outcome = await runContentCheckSafely({
       createModel() {
         throw new Error('configuration contained a secret value that must not escape')
@@ -392,6 +409,13 @@ describe('runContentCheck', () => {
     })
     expect(outcome.error).not.toContain('secret value')
     expect(scoreContent(outcome.parsed ?? notCheckedContent()).total).toBe(50)
+    expect(warning).toHaveBeenCalledWith({
+      provider: 'deepseek',
+      model: 'unknown',
+      code: 'configuration_error',
+      status: null,
+    })
+    warning.mockRestore()
   })
 })
 

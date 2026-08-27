@@ -1,4 +1,9 @@
-import type { ContentModel, ContentModelRequest } from '@/lib/deepseek/provider'
+import {
+  CONTENT_PROVIDER_UNAVAILABLE_MESSAGE,
+  reportContentProviderFailure,
+  type ContentModel,
+  type ContentModelRequest,
+} from '@/lib/deepseek/provider'
 import {
   ContentParseError,
   countWords,
@@ -163,8 +168,13 @@ export async function runContentCheck(input: ContentCheckInput): Promise<Content
         input.countedTokens ?? 0,
       )
     } catch (thrown) {
-      error = thrown instanceof Error ? thrown.message : 'The content check failed.'
-      if (!(thrown instanceof ContentParseError)) break
+      if (thrown instanceof ContentParseError) {
+        error = thrown.message
+        continue
+      }
+      reportContentProviderFailure(thrown, input.model.name)
+      error = CONTENT_PROVIDER_UNAVAILABLE_MESSAGE
+      break
     }
   }
 
@@ -191,11 +201,12 @@ export async function runContentCheckSafely(
   let model: ContentModel
   try {
     model = createModel()
-  } catch {
+  } catch (error) {
+    reportContentProviderFailure(error, 'unknown', 'configuration_error')
     return {
       model: null,
       parsed: null,
-      error: 'The content provider was unavailable.',
+      error: CONTENT_PROVIDER_UNAVAILABLE_MESSAGE,
       calls: 0,
       tighten: null,
     }
