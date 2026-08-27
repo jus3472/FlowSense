@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { apiError } from '@/lib/api/responses'
 import { validateOwnedAttemptAudioPath } from '@/lib/attempts/audio-path'
 import { ATTEMPT_FAILURE_CODES, canFinalizeAttemptUpload } from '@/lib/attempts/lifecycle'
@@ -179,5 +180,8 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     return apiError('The response could not be deleted.', error ? 500 : 409)
   }
 
+  revalidatePath('/home')
+  revalidatePath('/history')
+  revalidatePath('/progress')
   return NextResponse.json({ ok: true })
 }

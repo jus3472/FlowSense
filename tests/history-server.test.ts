@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
-  HISTORY_PAGE_SIZE,
   HISTORY_SCORE_SCAN_SIZE,
   loadHistoryPage,
+  safeHistoryErrorCode,
 } from '@/lib/results/history-server'
 import type { AttemptStatus } from '@/lib/attempts/lifecycle'
 import type { Database, Json, PracticeMode, PromptSource } from '@/lib/types/database'
+import { legacySectionSnapshot, v2Snapshot } from './helpers/result-snapshots'
 
 vi.mock('server-only', () => ({}))
 
@@ -35,7 +37,7 @@ function attempt(index: number, over: Partial<FakeAttempt> = {}): FakeAttempt {
     created_at: new Date(Date.UTC(2026, 7, 27, 0, 0, index)).toISOString(),
     prompt_text: `Prompt ${index}`,
     score: 70,
-    section_scores: { version: 'stored' },
+    section_scores: legacySectionSnapshot as unknown as Json,
     practice_mode: 'practice',
     prompt_source: 'library',
     retry_of_attempt_id: null,
@@ -161,23 +163,43 @@ function fakeSupabase(rows: FakeAttempt[], failSelect: (select: string) => boole
 }
 
 describe('history server loading', () => {
+  it('keeps diagnostics bounded to a safe code and never logs database messages', () => {
+    expect(safeHistoryErrorCode({ code: 'PGRST500', message: 'private database text' })).toBe(
+      'PGRST500',
+    )
+    expect(
+      safeHistoryErrorCode({ code: 'bad code', message: 'private database text' }),
+    ).toBeUndefined()
+    expect(safeHistoryErrorCode(new Error('private database text'))).toBeUndefined()
+    const page = readFileSync('src/app/(app)/history/page.tsx', 'utf8')
+    expect(page).toContain('safeHistoryErrorCode(historyResult.error)')
+    expect(page).not.toContain('error.message')
+    expect(page).not.toContain('message: typeof')
+  })
+
   it('distinguishes a successful empty history from a query failure', async () => {
     const empty = fakeSupabase([])
     await expect(
       loadHistoryPage(empty.client, 'user-1', { metadata: 'all', score: 'all', page: 1 }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       status: 'ready',
-      data: { entries: [], hasAnyEntries: false, hasNext: false, hasPrevious: false },
+      data: {
+        entries: [],
+        scoreSummary: { cohort: null, points: [], average: null },
+        hasAnyEntries: false,
+        hasNext: false,
+        hasPrevious: false,
+      },
     })
 
     const failed = fakeSupabase([attempt(1)], (select) => select.includes('prompt_text'))
     await expect(
       loadHistoryPage(failed.client, 'user-1', { metadata: 'all', score: 'all', page: 1 }),
-    ).resolves.toMatchObject({ status: 'failure', operation: 'page' })
+    ).resolves.toMatchObject({ status: 'failure', operation: 'score_cohort' })
   })
 
   it('filters before pagination so an older matching custom retry remains visible', async () => {
-    const rows = Array.from({ length: HISTORY_PAGE_SIZE + 5 }, (_, index) => attempt(index))
+    const rows = Array.from({ length: HISTORY_SCORE_SCAN_SIZE + 5 }, (_, index) => attempt(index))
     rows.push(
       attempt(99, {
         created_at: '2026-01-01T00:00:00.000Z',
@@ -208,9 +230,20 @@ describe('history server loading', () => {
 
   it('includes done legacy, v2, and partial rows but excludes every other lifecycle status', async () => {
     const setup = fakeSupabase([
-      attempt(1, { score: 61, section_scores: null, practice_mode: null, prompt_source: null }),
-      attempt(2, { score: 82, section_scores: { score_version: 'v2' } }),
-      attempt(3, { score: null, section_scores: { score_version: 'v2-partial' } }),
+      attempt(1, {
+        score: 61,
+        section_scores: legacySectionSnapshot as unknown as Json,
+        practice_mode: null,
+        prompt_source: null,
+      }),
+      attempt(2, {
+        score: 82,
+        section_scores: v2Snapshot({ component: 0.8 }) as unknown as Json,
+      }),
+      attempt(3, {
+        score: null,
+        section_scores: v2Snapshot({ notCheckedCategory: 'grammar' }) as unknown as Json,
+      }),
       attempt(4, { status: 'uploading', score: 99 }),
       attempt(5, { status: 'transcribing', section_scores: { stale: true } }),
       attempt(6, { status: 'scoring', score: 98, section_scores: { stale: true } }),
@@ -226,11 +259,11 @@ describe('history server loading', () => {
       page: 1,
     })
     if (result.status !== 'ready') throw new Error('expected ready history')
-    expect(result.data.entries.map((entry) => [entry.id, entry.score])).toEqual([
-      ['attempt-010', null],
-      ['attempt-003', null],
-      ['attempt-002', 82],
-      ['attempt-001', 61],
+    expect(result.data.entries.map((entry) => [entry.id, entry.score, entry.resultKind])).toEqual([
+      ['attempt-010', null, 'partial'],
+      ['attempt-003', null, 'partial'],
+      ['attempt-002', 81, 'v2'],
+      ['attempt-001', 61, 'legacy'],
     ])
 
     const general = await loadHistoryPage(setup.client, 'user-1', {
@@ -249,32 +282,38 @@ describe('history server loading', () => {
 
   it('uses bounded lookahead pages and reports stable pagination', async () => {
     const setup = fakeSupabase(
-      Array.from({ length: HISTORY_PAGE_SIZE + 5 }, (_, index) => attempt(index)),
+      Array.from({ length: HISTORY_SCORE_SCAN_SIZE + 5 }, (_, index) => attempt(index)),
     )
     const first = await loadHistoryPage(setup.client, 'user-1', {
       metadata: 'all',
       score: 'all',
       page: 1,
     })
-    const second = await loadHistoryPage(setup.client, 'user-1', {
+    const last = await loadHistoryPage(setup.client, 'user-1', {
       metadata: 'all',
       score: 'all',
-      page: 2,
+      page: 11,
     })
     expect(first).toMatchObject({
       status: 'ready',
       data: { hasNext: true, hasPrevious: false },
     })
-    expect(second).toMatchObject({
+    expect(last).toMatchObject({
       status: 'ready',
       data: { hasNext: false, hasPrevious: true },
     })
+    if (first.status === 'ready') {
+      expect(first.data.scoreSummary).toMatchObject({
+        scannedCount: HISTORY_SCORE_SCAN_SIZE,
+        truncated: true,
+      })
+    }
     const ranges = setup.queries.flatMap((query) =>
       query.operations.filter((operation) => operation.method === 'range'),
     )
     for (const range of ranges) {
       expect(Number(range.args[1]) - Number(range.args[0]) + 1).toBeLessThanOrEqual(
-        HISTORY_SCORE_SCAN_SIZE,
+        HISTORY_SCORE_SCAN_SIZE + 1,
       )
     }
   })
@@ -292,5 +331,72 @@ describe('history server loading', () => {
     })
     if (result.status !== 'ready') throw new Error('expected ready history')
     expect(result.data.entries.map((entry) => entry.score)).toEqual([80])
+  })
+
+  it('lists mixed generations while filtering and trending one newest exact cohort', async () => {
+    const currentLow = v2Snapshot({ component: 0.6 })
+    const currentHigh = v2Snapshot({ component: 0.8 })
+    const future = { ...v2Snapshot({ component: 1 }), version: 'v3.score.1' }
+    const setup = fakeSupabase([
+      attempt(1, { score: 55, section_scores: legacySectionSnapshot as unknown as Json }),
+      attempt(2, {
+        score: 99,
+        section_scores: currentLow as unknown as Json,
+        created_at: '2026-08-27T00:00:20.000Z',
+      }),
+      attempt(3, {
+        score: 1,
+        section_scores: currentHigh as unknown as Json,
+        created_at: '2026-08-27T00:00:21.000Z',
+      }),
+      attempt(4, {
+        score: 95,
+        section_scores: v2Snapshot({ mode: 'interview', component: 0.95 }) as unknown as Json,
+        practice_mode: 'interview',
+        created_at: '2026-08-27T00:00:19.000Z',
+      }),
+      attempt(5, {
+        score: 100,
+        section_scores: future as unknown as Json,
+        created_at: '2026-08-27T00:00:23.000Z',
+      }),
+      attempt(6, {
+        score: 100,
+        section_scores: v2Snapshot({ notCheckedCategory: 'grammar' }) as unknown as Json,
+        created_at: '2026-08-27T00:00:22.000Z',
+      }),
+    ])
+
+    const all = await loadHistoryPage(setup.client, 'user-1', {
+      metadata: 'all',
+      score: 'all',
+      page: 1,
+    })
+    if (all.status !== 'ready') throw new Error('expected ready history')
+    expect(all.data.entries.map((entry) => [entry.id, entry.resultKind])).toEqual([
+      ['attempt-005', 'unsupported'],
+      ['attempt-006', 'partial'],
+      ['attempt-003', 'v2'],
+      ['attempt-002', 'v2'],
+      ['attempt-004', 'v2'],
+      ['attempt-001', 'legacy'],
+    ])
+    expect(all.data.scoreSummary).toMatchObject({
+      cohort: { kind: 'v2', mode: 'practice' },
+      average: 70.5,
+      excludedCount: 4,
+    })
+    expect(all.data.scoreSummary.points.map((point) => [point.attemptId, point.value])).toEqual([
+      ['attempt-002', 60],
+      ['attempt-003', 81],
+    ])
+
+    const high = await loadHistoryPage(setup.client, 'user-1', {
+      metadata: 'all',
+      score: 'high',
+      page: 1,
+    })
+    if (high.status !== 'ready') throw new Error('expected ready high history')
+    expect(high.data.entries.map((entry) => [entry.id, entry.score])).toEqual([['attempt-003', 81]])
   })
 })

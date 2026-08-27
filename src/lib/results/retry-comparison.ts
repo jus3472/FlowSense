@@ -33,8 +33,8 @@ export async function loadRetryAncestorChain<T extends RetryChainNode>(
   const ancestors: T[] = []
   const seen = new Set<string>([startId])
   let currentId = startId
-  for (let depth = 0; depth < MAX_RETRY_CHAIN_LENGTH; depth += 1) {
-    const current = await load(currentId)
+  let current = await load(currentId)
+  for (let depth = 0; depth <= MAX_RETRY_CHAIN_LENGTH; depth += 1) {
     if (
       !current ||
       typeof current.id !== 'string' ||
@@ -43,13 +43,13 @@ export async function loadRetryAncestorChain<T extends RetryChainNode>(
     )
       return null
     if (current.retryOfAttemptId === null) return ancestors
+    if (depth === MAX_RETRY_CHAIN_LENGTH) return null
     if (seen.has(current.retryOfAttemptId)) return null
     seen.add(current.retryOfAttemptId)
-    const parent = await load(current.retryOfAttemptId)
-    if (!parent || parent.id !== current.retryOfAttemptId) return null
-    ancestors.push(parent)
-    if (parent.retryOfAttemptId === null) return ancestors
-    currentId = parent.id
+    currentId = current.retryOfAttemptId
+    current = await load(currentId)
+    if (!current || current.id !== currentId) return null
+    ancestors.push(current)
   }
   return null
 }

@@ -291,6 +291,18 @@ test('records once, shows processing and v2 results, retries, compares, filters,
   expect(deletedState.attempts).toHaveLength(1)
   expect(deletedState.uploadedObjects).toHaveLength(1)
   expect(uploadedObjectAt(deletedState, 0).name).toBe(firstAttempt.metrics.upload.storage_path)
+
+  await page.getByRole('link', { name: 'FlowSense' }).click()
+  await expect(page).toHaveURL(/\/home$/)
+  await expect(page.locator(`a[href="/attempts/${retryAttempt.id}"]`)).toHaveCount(0)
+  await expect(page.locator(`a[href="/attempts/${firstAttempt.id}"]`)).toBeVisible()
+
+  await page.getByRole('button', { name: 'More options' }).click()
+  await page.getByRole('menuitem', { name: 'Progress' }).click()
+  await expect(page.getByRole('heading', { name: 'Recent retries' })).toHaveCount(0)
+  await page.getByRole('link', { name: 'History' }).click()
+  await expect(page.locator(`a[href="/attempts/${retryAttempt.id}"]`)).toHaveCount(0)
+  await expect(page.locator(`a[href="/attempts/${firstAttempt.id}"]`)).toBeVisible()
 })
 
 test('provider failure persists explicit not-checked categories', async ({ page, context }) => {

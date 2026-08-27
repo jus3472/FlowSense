@@ -1,13 +1,31 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import {
+  readHistoryStoredResult,
+  summarizeHistoryScoreCohort,
+  type HistoryScoreSummary,
+} from '@/lib/results/history-cohort'
 import type { HistoryEntry, HistoryMetadataFilter, HistoryQuery } from '@/lib/results/history'
-import type { Database } from '@/lib/types/database'
+import type { AttemptRow, Database } from '@/lib/types/database'
 
 export const HISTORY_PAGE_SIZE = 20
 export const HISTORY_SCORE_SCAN_SIZE = 200
 
+type HistoryAttemptRow = Pick<
+  AttemptRow,
+  | 'id'
+  | 'created_at'
+  | 'prompt_text'
+  | 'score'
+  | 'section_scores'
+  | 'practice_mode'
+  | 'prompt_source'
+  | 'retry_of_attempt_id'
+>
+
 export interface HistoryPageData {
   entries: HistoryEntry[]
+  scoreSummary: HistoryScoreSummary
   hasAnyEntries: boolean
   hasNext: boolean
   hasPrevious: boolean
@@ -15,7 +33,7 @@ export interface HistoryPageData {
 
 export type HistoryPageResult =
   | { status: 'ready'; data: HistoryPageData }
-  | { status: 'failure'; operation: 'existence' | 'score_average' | 'page'; error: unknown }
+  | { status: 'failure'; operation: 'existence' | 'score_cohort' | 'page'; error: unknown }
 
 function applyMetadataFilter<T>(query: T, metadata: HistoryMetadataFilter): T {
   const filter = query as T & {
@@ -31,36 +49,58 @@ function applyMetadataFilter<T>(query: T, metadata: HistoryMetadataFilter): T {
   return query
 }
 
-async function loadFilteredScoreAverage(
-  supabase: SupabaseClient<Database>,
-  userId: string,
-  metadata: HistoryMetadataFilter,
-): Promise<{ status: 'ready'; average: number | null } | { status: 'failure'; error: unknown }> {
-  let offset = 0
-  let count = 0
-  let total = 0
-  while (true) {
-    let batchQuery = supabase
-      .from('attempts')
-      .select('score')
-      .eq('user_id', userId)
-      .eq('status', 'done')
-      .not('score', 'is', null)
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-      .range(offset, offset + HISTORY_SCORE_SCAN_SIZE - 1)
-    batchQuery = applyMetadataFilter(batchQuery, metadata)
-    const { data, error } = await batchQuery
-    if (error) return { status: 'failure', error }
-    const scores = (data ?? [])
-      .map((row) => row.score)
-      .filter((score): score is number => score !== null)
-    total += scores.reduce((sum, score) => sum + score, 0)
-    count += scores.length
-    if ((data?.length ?? 0) < HISTORY_SCORE_SCAN_SIZE) break
-    offset += HISTORY_SCORE_SCAN_SIZE
+function historyEntry(row: HistoryAttemptRow): HistoryEntry {
+  const stored = readHistoryStoredResult(row.section_scores, row.score)
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    promptText: row.prompt_text,
+    score: stored.score,
+    resultKind: stored.kind,
+    practiceMode: row.practice_mode,
+    promptSource: row.prompt_source,
+    retryOfAttemptId: row.retry_of_attempt_id,
   }
-  return { status: 'ready', average: count > 0 ? total / count : null }
+}
+
+function scoreSummary(rows: readonly HistoryAttemptRow[], truncated: boolean) {
+  return summarizeHistoryScoreCohort(
+    rows.map((row) => ({
+      id: row.id,
+      createdAt: row.created_at,
+      score: row.score,
+      sectionScores: row.section_scores,
+      practiceMode: row.practice_mode,
+    })),
+    { scanLimit: HISTORY_SCORE_SCAN_SIZE, truncated },
+  )
+}
+
+function pageFromCohort(
+  rows: readonly HistoryAttemptRow[],
+  summary: HistoryScoreSummary,
+  query: HistoryQuery,
+): { entries: HistoryEntry[]; hasNext: boolean } {
+  if (summary.average === null) return { entries: [], hasNext: false }
+  const average = summary.average
+  const values = new Map(summary.points.map((point) => [point.attemptId, point.value]))
+  const filtered = rows.filter((row) => {
+    const value = values.get(row.id)
+    if (value === undefined) return false
+    return query.score === 'high' ? value >= average : value < average
+  })
+  const offset = (query.page - 1) * HISTORY_PAGE_SIZE
+  return {
+    entries: filtered.slice(offset, offset + HISTORY_PAGE_SIZE).map(historyEntry),
+    hasNext: filtered.length > offset + HISTORY_PAGE_SIZE,
+  }
+}
+
+/** Returns only a bounded diagnostic code, never database text or row contents. */
+export function safeHistoryErrorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || Array.isArray(error)) return undefined
+  const code = (error as Record<string, unknown>).code
+  return typeof code === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(code) ? code : undefined
 }
 
 export async function loadHistoryPage(
@@ -75,12 +115,44 @@ export async function loadHistoryPage(
     .eq('status', 'done')
     .limit(1)
 
-  const averageResult =
-    historyQuery.score === 'all'
-      ? ({ status: 'ready', average: null } as const)
-      : await loadFilteredScoreAverage(supabase, userId, historyQuery.metadata)
-  if (averageResult.status === 'failure')
-    return { status: 'failure', operation: 'score_average', error: averageResult.error }
+  let cohortQuery = supabase
+    .from('attempts')
+    .select(
+      'id, created_at, prompt_text, score, section_scores, practice_mode, prompt_source, retry_of_attempt_id',
+    )
+    .eq('user_id', userId)
+    .eq('status', 'done')
+  cohortQuery = applyMetadataFilter(cohortQuery, historyQuery.metadata)
+  const cohortPromise = cohortQuery
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(0, HISTORY_SCORE_SCAN_SIZE)
+
+  const [existenceResult, cohortResult] = await Promise.all([existencePromise, cohortPromise])
+  if (existenceResult.error)
+    return { status: 'failure', operation: 'existence', error: existenceResult.error }
+  if (cohortResult.error)
+    return { status: 'failure', operation: 'score_cohort', error: cohortResult.error }
+
+  const scannedRows = (cohortResult.data ?? []).slice(0, HISTORY_SCORE_SCAN_SIZE)
+  const summary = scoreSummary(
+    scannedRows,
+    (cohortResult.data?.length ?? 0) > HISTORY_SCORE_SCAN_SIZE,
+  )
+
+  if (historyQuery.score !== 'all') {
+    const page = pageFromCohort(scannedRows, summary, historyQuery)
+    return {
+      status: 'ready',
+      data: {
+        entries: page.entries,
+        scoreSummary: summary,
+        hasAnyEntries: (existenceResult.data?.length ?? 0) > 0,
+        hasNext: page.hasNext,
+        hasPrevious: historyQuery.page > 1,
+      },
+    }
+  }
 
   const offset = (historyQuery.page - 1) * HISTORY_PAGE_SIZE
   let pageQuery = supabase
@@ -91,49 +163,18 @@ export async function loadHistoryPage(
     .eq('user_id', userId)
     .eq('status', 'done')
   pageQuery = applyMetadataFilter(pageQuery, historyQuery.metadata)
-  if (historyQuery.score !== 'all') {
-    if (averageResult.average === null) {
-      const { data: existenceData, error: existenceError } = await existencePromise
-      if (existenceError)
-        return { status: 'failure', operation: 'existence', error: existenceError }
-      return {
-        status: 'ready',
-        data: {
-          entries: [],
-          hasAnyEntries: (existenceData?.length ?? 0) > 0,
-          hasNext: false,
-          hasPrevious: historyQuery.page > 1,
-        },
-      }
-    }
-    pageQuery =
-      historyQuery.score === 'high'
-        ? pageQuery.gte('score', averageResult.average)
-        : pageQuery.lt('score', averageResult.average)
-  }
-  const pagePromise = pageQuery
+  const pageResult = await pageQuery
     .order('created_at', { ascending: false })
     .order('id', { ascending: false })
     .range(offset, offset + HISTORY_PAGE_SIZE)
-
-  const [existenceResult, pageResult] = await Promise.all([existencePromise, pagePromise])
-  if (existenceResult.error)
-    return { status: 'failure', operation: 'existence', error: existenceResult.error }
   if (pageResult.error) return { status: 'failure', operation: 'page', error: pageResult.error }
 
   const rows = pageResult.data ?? []
   return {
     status: 'ready',
     data: {
-      entries: rows.slice(0, HISTORY_PAGE_SIZE).map((attempt) => ({
-        id: attempt.id,
-        createdAt: attempt.created_at,
-        promptText: attempt.prompt_text,
-        score: attempt.score,
-        practiceMode: attempt.practice_mode,
-        promptSource: attempt.prompt_source,
-        retryOfAttemptId: attempt.retry_of_attempt_id,
-      })),
+      entries: rows.slice(0, HISTORY_PAGE_SIZE).map(historyEntry),
+      scoreSummary: summary,
       hasAnyEntries: (existenceResult.data?.length ?? 0) > 0,
       hasNext: rows.length > HISTORY_PAGE_SIZE,
       hasPrevious: historyQuery.page > 1,

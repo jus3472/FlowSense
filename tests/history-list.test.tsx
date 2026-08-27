@@ -6,8 +6,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { HistoryList } from '@/components/history/history-list'
 import { deleteAttempt } from '@/lib/results/api'
 import type { HistoryEntry } from '@/lib/results/history'
+import type { HistoryScoreSummary } from '@/lib/results/history-cohort'
 
-const navigation = vi.hoisted(() => ({ push: vi.fn() }))
+const navigation = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }))
 
 vi.mock('next/navigation', () => ({
   useRouter: () => navigation,
@@ -43,10 +44,32 @@ const entries: HistoryEntry[] = [
   },
 ]
 
+function scoreSummary(
+  values: readonly number[],
+  overrides: Partial<HistoryScoreSummary> = {},
+): HistoryScoreSummary {
+  return {
+    cohort: { kind: 'v2', scoreVersion: 'v2.score.1', rubricVersion: 'v2', mode: 'practice' },
+    points: values.map((value, index) => ({
+      attemptId: `cohort-${index}`,
+      createdAt: new Date(2026, 7, 20 + index).toISOString(),
+      value,
+    })),
+    average:
+      values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length,
+    scannedCount: values.length,
+    excludedCount: 0,
+    scanLimit: 200,
+    truncated: false,
+    ...overrides,
+  }
+}
+
 describe('HistoryList', () => {
   beforeEach(() => {
     vi.mocked(deleteAttempt).mockReset()
     navigation.push.mockReset()
+    navigation.refresh.mockReset()
   })
 
   it('shows the response time in each history row', () => {
@@ -109,6 +132,7 @@ describe('HistoryList', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Delete response' })).toHaveFocus()
     })
+    expect(navigation.refresh).not.toHaveBeenCalled()
   })
 
   it('dismisses delete confirmation on Escape and restores focus to delete', async () => {
@@ -123,6 +147,7 @@ describe('HistoryList', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Delete response' })).toHaveFocus()
     })
+    expect(navigation.refresh).not.toHaveBeenCalled()
   })
 
   it('restores focus to delete when deletion fails', async () => {
@@ -138,6 +163,7 @@ describe('HistoryList', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Delete response' })).toHaveFocus()
     })
+    expect(navigation.refresh).not.toHaveBeenCalled()
   })
 
   it('keeps dialog controls focusable while busy, then announces success and focuses a remaining row', async () => {
@@ -183,6 +209,7 @@ describe('HistoryList', () => {
       expect(screen.getByRole('status')).toHaveTextContent('Response deleted.')
       expect(screen.getByRole('button', { name: 'Delete response' })).toHaveFocus()
     })
+    expect(navigation.refresh).toHaveBeenCalledOnce()
   })
 
   it('focuses the History container after deleting the final visible row', async () => {
@@ -196,6 +223,7 @@ describe('HistoryList', () => {
       expect(screen.getByRole('status')).toHaveTextContent('Response deleted.')
       expect(screen.getByRole('region', { name: 'History responses' })).toHaveFocus()
     })
+    expect(navigation.refresh).toHaveBeenCalledOnce()
   })
 
   it('keeps long prompts and 3-digit scores stable in the mobile row layout', () => {
@@ -303,7 +331,7 @@ describe('HistoryList', () => {
       'href',
       '/attempts/partial-attempt',
     )
-    expect(screen.getByText('Incomplete')).toBeInTheDocument()
+    expect(screen.getByText('Overall unavailable')).toBeInTheDocument()
   })
 
   it('keeps the active filters while paging through bounded history', () => {
@@ -327,7 +355,7 @@ describe('HistoryList', () => {
     )
   })
 
-  it('labels the trend and average as limited to the loaded page', () => {
+  it('labels the trend and average as limited to one compatible bounded cohort', () => {
     render(
       <HistoryList
         entries={[
@@ -335,16 +363,60 @@ describe('HistoryList', () => {
           { ...entries[0]!, id: 'attempt-2', score: 72 },
           { ...entries[0]!, id: 'attempt-3', score: 92 },
         ]}
+        scoreSummary={scoreSummary([72, 82, 92], {
+          scannedCount: 5,
+          excludedCount: 2,
+          truncated: true,
+        })}
         focusPhrase="with less filler"
         hasNext
       />,
     )
 
-    expect(screen.getByText('Scores on this page')).toBeInTheDocument()
-    expect(screen.getByText('page average 82')).toBeInTheDocument()
+    expect(screen.getByText('Compatible score trend')).toBeInTheDocument()
+    expect(screen.getByText('cohort average 82')).toBeInTheDocument()
     expect(
-      screen.getByRole('img', { name: 'Scores on this page, averaging 82 out of 100' }),
+      screen.getByRole('img', { name: 'Compatible scores, averaging 82 out of 100' }),
     ).toBeInTheDocument()
-    expect(screen.queryByText('Scores over time')).not.toBeInTheDocument()
+    expect(screen.getByText(/latest 200 completed responses/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/2 responses use another mode or result generation/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Pages show up to 20/)).toBeInTheDocument()
+  })
+
+  it('keeps unsupported and partial responses visible with factual labels', () => {
+    render(
+      <HistoryList
+        entries={[
+          { ...entries[0]!, id: 'unsupported', resultKind: 'unsupported', score: null },
+          { ...entries[0]!, id: 'partial', resultKind: 'partial', score: null },
+        ]}
+        scoreSummary={scoreSummary([], { scannedCount: 2, excludedCount: 2 })}
+        focusPhrase="with less filler"
+      />,
+    )
+
+    expect(screen.getByText(/Unsupported result/)).toBeInTheDocument()
+    expect(screen.getByText(/Partial result/)).toBeInTheDocument()
+    expect(screen.getByText('Unsupported')).toBeInTheDocument()
+    expect(screen.getByText('Overall unavailable')).toBeInTheDocument()
+    expect(
+      screen.getByText('No compatible scored responses are available in this filter.'),
+    ).toBeInTheDocument()
+  })
+
+  it('states that a single compatible score is insufficient for a trend', () => {
+    render(
+      <HistoryList
+        entries={entries}
+        scoreSummary={scoreSummary([82])}
+        focusPhrase="with less filler"
+      />,
+    )
+
+    expect(screen.getByText('cohort average 82')).toBeInTheDocument()
+    expect(screen.getByText('A trend needs at least two compatible responses.')).toBeInTheDocument()
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
   })
 })
