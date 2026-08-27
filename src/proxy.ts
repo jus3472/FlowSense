@@ -1,7 +1,15 @@
-import type { NextRequest } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
+import { audioDebugRouteEnabled } from '@/lib/env/server'
 import { updateSession } from '@/lib/supabase/session'
 
+function isAudioDebugPath(pathname: string): boolean {
+  return pathname === '/debug/audio' || pathname.startsWith('/debug/audio/')
+}
+
 export default async function proxy(request: NextRequest) {
+  if (isAudioDebugPath(request.nextUrl.pathname) && !audioDebugRouteEnabled()) {
+    return new NextResponse(null, { status: 404 })
+  }
   return updateSession(request)
 }
 
