@@ -129,7 +129,8 @@ describe('pronunciation score orchestration', () => {
 
   it('keeps the attempt query user-scoped and persists the normalized snapshot', () => {
     const route = readFileSync('src/app/api/score/route.ts', 'utf8')
-    expect(route).toContain(".eq('user_id', user.id)")
+    expect(route).toContain(".eq('user_id', userId)")
+    expect(route).toContain('authenticatedAttemptContext()')
     expect(route).toContain('...(pronunciation ? { pronunciation } : {})')
     expect(route).toContain('Promise.all([pronunciationPromise, contentPromise])')
   })

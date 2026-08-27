@@ -11,6 +11,7 @@
  */
 
 import type { PracticeMode, PromptDifficulty, PromptSource } from '@/lib/practice/contracts'
+import type { AttemptStatus } from '@/lib/attempts/lifecycle'
 
 export type { PracticeMode, PromptDifficulty, PromptSource } from '@/lib/practice/contracts'
 
@@ -51,6 +52,11 @@ export type AttemptRow = {
   prompt_difficulty: PromptDifficulty | null
   rubric_version: string | null
   retry_of_attempt_id: string | null
+  status: AttemptStatus
+  status_changed_at: string
+  finished_at: string | null
+  failure_code: string | null
+  client_request_id: string | null
   created_at: string
 }
 

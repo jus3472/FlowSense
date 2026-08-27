@@ -1,6 +1,21 @@
 import { NextResponse } from 'next/server'
 import { apiError } from '@/lib/api/responses'
-import { parseDeepgramResponse } from '@/lib/deepgram/parse'
+import {
+  ATTEMPT_FAILURE_CODES,
+  canRunTranscription,
+  terminalStatusForTimeout,
+} from '@/lib/attempts/lifecycle'
+import {
+  authenticatedAttemptContext,
+  logAttemptDiagnostic,
+  markOwnedAttemptFailure,
+  transitionOwnedAttempt,
+} from '@/lib/attempts/server'
+import {
+  DeepgramParseError,
+  deepgramQualityMetrics,
+  parseDeepgramResponse,
+} from '@/lib/deepgram/parse'
 import {
   DEEPGRAM_MODEL,
   buildDeepgramUrl,
@@ -9,7 +24,7 @@ import {
 } from '@/lib/deepgram/request'
 import { deepgramApiKey } from '@/lib/env/server'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
-import { createClient } from '@/lib/supabase/server'
+import { isUuid } from '@/lib/practice/session'
 import type { AttemptMetrics } from '@/lib/types/metrics'
 
 /** Deepgram on 60 seconds of audio finishes in a few seconds. This is headroom. */
@@ -22,33 +37,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** Deepgram reports failures as err_msg. Anything else is surfaced verbatim. */
-function describeDeepgramFailure(status: number, raw: string): string {
-  try {
-    const body: unknown = JSON.parse(raw)
-    if (isRecord(body)) {
-      for (const key of ['err_msg', 'message', 'error', 'reason']) {
-        const value = body[key]
-        if (typeof value === 'string' && value.trim().length > 0) {
-          return `Deepgram rejected the audio: ${value}`
-        }
-      }
-    }
-  } catch {
-    // Not JSON. Fall through to the raw text.
-  }
-  const snippet = raw.trim().slice(0, 200)
-  return snippet.length > 0
-    ? `Deepgram rejected the audio: ${snippet}`
-    : `Deepgram returned status ${status} with no explanation.`
-}
-
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return apiError('Your session ended. Log in and try again.', 401)
+  const context = await authenticatedAttemptContext()
+  if (!context) return apiError('Your session ended. Log in and try again.', 401)
+  const { userId, admin } = context
 
   let body: unknown
   try {
@@ -58,45 +50,76 @@ export async function POST(request: Request) {
   }
 
   const attemptId = isRecord(body) && typeof body.attemptId === 'string' ? body.attemptId : ''
-  if (attemptId.length === 0) return apiError('The attempt id was missing.', 400)
+  if (!isUuid(attemptId)) return apiError('The attempt id was invalid.', 400)
 
-  const { data: attempt, error: attemptError } = await supabase
+  const { data: attempt, error: readError } = await admin
     .from('attempts')
-    .select('id, audio_path, metrics')
+    .select('id, audio_path, metrics, transcript, status')
     .eq('id', attemptId)
+    .eq('user_id', userId)
     .maybeSingle()
-
-  if (attemptError) return apiError(attemptError.message, 500)
+  if (readError) {
+    logAttemptDiagnostic('load_transcription_attempt', 'attempt_read_failed', attemptId, readError)
+    return apiError('The transcript could not be made.', 500)
+  }
   if (!attempt) return apiError('That attempt does not exist.', 404)
+
+  const metrics = (attempt.metrics as AttemptMetrics | null) ?? {}
+  const storedWords = metrics.transcript?.words
+  if (
+    (attempt.status === 'scoring' || attempt.status === 'done') &&
+    attempt.transcript !== null &&
+    storedWords
+  ) {
+    return NextResponse.json({ transcript: attempt.transcript, wordCount: storedWords.length })
+  }
+  if (!canRunTranscription(attempt.status)) {
+    return apiError('That attempt is not ready to be transcribed.', 409)
+  }
   if (!attempt.audio_path) {
     return apiError('The recording was not saved, so there is nothing to transcribe.', 400)
   }
 
-  const { data: audio, error: downloadError } = await supabase.storage
-    .from(RECORDINGS_BUCKET)
-    .download(attempt.audio_path)
-
-  if (downloadError || !audio) {
-    return apiError(
-      downloadError?.message ?? 'The recording could not be read back from storage.',
-      502,
+  if (attempt.status === 'failed' || attempt.status === 'timed_out') {
+    const resumed = await transitionOwnedAttempt(
+      admin,
+      userId,
+      attemptId,
+      [attempt.status],
+      'transcribing',
     )
+    if (!resumed) return apiError('That attempt could not resume transcription.', 409)
   }
 
-  const metrics = (attempt.metrics as AttemptMetrics | null) ?? {}
-  const contentType = metrics.capture?.mime_type ?? 'audio/webm'
+  const { data: audio, error: downloadError } = await admin.storage
+    .from(RECORDINGS_BUCKET)
+    .download(attempt.audio_path)
+  if (downloadError || !audio) {
+    logAttemptDiagnostic(
+      'download_recording',
+      ATTEMPT_FAILURE_CODES.recordingUnavailable,
+      attemptId,
+      downloadError,
+    )
+    await markOwnedAttemptFailure(
+      admin,
+      userId,
+      attemptId,
+      ['transcribing'],
+      'failed',
+      ATTEMPT_FAILURE_CODES.recordingUnavailable,
+    )
+    return apiError('The saved recording could not be read.', 502)
+  }
 
+  const contentType = metrics.capture?.mime_type ?? metrics.upload?.mime_type ?? 'audio/webm'
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), DEEPGRAM_TIMEOUT_MS)
-
-  // The request is logged in full because a wrong or dropped query parameter is
-  // invisible otherwise: Deepgram answers 200 either way. No secret appears
-  // here, the key travels in the Authorization header.
   const url = buildDeepgramUrl()
   console.info('[transcribe] request', {
     attemptId,
-    url,
-    query: new URL(url).search,
+    operation: 'deepgram_transcription',
+    model: DEEPGRAM_MODEL,
     contentType,
     audioBytes: audio.size,
   })
@@ -113,50 +136,111 @@ export async function POST(request: Request) {
       signal: controller.signal,
     })
   } catch (error) {
-    if (controller.signal.aborted) {
-      return apiError('Deepgram did not answer within 25 seconds.', 504)
-    }
-    const reason = error instanceof Error ? error.message : 'The connection failed.'
-    return apiError(`Deepgram could not be reached: ${reason}`, 502)
+    const timedOut = controller.signal.aborted
+    const failureCode = timedOut
+      ? ATTEMPT_FAILURE_CODES.transcriptionTimeout
+      : ATTEMPT_FAILURE_CODES.transcriptionUnavailable
+    logAttemptDiagnostic('call_transcription_provider', failureCode, attemptId, error)
+    await markOwnedAttemptFailure(
+      admin,
+      userId,
+      attemptId,
+      ['transcribing'],
+      terminalStatusForTimeout(timedOut),
+      failureCode,
+    )
+    return apiError(
+      timedOut ? 'The transcription timed out. Try again.' : 'The transcript could not be made.',
+      timedOut ? 504 : 502,
+    )
   } finally {
     clearTimeout(timer)
   }
 
   if (!response.ok) {
-    return apiError(describeDeepgramFailure(response.status, await response.text()), 502)
+    await response.body?.cancel().catch(() => undefined)
+    logAttemptDiagnostic(
+      'transcription_provider_response',
+      ATTEMPT_FAILURE_CODES.transcriptionRejected,
+      attemptId,
+    )
+    await markOwnedAttemptFailure(
+      admin,
+      userId,
+      attemptId,
+      ['transcribing'],
+      'failed',
+      ATTEMPT_FAILURE_CODES.transcriptionRejected,
+    )
+    return apiError('The transcript could not be made.', 502)
   }
 
   let raw: unknown
   try {
     raw = await response.json()
-  } catch {
-    return apiError('Deepgram returned a response that was not JSON.', 502)
-  }
-
-  if (process.env.DEEPGRAM_DEBUG === 'true') {
-    console.info('[transcribe] raw response', JSON.stringify(raw))
+  } catch (error) {
+    logAttemptDiagnostic(
+      'parse_transcription_json',
+      ATTEMPT_FAILURE_CODES.transcriptionInvalidResponse,
+      attemptId,
+      error,
+    )
+    await markOwnedAttemptFailure(
+      admin,
+      userId,
+      attemptId,
+      ['transcribing'],
+      'failed',
+      ATTEMPT_FAILURE_CODES.transcriptionInvalidResponse,
+    )
+    return apiError('The transcript could not be made.', 502)
   }
 
   let parsed
   try {
     parsed = parseDeepgramResponse(raw)
   } catch (error) {
-    return apiError(
-      error instanceof Error ? error.message : 'Deepgram returned an unreadable response.',
-      502,
+    const unavailableQuality =
+      error instanceof DeepgramParseError
+        ? error.quality
+        : { status: 'unavailable' as const, diagnostics: ['Transcript parsing failed.'] }
+    const failedMetrics: AttemptMetrics = {
+      ...metrics,
+      transcript: {
+        provider: 'deepgram',
+        model: DEEPGRAM_MODEL,
+        confidence: null,
+        words: [],
+        quality: unavailableQuality,
+      },
+    }
+    logAttemptDiagnostic(
+      'validate_transcription_response',
+      ATTEMPT_FAILURE_CODES.transcriptionInvalidResponse,
+      attemptId,
+      error,
     )
+    await markOwnedAttemptFailure(
+      admin,
+      userId,
+      attemptId,
+      ['transcribing'],
+      'failed',
+      ATTEMPT_FAILURE_CODES.transcriptionInvalidResponse,
+      { metrics: JSON.parse(JSON.stringify(failedMetrics)) },
+    )
+    return apiError('The transcript could not be made.', 502)
   }
 
-  // Filler count is the number worth watching. If it is 0 on speech that had
-  // fillers, the model is ignoring filler_words rather than failing loudly.
   const fillerCount = parsed.words.filter((entry) => isFillerToken(entry.word)).length
   console.info('[transcribe] response', {
     attemptId,
+    operation: 'deepgram_transcription',
     status: response.status,
     model: DEEPGRAM_MODEL,
     words: parsed.words.length,
     fillers: fillerCount,
-    characters: parsed.transcript.length,
+    quality: parsed.quality.status,
   })
 
   const nextMetrics: AttemptMetrics = {
@@ -166,23 +250,33 @@ export async function POST(request: Request) {
       model: DEEPGRAM_MODEL,
       confidence: parsed.confidence,
       words: parsed.words,
+      duration_seconds: parsed.durationSeconds,
+      ...deepgramQualityMetrics(parsed),
     },
   }
 
-  const { error: saveError } = await supabase
-    .from('attempts')
-    .update({
+  const saved = await transitionOwnedAttempt(
+    admin,
+    userId,
+    attemptId,
+    ['transcribing'],
+    'scoring',
+    {
       transcript: parsed.transcript,
       metrics: JSON.parse(JSON.stringify(nextMetrics)),
-    })
-    .eq('id', attemptId)
-
-  if (saveError) {
-    return apiError(`The transcript could not be saved: ${saveError.message}`, 500)
+    },
+  )
+  if (!saved) {
+    await markOwnedAttemptFailure(
+      admin,
+      userId,
+      attemptId,
+      ['transcribing'],
+      'failed',
+      ATTEMPT_FAILURE_CODES.transcriptionPersistenceFailed,
+    )
+    return apiError('The transcript could not be saved.', 500)
   }
 
-  return NextResponse.json({
-    transcript: parsed.transcript,
-    wordCount: parsed.words.length,
-  })
+  return NextResponse.json({ transcript: parsed.transcript, wordCount: parsed.words.length })
 }

@@ -1,4 +1,8 @@
-import type { TranscriptWord } from '@/lib/deepgram/parse'
+import type {
+  DeepgramTranscriptQuality,
+  DeepgramUnavailableQuality,
+  TranscriptWord,
+} from '@/lib/deepgram/parse'
 import type { PronunciationEvaluation } from '@/lib/pronunciation/contracts'
 
 export interface AmplitudeSample {
@@ -32,6 +36,13 @@ export interface TranscriptMetrics {
   model: string
   confidence: number | null
   words: TranscriptWord[]
+  duration_seconds?: number | null
+  quality?: DeepgramTranscriptQuality | DeepgramUnavailableQuality
+}
+
+export interface AttemptUploadMetrics {
+  storage_path: string
+  mime_type: string
 }
 
 /** Everything the mechanical half computed, stored beside the raw capture. */
@@ -48,6 +59,7 @@ export interface AttemptMetrics {
   capture?: CaptureMetrics
   transcript?: TranscriptMetrics
   delivery?: DeliveryBlock
-  practice?: { additional_context?: string }
+  practice?: { target_duration_seconds?: number; additional_context?: string }
+  upload?: AttemptUploadMetrics
   pronunciation?: PronunciationEvaluation
 }
