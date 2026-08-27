@@ -8,6 +8,10 @@ import { analyseTimeToFirstWord } from '@/lib/scoring/time-to-first-word'
 import { buildTokens } from '@/lib/scoring/tokens'
 import type { CaptureMetrics } from '@/lib/types/metrics'
 import type { ScoreEvidence, ScoreStatus } from '@/lib/scoring/v2/contracts'
+import {
+  AUDIO_MILLISECOND_COORDINATE,
+  TRANSCRIPT_CHARACTER_COORDINATE,
+} from '@/lib/scoring/v2/evidence'
 
 const MINIMUM_WORDS = 3
 const MINIMUM_TIMELINE_SAMPLES = 3
@@ -158,12 +162,20 @@ function finiteUnitInterval(value: number): boolean {
 }
 
 function transcriptEvidence(
+  transcript: string,
   start: number,
   end: number,
   quote: string,
   detail: string,
 ): ScoreEvidence {
-  return { source: 'transcript', start, end, quote, detail }
+  return {
+    source: 'transcript',
+    start,
+    end,
+    coordinate: TRANSCRIPT_CHARACTER_COORDINATE,
+    quote: transcript.slice(start, end) || quote,
+    detail,
+  }
 }
 
 /**
@@ -238,15 +250,27 @@ export function evaluateFluency(input: FluencyEvaluationInput): FluencyEvaluatio
 
   const evidence: ScoreEvidence[] = []
   for (const hit of fillers.hits.filter((hit) => hit.category === 'filler')) {
-    evidence.push(
-      transcriptEvidence(hit.start, hit.end, hit.text, 'Filler detected in the transcript.'),
-    )
+    const involved = hit.token_indices.map((index) => tokens[index]).filter(Boolean)
+    const first = involved[0]
+    const last = involved.at(-1)
+    if (first && last) {
+      evidence.push(
+        transcriptEvidence(
+          transcript,
+          first.charStart,
+          last.charEnd,
+          hit.text,
+          'Filler detected in the transcript.',
+        ),
+      )
+    }
   }
   for (const pause of pauses.mid_sentence) {
     evidence.push({
       source: 'audio_timeline',
       start: pause.start_ms,
       end: pause.end_ms,
+      coordinate: AUDIO_MILLISECOND_COORDINATE,
       quote: pause.preceding_word,
       detail: `Mid-sentence pause after “${pause.preceding_word}”.`,
     })
@@ -255,13 +279,15 @@ export function evaluateFluency(input: FluencyEvaluationInput): FluencyEvaluatio
     source: 'transcript_and_audio_timeline',
     start: 0,
     end: capture.duration_ms,
+    coordinate: null,
     quote: null,
     detail: `${Math.round(pace.words_per_minute)} words per minute over ${(pace.speaking_ms / 1000).toFixed(1)} seconds of speaking time.`,
   })
   evidence.push({
-    source: firstWord.source === 'transcript' ? 'transcript' : 'audio_timeline',
+    source: 'audio_timeline',
     start: 0,
     end: Math.round(firstWord.seconds * 1000),
+    coordinate: AUDIO_MILLISECOND_COORDINATE,
     quote: words[0]?.word ?? null,
     detail: `${firstWord.seconds.toFixed(2)} seconds to first word from ${firstWord.source}.`,
   })

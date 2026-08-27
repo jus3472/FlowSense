@@ -63,6 +63,29 @@ describe('v2 fluency evaluator', () => {
     ).toEqual([])
   })
 
+  it('stores repeated filler evidence in exact transcript character coordinates', () => {
+    const transcript = 'Um, I paused, then um, I continued.'
+    const result = evaluated(transcript)
+    if (result.availability === 'unavailable') throw new Error('Expected scoreable fluency.')
+    const fillers = result.evidence.filter(
+      (entry) => entry.detail === 'Filler detected in the transcript.',
+    )
+    expect(fillers).toEqual([
+      expect.objectContaining({
+        start: 0,
+        end: 3,
+        coordinate: { space: 'transcript', unit: 'utf16_code_unit' },
+        quote: 'Um,',
+      }),
+      expect.objectContaining({
+        start: 19,
+        end: 22,
+        coordinate: { space: 'transcript', unit: 'utf16_code_unit' },
+        quote: 'um,',
+      }),
+    ])
+  })
+
   it('reports corrections without counting them as fillers or deductions', () => {
     const result = evaluated('I love pizza, oh wait, I mean I love sushi for dinner.')
     if (result.availability === 'unavailable') throw new Error('Expected scoreable fluency.')

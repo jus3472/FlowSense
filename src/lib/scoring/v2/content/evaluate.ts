@@ -161,15 +161,49 @@ interface ParseContext {
   claimed: TranscriptEvidenceSpan[]
 }
 
+function explicitEvidence(
+  value: Record<string, unknown>,
+): TranscriptEvidenceSpan | null | undefined {
+  if (value.start === undefined && value.end === undefined) return undefined
+  return Number.isInteger(value.start) && Number.isInteger(value.end)
+    ? { start: value.start as number, end: value.end as number }
+    : null
+}
+
+function quoteMatchesSpan(
+  quote: string,
+  span: TranscriptEvidenceSpan,
+  transcript: string,
+): boolean {
+  return (
+    transcript
+      .slice(span.start, span.end)
+      .localeCompare(quote, undefined, { sensitivity: 'accent' }) === 0
+  )
+}
+
 function acceptableQuote(
   quote: string,
   context: ParseContext,
   warnings: string[],
   label: string,
+  explicit: TranscriptEvidenceSpan | null | undefined,
 ): TranscriptEvidenceSpan | null {
-  const evidence = locateQuote(quote, context.transcript)
+  if (explicit === null) {
+    warnings.push(`${label}: explicit transcript coordinates were malformed`)
+    return null
+  }
+  const evidence = explicit ?? locateQuote(quote, context.transcript)
   if (!evidence) {
     warnings.push(`${label}: quote was not in the transcript`)
+    return null
+  }
+  if (
+    explicit !== undefined &&
+    (!validSpan(evidence, context.transcript) ||
+      !quoteMatchesSpan(quote, evidence, context.transcript))
+  ) {
+    warnings.push(`${label}: explicit transcript coordinates did not match the quote`)
     return null
   }
   if (context.unreliable.some((span) => overlaps(evidence, span))) {
@@ -215,7 +249,7 @@ function parseFinding(
     warnings.push('vocabulary: unknown finding kind dropped')
     return null
   }
-  const evidence = acceptableQuote(quote, context, warnings, category)
+  const evidence = acceptableQuote(quote, context, warnings, category, explicitEvidence(value))
   if (!evidence) return null
   return {
     kind,
@@ -242,6 +276,8 @@ function parseStructure(value: unknown, context: ParseContext): V2CategoryResult
       if (
         check.severity !== null ||
         check.quote !== null ||
+        (check.start !== undefined && check.start !== null) ||
+        (check.end !== undefined && check.end !== null) ||
         check.observation !== null ||
         check.suggestion !== null
       ) {
@@ -256,7 +292,16 @@ function parseStructure(value: unknown, context: ParseContext): V2CategoryResult
     if (!findingSeverity || !observation || quote === undefined || suggestion === undefined) {
       return emptyCategory('structure', `structure.${id} was missing or malformed`)
     }
-    const evidence = quote ? acceptableQuote(quote, context, warnings, `structure.${id}`) : null
+    if (
+      quote === null &&
+      ((check.start !== undefined && check.start !== null) ||
+        (check.end !== undefined && check.end !== null))
+    ) {
+      return emptyCategory('structure', `structure.${id} had coordinates without a quote`)
+    }
+    const evidence = quote
+      ? acceptableQuote(quote, context, warnings, `structure.${id}`, explicitEvidence(check))
+      : null
     if (quote && !evidence) continue
     findings.push({
       kind: id,

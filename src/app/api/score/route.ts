@@ -12,7 +12,7 @@ import { createAzurePronunciationProvider } from '@/lib/pronunciation/azure'
 import { collectPronunciationEvidence } from '@/lib/pronunciation/orchestrate'
 import { SCORE_VERSION, assembleScore } from '@/lib/scoring/assemble'
 import { notCheckedContent, type Dispute } from '@/lib/scoring/content'
-import { runContentCheck } from '@/lib/scoring/run-content'
+import { runContentCheckSafely } from '@/lib/scoring/run-content'
 import { computeMechanical } from '@/lib/scoring/mechanical'
 import { surfacesToDelete } from '@/lib/scoring/tighten'
 import { analyseFillers } from '@/lib/scoring/fillers'
@@ -154,7 +154,7 @@ export async function POST(request: Request) {
       mode: attempt.practice_mode,
       fluency: evaluateFluency({ capture, words: transcriptWords, transcript }),
       delivery: evaluateDelivery(capture),
-      clarity: analyseClarity(transcriptWords, capture, pronunciation),
+      clarity: analyseClarity(transcriptWords, capture, pronunciation, transcript),
       content,
     })
     const nextMetrics = {
@@ -203,7 +203,6 @@ export async function POST(request: Request) {
     0,
   )
 
-  const model = createDeepSeekModel(deepseekApiKey())
   const userPrompt = buildContentUserPrompt({
     promptText: attempt.prompt_text,
     transcript,
@@ -215,11 +214,12 @@ export async function POST(request: Request) {
   })
 
   const {
+    model,
     parsed,
     error: contentError,
     tighten,
-  } = await runContentCheck({
-    model,
+  } = await runContentCheckSafely({
+    createModel: () => createDeepSeekModel(deepseekApiKey()),
     request: { system: CONTENT_SYSTEM_PROMPT, user: userPrompt, timeoutMs: MODEL_TIMEOUT_MS },
     transcript,
     countedText: mechanical.statistics.counted_items.map((item) => item.text),
@@ -244,7 +244,7 @@ export async function POST(request: Request) {
   const checked = parsed !== null
   const assembled = assembleScore(mechanical, parsed ?? notCheckedContent(), {
     status: checked ? 'checked' : 'not_checked',
-    model: checked ? model.name : null,
+    model: checked ? (model?.name ?? null) : null,
     error: checked ? null : contentError,
     disputes,
   })

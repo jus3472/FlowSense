@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { DeepgramParseError, parseDeepgramResponse } from '@/lib/deepgram/parse'
+import {
+  DeepgramParseError,
+  deepgramQualityMetrics,
+  parseDeepgramResponse,
+} from '@/lib/deepgram/parse'
 import { buildDeepgramUrl, deepgramAuthHeader, isFillerToken } from '@/lib/deepgram/request'
 
 /** Shaped after a real nova-3 response with filler_words=true and punctuate=true. */
@@ -17,7 +21,15 @@ const RESPONSE_WITH_FILLERS = {
               { word: 'um', start: 0.4, end: 0.72, confidence: 0.977, punctuated_word: 'um,' },
               { word: 'i', start: 0.72, end: 1.04, confidence: 0.99, punctuated_word: 'I' },
               { word: 'think', start: 1.04, end: 1.2, confidence: 1, punctuated_word: 'think' },
+              { word: 'the', start: 1.2, end: 1.4, confidence: 0.99 },
+              { word: 'main', start: 1.4, end: 1.6, confidence: 0.99 },
+              { word: 'thing', start: 1.6, end: 1.8, confidence: 0.99 },
+              { word: 'is', start: 1.8, end: 2, confidence: 0.99 },
               { word: 'uh', start: 2, end: 2.24, confidence: 0.96, punctuated_word: 'uh,' },
+              { word: 'that', start: 2.24, end: 2.5, confidence: 0.99 },
+              { word: 'i', start: 2.5, end: 2.7, confidence: 0.99 },
+              { word: 'like', start: 2.7, end: 3, confidence: 0.99 },
+              { word: 'problems', start: 3, end: 3.5, confidence: 0.99 },
             ],
           },
         ],
@@ -35,7 +47,21 @@ describe('parseDeepgramResponse', () => {
 
   it('keeps filler tokens as words rather than dropping them', () => {
     const parsed = parseDeepgramResponse(RESPONSE_WITH_FILLERS)
-    expect(parsed.words.map((entry) => entry.word)).toEqual(['so', 'um', 'i', 'think', 'uh'])
+    expect(parsed.words.map((entry) => entry.word)).toEqual([
+      'so',
+      'um',
+      'i',
+      'think',
+      'the',
+      'main',
+      'thing',
+      'is',
+      'uh',
+      'that',
+      'i',
+      'like',
+      'problems',
+    ])
   })
 
   it('keeps start and end on every word', () => {
@@ -51,6 +77,7 @@ describe('parseDeepgramResponse', () => {
     const parsed = parseDeepgramResponse(RESPONSE_WITH_FILLERS)
     expect(parsed.confidence).toBe(0.995)
     expect(parsed.durationSeconds).toBe(6.909375)
+    expect(parsed.quality).toEqual({ status: 'usable', diagnostics: [] })
   })
 
   it('accepts silence, which is an empty transcript with no words', () => {
@@ -60,21 +87,87 @@ describe('parseDeepgramResponse', () => {
     expect(parsed.transcript).toBe('')
     expect(parsed.words).toEqual([])
     expect(parsed.confidence).toBeNull()
+    expect(parsed.quality.status).toBe('degraded')
   })
 
-  it('drops word entries that are missing a timing', () => {
+  it.each([
+    [
+      'missing timing',
+      [
+        { word: 'one', start: 0, end: 0.2 },
+        { word: 'two', start: 0.2 },
+      ],
+    ],
+    ['non-object entry', [{ word: 'one', start: 0, end: 0.2 }, 'bad']],
+    ['negative timing', [{ word: 'one', start: -0.1, end: 0.2 }]],
+    [
+      'reversed timing',
+      [
+        { word: 'one', start: 0, end: 0.2 },
+        { word: 'two', start: 0.3, end: 0.25 },
+      ],
+    ],
+    [
+      'nonmonotonic timing',
+      [
+        { word: 'one', start: 0.2, end: 0.4 },
+        { word: 'two', start: 0.1, end: 0.5 },
+      ],
+    ],
+    ['invalid confidence', [{ word: 'one', start: 0, end: 0.2, confidence: 2 }]],
+  ])('rejects %s with an explicit unavailable quality diagnostic', (_label, words) => {
+    try {
+      parseDeepgramResponse({
+        metadata: { duration: 1 },
+        results: { channels: [{ alternatives: [{ transcript: 'one two', words }] }] },
+      })
+      throw new Error('Expected Deepgram parsing to fail.')
+    } catch (error) {
+      expect(error).toBeInstanceOf(DeepgramParseError)
+      expect((error as DeepgramParseError).quality.status).toBe('unavailable')
+      expect((error as DeepgramParseError).quality.diagnostics).toHaveLength(1)
+    }
+  })
+
+  it('rejects word evidence that exceeds reported duration or does not cover the transcript', () => {
+    expect(() =>
+      parseDeepgramResponse({
+        metadata: { duration: 0.5 },
+        results: {
+          channels: [
+            { alternatives: [{ transcript: 'one', words: [{ word: 'one', start: 0, end: 1 }] }] },
+          ],
+        },
+      }),
+    ).toThrow(/duration/)
+    expect(() =>
+      parseDeepgramResponse({
+        metadata: { duration: 1 },
+        results: {
+          channels: [
+            {
+              alternatives: [
+                { transcript: 'one two', words: [{ word: 'one', start: 0, end: 0.2 }] },
+              ],
+            },
+          ],
+        },
+      }),
+    ).toThrow(/cover/)
+  })
+
+  it('returns a degraded diagnostic without dropping words when confidence is absent', () => {
     const parsed = parseDeepgramResponse({
+      metadata: { duration: 1 },
       results: {
         channels: [
           {
             alternatives: [
               {
-                transcript: 'one two',
+                transcript: 'Um, one.',
                 words: [
-                  { word: 'one', start: 0, end: 0.2 },
-                  { word: 'two', start: 0.2 },
-                  { start: 0.4, end: 0.6 },
-                  'not an object',
+                  { word: 'um', start: 0, end: 0.2 },
+                  { word: 'one', start: 0.2, end: 0.5 },
                 ],
               },
             ],
@@ -82,38 +175,10 @@ describe('parseDeepgramResponse', () => {
         ],
       },
     })
-    expect(parsed.words).toEqual([{ word: 'one', start: 0, end: 0.2 }])
-  })
-
-  it('keeps only finite word confidence values from zero through one', () => {
-    const parsed = parseDeepgramResponse({
-      results: {
-        channels: [
-          {
-            alternatives: [
-              {
-                transcript: 'one two three four five',
-                words: [
-                  { word: 'one', start: 0, end: 0.2, confidence: -0.1 },
-                  { word: 'two', start: 0.2, end: 0.4, confidence: 2 },
-                  { word: 'three', start: 0.4, end: 0.6, confidence: Number.NaN },
-                  { word: 'four', start: 0.6, end: 0.8, confidence: '0.8' },
-                  { word: 'five', start: 0.8, end: 1, confidence: 0.8 },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-    })
-
-    expect(parsed.words).toEqual([
-      { word: 'one', start: 0, end: 0.2 },
-      { word: 'two', start: 0.2, end: 0.4 },
-      { word: 'three', start: 0.4, end: 0.6 },
-      { word: 'four', start: 0.6, end: 0.8 },
-      { word: 'five', start: 0.8, end: 1, confidence: 0.8 },
-    ])
+    expect(parsed.words.map((word) => word.word)).toEqual(['um', 'one'])
+    expect(parsed.quality.status).toBe('degraded')
+    expect(parsed.quality.diagnostics.join(' ')).toMatch(/confidence/)
+    expect(deepgramQualityMetrics(parsed)).toEqual({ quality: parsed.quality })
   })
 
   it.each([

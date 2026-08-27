@@ -11,7 +11,7 @@ import {
   wordChoicePoints,
   ContentParseError,
 } from '@/lib/scoring/content'
-import { runContentCheck } from '@/lib/scoring/run-content'
+import { runContentCheck, runContentCheckSafely } from '@/lib/scoring/run-content'
 
 const TRANSCRIPT =
   "I'd say New York is really cool. I feel like the food there is good, and I mean the food there is good."
@@ -372,6 +372,25 @@ describe('runContentCheck', () => {
       request,
       transcript: TRANSCRIPT,
     })
+    expect(scoreContent(outcome.parsed ?? notCheckedContent()).total).toBe(50)
+  })
+
+  it('keeps missing or invalid provider configuration inside the user-favoring boundary', async () => {
+    const outcome = await runContentCheckSafely({
+      createModel() {
+        throw new Error('configuration contained a secret value that must not escape')
+      },
+      request,
+      transcript: TRANSCRIPT,
+    })
+    expect(outcome).toMatchObject({
+      model: null,
+      parsed: null,
+      error: 'The content provider was unavailable.',
+      calls: 0,
+      tighten: null,
+    })
+    expect(outcome.error).not.toContain('secret value')
     expect(scoreContent(outcome.parsed ?? notCheckedContent()).total).toBe(50)
   })
 })

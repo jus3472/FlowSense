@@ -157,8 +157,9 @@ describe('v2 result helpers', () => {
         evidence: [
           {
             source: 'deepgram_word_confidence',
-            start: 8,
-            end: 9,
+            start: 6,
+            end: 7,
+            coordinate: { space: 'transcript', unit: 'utf16_code_unit' } as const,
             quote: 'B',
             detail: 'Recognition confidence for this word was 0.50.',
           },
@@ -184,15 +185,17 @@ describe('v2 result helpers', () => {
         evidence: [
           {
             source: 'transcript',
-            start: 20,
-            end: 22,
+            start: 9,
+            end: 11,
+            coordinate: { space: 'transcript', unit: 'utf16_code_unit' } as const,
             quote: 'um',
             detail: 'Filler detected in the transcript.',
           },
           {
             source: 'transcript',
-            start: 2,
-            end: 4,
+            start: 0,
+            end: 2,
+            coordinate: { space: 'transcript', unit: 'utf16_code_unit' } as const,
             quote: 'um',
             detail: 'Filler detected in the transcript.',
           },
@@ -200,6 +203,7 @@ describe('v2 result helpers', () => {
             source: 'transcript',
             start: 0,
             end: 1,
+            coordinate: { space: 'transcript', unit: 'utf16_code_unit' } as const,
             quote: 'missing',
             detail: 'Filler detected in the transcript.',
           },
@@ -224,6 +228,133 @@ describe('v2 result helpers', () => {
       (segment) => segment.type === 'highlight',
     )
     expect(highlights.map((segment) => segment.text)).toEqual(['um', 'vague', 'um'])
+  })
+
+  it('uses exact repeated-quote coordinates, preserves transcript case and punctuation, and deduplicates', () => {
+    const score = payload()
+    const transcript = 'Clear, then clear.'
+    const categories = {
+      ...score.categories,
+      grammar: {
+        ...score.categories.grammar,
+        component: 0.75,
+        earned_points: 9,
+        deductions: [
+          {
+            quote: 'clear',
+            observation: 'Use a complete clause.',
+            suggestion: null,
+            deduction: 0.25,
+            evidence: [{ start: 12, end: 17 }],
+          },
+          {
+            quote: 'clear',
+            observation: 'Duplicate provider evidence.',
+            suggestion: null,
+            deduction: 0.1,
+            evidence: [{ start: 12, end: 17 }],
+          },
+        ],
+      },
+    }
+
+    const highlights = v2TranscriptSegments(transcript, { ...score, categories }).filter(
+      (segment) => segment.type === 'highlight',
+    )
+    expect(highlights).toHaveLength(1)
+    expect(highlights[0]?.text).toBe('clear')
+    expect(v2TranscriptSegments(transcript, { ...score, categories })[0]).toEqual({
+      type: 'text',
+      text: 'Clear, then ',
+    })
+  })
+
+  it('does not guess a later occurrence for quote-only or audio-time evidence', () => {
+    const score = payload()
+    const categories = {
+      ...score.categories,
+      fluency: {
+        ...score.categories.fluency,
+        component: 0.8,
+        earned_points: 18,
+        deductions: [{ id: 'filler_rate', detail: 'Fillers reduced fluency.' }],
+        evidence: [
+          {
+            source: 'transcript',
+            start: 1,
+            end: 1.2,
+            quote: 'um',
+            detail: 'Filler detected in the transcript.',
+          },
+        ],
+      },
+    }
+    expect(
+      v2TranscriptSegments('um then um', { ...score, categories }).filter(
+        (segment) => segment.type === 'highlight',
+      ),
+    ).toEqual([])
+  })
+
+  it('preserves exact legacy transcript offsets without coordinate metadata', () => {
+    const score = payload()
+    const categories = {
+      ...score.categories,
+      fluency: {
+        ...score.categories.fluency,
+        component: 0.8,
+        earned_points: 18,
+        deductions: [{ id: 'filler_rate', detail: 'Fillers reduced fluency.' }],
+        evidence: [
+          {
+            source: 'transcript',
+            start: 8,
+            end: 10,
+            quote: 'um',
+            detail: 'Filler detected in the transcript.',
+          },
+          {
+            source: 'transcript',
+            start: 3,
+            end: 5,
+            quote: 'um',
+            detail: 'Filler detected in the transcript.',
+          },
+        ],
+      },
+    }
+    const highlights = v2TranscriptSegments('um then um', { ...score, categories }).filter(
+      (segment) => segment.type === 'highlight',
+    )
+    expect(highlights.map((segment) => segment.text)).toEqual(['um'])
+    expect(highlights[0]).toMatchObject({ text: 'um', label: expect.stringContaining('Fluency') })
+  })
+
+  it('does not reinterpret legacy Clarity seconds as transcript characters', () => {
+    const score = payload()
+    const categories = {
+      ...score.categories,
+      clarity: {
+        ...score.categories.clarity,
+        component: 0.8,
+        earned_points: 16,
+        deductions: [{ id: 'recognition_uncertainty', detail: 'Lower recognition.' }],
+        evidence: [
+          {
+            source: 'deepgram_word_confidence',
+            start: 0,
+            end: 2,
+            quote: 'um',
+            detail: 'Recognition confidence for this word was 0.40.',
+          },
+        ],
+      },
+    }
+    expect(
+      v2TranscriptSegments('um then um', { ...score, categories }).filter(
+        (segment) => segment.type === 'highlight',
+      ),
+    ).toEqual([])
   })
 
   it('formats stored feedback safely without serializing malformed deductions', () => {

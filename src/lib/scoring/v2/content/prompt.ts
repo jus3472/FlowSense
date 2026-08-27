@@ -8,7 +8,7 @@ Assess grammar only for clear grammatical errors. Give exact words the speaker s
 
 Assess vocabulary only for precision, unnecessary repeated wording, vague language, or fit for the prompt. Precision is not fancy words or vocabulary level. Give exact words the speaker said as quote evidence.
 
-For every structure check, include passed, severity, quote, observation, and suggestion. A passed structure check uses null for severity, quote, observation, and suggestion. A failed structure check uses severity minor or clear, a nonempty observation, and string-or-null quote and suggestion. Grammar and vocabulary findings always include kind, severity, exact nonempty quote, nonempty observation, and string-or-null suggestion.
+For every structure check, include passed, severity, quote, start, end, observation, and suggestion. A passed structure check uses null for severity, quote, start, end, observation, and suggestion. A failed structure check uses severity minor or clear, a nonempty observation, and string-or-null quote and suggestion. When quote is present, start and end are its exact zero-based character offsets in the transcript, with end exclusive. When quote is null, start and end are null. Grammar and vocabulary findings always include kind, severity, exact nonempty quote, its exact start and exclusive end character offsets, nonempty observation, and string-or-null suggestion.
 
 Use severity minor or clear. Do not report fillers, false starts, or closers. Never invent a quote. The response version must exactly match the request version.`
 
@@ -26,6 +26,8 @@ export function buildV2ContentUserPrompt(request: V2ContentDetectorRequest): str
             passed: true,
             severity: null,
             quote: null,
+            start: null,
+            end: null,
             observation: null,
             suggestion: null,
           },
@@ -33,6 +35,8 @@ export function buildV2ContentUserPrompt(request: V2ContentDetectorRequest): str
             passed: false,
             severity: 'minor',
             quote: null,
+            start: null,
+            end: null,
             observation: 'The main point appears late.',
             suggestion: 'State the main point first.',
           },
@@ -40,6 +44,8 @@ export function buildV2ContentUserPrompt(request: V2ContentDetectorRequest): str
             passed: true,
             severity: null,
             quote: null,
+            start: null,
+            end: null,
             observation: null,
             suggestion: null,
           },
@@ -47,6 +53,8 @@ export function buildV2ContentUserPrompt(request: V2ContentDetectorRequest): str
             passed: true,
             severity: null,
             quote: null,
+            start: null,
+            end: null,
             observation: null,
             suggestion: null,
           },
@@ -54,6 +62,8 @@ export function buildV2ContentUserPrompt(request: V2ContentDetectorRequest): str
             passed: true,
             severity: null,
             quote: null,
+            start: null,
+            end: null,
             observation: null,
             suggestion: null,
           },
@@ -61,6 +71,8 @@ export function buildV2ContentUserPrompt(request: V2ContentDetectorRequest): str
             passed: true,
             severity: null,
             quote: null,
+            start: null,
+            end: null,
             observation: null,
             suggestion: null,
           },
@@ -68,6 +80,8 @@ export function buildV2ContentUserPrompt(request: V2ContentDetectorRequest): str
             passed: true,
             severity: null,
             quote: null,
+            start: null,
+            end: null,
             observation: null,
             suggestion: null,
           },
@@ -79,6 +93,8 @@ export function buildV2ContentUserPrompt(request: V2ContentDetectorRequest): str
             kind: 'grammatical_error',
             severity: 'minor',
             quote: 'exact transcript words',
+            start: 0,
+            end: 22,
             observation: 'Name the clear grammatical error.',
             suggestion: 'Give a brief corrected form.',
           },
@@ -90,6 +106,8 @@ export function buildV2ContentUserPrompt(request: V2ContentDetectorRequest): str
             kind: 'imprecise_wording',
             severity: 'minor',
             quote: 'exact transcript words',
+            start: 0,
+            end: 22,
             observation: 'Name the precision, repetition, vagueness, or fit issue.',
             suggestion: 'Offer a more specific phrase when useful.',
           },

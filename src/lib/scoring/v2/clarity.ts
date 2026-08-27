@@ -1,6 +1,11 @@
 import type { TranscriptWord } from '@/lib/deepgram/parse'
 import { clamp01, median } from '@/lib/scoring/scale'
 import type { ScoreEvidence } from '@/lib/scoring/v2/contracts'
+import {
+  AUDIO_MILLISECOND_COORDINATE,
+  AUDIO_SECOND_COORDINATE,
+  transcriptEvidenceForWord,
+} from '@/lib/scoring/v2/evidence'
 import type { CaptureMetrics } from '@/lib/types/metrics'
 import { parsePronunciationEvaluation } from '@/lib/pronunciation/contracts'
 
@@ -245,20 +250,29 @@ function checkCapture(capture: CaptureMetrics, words: readonly TranscriptWord[])
   return { status: 'available', audio: { speechLevel, noiseLevel, speechToNoiseRatio } }
 }
 
-function wordEvidence(words: readonly TranscriptWord[]): ScoreEvidence[] {
-  return words.slice(0, MAX_WORD_EVIDENCE).map((word) => ({
-    source: 'deepgram_word_confidence',
-    start: word.start,
-    end: word.end,
-    quote: word.word,
-    detail: `Recognition confidence for this word was ${(confidenceOf(word) ?? 0).toFixed(2)}.`,
-  }))
+function wordEvidence(
+  allWords: readonly TranscriptWord[],
+  selectedWords: readonly TranscriptWord[],
+  transcript?: string,
+): ScoreEvidence[] {
+  return selectedWords
+    .slice(0, MAX_WORD_EVIDENCE)
+    .map((word) =>
+      transcriptEvidenceForWord(
+        allWords,
+        transcript,
+        word,
+        'deepgram_word_confidence',
+        `Recognition confidence for this word was ${(confidenceOf(word) ?? 0).toFixed(2)}.`,
+      ),
+    )
 }
 
 /** Evaluates response intelligibility from recognition and recording evidence only. */
 function analyseClarityV1(
   words: readonly TranscriptWord[],
   capture?: CaptureMetrics | null,
+  transcript?: string,
 ): ClarityResult {
   let measurements = baseMeasurements(words, capture)
   if (!capture) return unavailable(measurements, 'Audio capture evidence was unavailable.')
@@ -304,11 +318,12 @@ function analyseClarityV1(
     speech_to_noise_ratio: captureCheck.audio.speechToNoiseRatio,
   }
 
-  const uncertainEvidence = wordEvidence(lowConfidenceWords)
+  const uncertainEvidence = wordEvidence(words, lowConfidenceWords, transcript)
   const audioEvidence: ScoreEvidence = {
     source: 'audio_timeline',
     start: 0,
     end: capture.duration_ms,
+    coordinate: AUDIO_MILLISECOND_COORDINATE,
     quote: null,
     detail: `Recognized-word audio was ${captureCheck.audio.speechToNoiseRatio.toFixed(1)} times the surrounding level.`,
   }
@@ -330,6 +345,7 @@ function analyseClarityV1(
     source: 'deepgram_word_confidence',
     start: words[0]?.start ?? null,
     end: words.at(-1)?.end ?? null,
+    coordinate: AUDIO_SECOND_COORDINATE,
     quote: null,
     detail:
       lowConfidenceWords.length === 0
@@ -358,7 +374,11 @@ function analyseClarityV1(
   }
 }
 
-function pronunciationOverlay(value: unknown): {
+function pronunciationOverlay(
+  value: unknown,
+  words: readonly TranscriptWord[],
+  transcript?: string,
+): {
   measurements: Pick<
     ClarityMeasurements,
     | 'pronunciation_status'
@@ -403,21 +423,37 @@ function pronunciationOverlay(value: unknown): {
     if (word.startMs === null || word.endMs === null || word.recognizedWord === null) return []
     const start = word.startMs / 1000
     const end = word.endMs / 1000
-    const wordEvidence: ScoreEvidence = {
-      source: 'azure_pronunciation',
-      start,
-      end,
-      quote: word.recognizedWord,
-      detail: `Word-level sound evidence was available for "${word.recognizedWord}".`,
-    }
+    const matchedTranscriptWord = words.find(
+      (candidate) =>
+        Math.abs(candidate.start - start) <= 0.05 &&
+        Math.abs(candidate.end - end) <= 0.05 &&
+        candidate.word.toLocaleLowerCase() === word.recognizedWord?.toLocaleLowerCase(),
+    )
+    const wordEvidence = matchedTranscriptWord
+      ? transcriptEvidenceForWord(
+          words,
+          transcript,
+          matchedTranscriptWord,
+          'azure_pronunciation',
+          `Word-level sound evidence was available for "${word.recognizedWord}".`,
+        )
+      : ({
+          source: 'azure_pronunciation',
+          start,
+          end,
+          coordinate: AUDIO_SECOND_COORDINATE,
+          quote: word.recognizedWord,
+          detail: `Word-level sound evidence was available for "${word.recognizedWord}".`,
+        } satisfies ScoreEvidence)
     const soundEvidence = word.phonemes.flatMap((phoneme) =>
       phoneme.expected
         ? [
             {
               source: 'azure_pronunciation',
-              start,
-              end,
-              quote: word.recognizedWord,
+              start: wordEvidence.start,
+              end: wordEvidence.end,
+              coordinate: wordEvidence.coordinate,
+              quote: wordEvidence.quote,
               detail: `Sound evidence for "${phoneme.expected}" in "${word.recognizedWord}" was available.`,
             } satisfies ScoreEvidence,
           ]
@@ -445,9 +481,10 @@ export function analyseClarity(
   words: readonly TranscriptWord[],
   capture?: CaptureMetrics | null,
   pronunciation?: unknown,
+  transcript?: string,
 ): ClarityResult {
-  const base = analyseClarityV1(words, capture)
-  const overlay = pronunciationOverlay(pronunciation)
+  const base = analyseClarityV1(words, capture, transcript)
+  const overlay = pronunciationOverlay(pronunciation, words, transcript)
   return {
     ...base,
     measurements: { ...base.measurements, ...overlay.measurements },
