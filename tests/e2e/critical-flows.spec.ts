@@ -4,6 +4,38 @@ import { MIN_PROCESSABLE_RECORDING_MS } from '../../src/lib/recording/capture-re
 const MOCK = 'http://127.0.0.1:54321'
 const APP = 'http://127.0.0.1:3100'
 
+interface E2EAttempt {
+  id: string
+  user_id: string
+  prompt_id: string | null
+  prompt_text: string
+  duration_ms: number
+  practice_mode: string
+  prompt_source: string
+  prompt_difficulty: string
+  rubric_version: string
+  retry_of_attempt_id: string | null
+  client_request_id: string
+  status: string
+  failure_code: string | null
+  score: number | null
+  section_scores: {
+    categories: Record<string, { status: string }>
+  } | null
+  metrics: {
+    practice: { target_duration_seconds: number; additional_context?: string }
+    upload: { storage_path: string; mime_type: string }
+  }
+}
+
+interface E2EState {
+  attempts: E2EAttempt[]
+  lifecycleEvents: Array<{ attemptId: string; status: string }>
+  uploadedObjects: Array<{ name: string; size: number }>
+  uploads: number
+  attemptInserts: number
+}
+
 async function blockExternalNetwork(page: Page) {
   await page.route('**/*', async (route) => {
     const url = new URL(route.request().url())
@@ -19,6 +51,28 @@ async function reset(request: APIRequestContext, onboarded = true) {
   await request.post(`${MOCK}/__e2e/reset`, { data: { onboarded } })
 }
 
+async function currentState(request: APIRequestContext): Promise<E2EState> {
+  return (await (await request.get(`${MOCK}/__e2e/state`)).json()) as E2EState
+}
+
+function attemptAt(state: E2EState, index: number): E2EAttempt {
+  const attempt = state.attempts[index]
+  if (!attempt) throw new Error(`Expected attempt ${index} in the E2E mock state.`)
+  return attempt
+}
+
+function uploadedObjectAt(state: E2EState, index: number): E2EState['uploadedObjects'][number] {
+  const object = state.uploadedObjects[index]
+  if (!object) throw new Error(`Expected uploaded object ${index} in the E2E mock state.`)
+  return object
+}
+
+function lifecycleFor(state: E2EState, attemptId: string): string[] {
+  return state.lifecycleEvents
+    .filter((event) => event.attemptId === attemptId)
+    .map((event) => event.status)
+}
+
 async function logIn(page: Page) {
   await page.goto('/login')
   await page.getByLabel('Sign up or log in').getByRole('button', { name: 'Log in' }).click()
@@ -30,18 +84,24 @@ async function logIn(page: Page) {
 
 async function processingMocks(page: Page, failure = false) {
   await page.route('**/api/transcribe', async (route) => {
+    const input = route.request().postDataJSON() as { attemptId: string }
     await new Promise((resolve) => setTimeout(resolve, 600))
-    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"wordCount":13}' })
+    const response = await page.request.post(`${MOCK}/__e2e/transcribe/${input.attemptId}`)
+    await route.fulfill({
+      status: response.status(),
+      contentType: 'application/json',
+      body: JSON.stringify(await response.json()),
+    })
   })
   await page.route('**/api/score', async (route) => {
     const input = route.request().postDataJSON() as { attemptId: string }
     await new Promise((resolve) => setTimeout(resolve, 1_000))
-    const response = await page.request.post(`${MOCK}/__e2e/process/${input.attemptId}`, {
+    const response = await page.request.post(`${MOCK}/__e2e/score/${input.attemptId}`, {
       data: { failure },
     })
     const result = await response.json()
     await route.fulfill({
-      status: 200,
+      status: response.status(),
       contentType: 'application/json',
       body: JSON.stringify(result),
     })
@@ -126,6 +186,15 @@ test('selects library and custom prompts through real screens', async ({ page })
   await expect(page.getByRole('button', { name: "I'm ready" })).toBeVisible()
 })
 
+test('history and progress start empty after an isolated reset', async ({ page }) => {
+  await logIn(page)
+  await page.goto('/history')
+  await expect(page.getByText('No responses yet')).toBeVisible()
+  await page.goto('/progress')
+  await expect(page.getByRole('heading', { name: 'Your practice' })).toBeVisible()
+  await expect(page.getByText('No practice results yet')).toBeVisible()
+})
+
 test('records once, shows processing and v2 results, retries, compares, filters, and deletes', async ({
   page,
   context,
@@ -144,19 +213,68 @@ test('records once, shows processing and v2 results, retries, compares, filters,
   for (const category of ['Fluency', 'Clarity', 'Vocabulary', 'Grammar', 'Structure', 'Delivery'])
     await expect(page.getByText(category, { exact: true })).toBeVisible()
   expect(attemptPosts).toBe(1)
-  const firstState = (await (await page.request.get(`${MOCK}/__e2e/state`)).json()) as {
-    uploads: number
-  }
+  const firstState = await currentState(page.request)
   expect(firstState.uploads).toBe(1)
+  expect(firstState.uploadedObjects).toHaveLength(1)
+  expect(firstState.attemptInserts).toBe(1)
+  expect(firstState.attempts).toHaveLength(1)
+  const firstAttempt = attemptAt(firstState, 0)
+  expect(firstAttempt).toMatchObject({ status: 'done', failure_code: null })
+  expect(lifecycleFor(firstState, firstAttempt.id)).toEqual([
+    'uploading',
+    'transcribing',
+    'scoring',
+    'done',
+  ])
+  expect(uploadedObjectAt(firstState, 0).name).toBe(firstAttempt.metrics.upload.storage_path)
+  const replay = await page.request.post(`${APP}/api/attempts`, {
+    data: {
+      clientRequestId: firstAttempt.client_request_id,
+      promptText: firstAttempt.prompt_text,
+      promptId: firstAttempt.prompt_id,
+      mode: firstAttempt.practice_mode,
+      difficulty: firstAttempt.prompt_difficulty,
+      source: firstAttempt.prompt_source,
+      targetDurationSeconds: firstAttempt.metrics.practice.target_duration_seconds,
+      retryOfAttemptId: firstAttempt.retry_of_attempt_id,
+      durationMs: firstAttempt.duration_ms,
+      mimeType: firstAttempt.metrics.upload.mime_type,
+    },
+  })
+  expect(replay.ok()).toBe(true)
+  await expect(replay.json()).resolves.toMatchObject({ attemptId: firstAttempt.id })
+  const replayState = await currentState(page.request)
+  expect(replayState.attempts).toHaveLength(1)
+  expect(replayState.attemptInserts).toBe(1)
+
   await page.getByRole('link', { name: 'Try Again' }).click()
   await recordOne(page)
   expect(attemptPosts).toBe(2)
-  const retryState = (await (await page.request.get(`${MOCK}/__e2e/state`)).json()) as {
-    uploads: number
-  }
+  const retryState = await currentState(page.request)
   expect(retryState.uploads).toBe(2)
+  expect(retryState.uploadedObjects).toHaveLength(2)
+  expect(retryState.attempts).toHaveLength(2)
+  expect(retryState.attempts.every((attempt) => attempt.status === 'done')).toBe(true)
+  const retryAttempt = attemptAt(retryState, 1)
+  expect(retryAttempt).toMatchObject({
+    retry_of_attempt_id: firstAttempt.id,
+    prompt_text: firstAttempt.prompt_text,
+    prompt_id: firstAttempt.prompt_id,
+    practice_mode: firstAttempt.practice_mode,
+    prompt_source: firstAttempt.prompt_source,
+    prompt_difficulty: firstAttempt.prompt_difficulty,
+  })
+  expect(lifecycleFor(retryState, retryAttempt.id)).toEqual([
+    'uploading',
+    'transcribing',
+    'scoring',
+    'done',
+  ])
   await expect(page.getByLabel('Previous response comparison')).toContainText('Overall')
   await expect(page.getByRole('link', { name: 'View previous response' })).toBeVisible()
+  await page.goto('/progress')
+  await expect(page.getByRole('heading', { name: 'Overall trend' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Recent retries' })).toBeVisible()
   await page.goto('/history')
   await page.getByLabel('Show responses').selectOption('retry')
   await expect(page.getByText(/Interview · Library prompt · Retry/)).toBeVisible()
@@ -169,6 +287,10 @@ test('records once, shows processing and v2 results, retries, compares, filters,
   await deleteButton.click()
   await confirm.click()
   await expect(page.getByText(/Interview · Library prompt · Retry/)).toHaveCount(0)
+  const deletedState = await currentState(page.request)
+  expect(deletedState.attempts).toHaveLength(1)
+  expect(deletedState.uploadedObjects).toHaveLength(1)
+  expect(uploadedObjectAt(deletedState, 0).name).toBe(firstAttempt.metrics.upload.storage_path)
 })
 
 test('provider failure persists explicit not-checked categories', async ({ page, context }) => {
@@ -180,6 +302,21 @@ test('provider failure persists explicit not-checked categories', async ({ page,
   await expect(page.getByText('Some checks are not available')).toBeVisible()
   await expect(page.getByText('Not checked', { exact: true })).toHaveCount(3)
   await expect(page.getByText('100')).toHaveCount(0)
+  const failureState = await currentState(page.request)
+  expect(failureState.attempts).toHaveLength(1)
+  const failedAttempt = attemptAt(failureState, 0)
+  expect(failedAttempt).toMatchObject({ status: 'done', score: null })
+  expect(lifecycleFor(failureState, failedAttempt.id)).toEqual([
+    'uploading',
+    'transcribing',
+    'scoring',
+    'done',
+  ])
+  expect(
+    Object.values(failedAttempt.section_scores?.categories ?? {}).filter(
+      (category) => category.status === 'not_checked',
+    ),
+  ).toHaveLength(3)
 })
 
 test('@mobile mobile navigation exposes practice, history, and account menu', async ({ page }) => {
