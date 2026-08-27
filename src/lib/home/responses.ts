@@ -2,7 +2,9 @@ import { recentCompletedLibraryPromptIds } from '@/lib/prompts/selection'
 import { readAttemptResult } from '@/lib/results/attempt-result'
 import { largestDeduction, summariseAttempt } from '@/lib/results/summary'
 import { v2OverallTakeaway } from '@/lib/results/v2'
-import { CONTENT_POINTS } from '@/lib/scoring/content'
+import { recomputeScore } from '@/lib/scoring/assemble'
+import { CONTENT_POINTS, type Dispute } from '@/lib/scoring/content'
+import { validLegacyDisputes } from '@/lib/scoring/disputes'
 
 export interface HomeLatestResponse {
   attemptId: string
@@ -31,6 +33,10 @@ interface HomeCompletedAttemptRow {
   metrics: unknown
   content_result: unknown
   status: 'done'
+}
+
+interface HomeDisputeRow extends Dispute {
+  attempt_id: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -83,6 +89,42 @@ function parseCompletedAttempt(value: unknown): HomeCompletedAttemptRow | null {
   }
 }
 
+function parseDisputeRows(value: unknown): Map<string, Dispute[]> | null {
+  if (!Array.isArray(value)) return null
+  const byAttempt = new Map<string, Dispute[]>()
+  for (const row of value) {
+    if (
+      !isRecord(row) ||
+      typeof row.attempt_id !== 'string' ||
+      row.attempt_id.length === 0 ||
+      typeof row.note_type !== 'string' ||
+      (row.quote !== null && typeof row.quote !== 'string')
+    ) {
+      return null
+    }
+    const parsed: HomeDisputeRow = {
+      attempt_id: row.attempt_id,
+      note_type: row.note_type,
+      quote: row.quote,
+    }
+    const existing = byAttempt.get(parsed.attempt_id) ?? []
+    existing.push({ note_type: parsed.note_type, quote: parsed.quote })
+    byAttempt.set(parsed.attempt_id, existing)
+  }
+  return byAttempt
+}
+
+export function homeCompletedAttemptIds(rows: unknown): string[] | null {
+  if (!Array.isArray(rows)) return null
+  const ids: string[] = []
+  for (const row of rows) {
+    const attempt = parseCompletedAttempt(row)
+    if (!attempt) return null
+    ids.push(attempt.id)
+  }
+  return ids
+}
+
 function compareNewestFirst(left: HomeCompletedAttemptRow, right: HomeCompletedAttemptRow): number {
   const createdAtOrder = right.created_at.localeCompare(left.created_at)
   return createdAtOrder !== 0 ? createdAtOrder : right.id.localeCompare(left.id)
@@ -93,7 +135,10 @@ interface ReadHomeResult {
   trendCohort: string | null
 }
 
-function readHomeResult(attempt: HomeCompletedAttemptRow): ReadHomeResult {
+function readHomeResult(
+  attempt: HomeCompletedAttemptRow,
+  storedDisputes: readonly Dispute[],
+): ReadHomeResult {
   const result = readAttemptResult({
     id: attempt.id,
     promptText: attempt.prompt_text,
@@ -114,19 +159,25 @@ function readHomeResult(attempt: HomeCompletedAttemptRow): ReadHomeResult {
         score: result.payload.total_earned_points,
         summary: v2OverallTakeaway(result.payload),
       },
-      trendCohort: `v2:${result.payload.version}:${result.payload.rubric_version}`,
+      trendCohort: `v2:${result.payload.version}:${result.payload.rubric_version}:${result.payload.mode}`,
     }
   }
   if (result.kind === 'legacy') {
+    const disputes = validLegacyDisputes(result.attempt.content, storedDisputes)
+    const adjusted = recomputeScore(
+      result.attempt.content,
+      result.attempt.sections.delivery.metrics,
+      disputes,
+    )
     return {
       latest: {
         attemptId: attempt.id,
-        score: result.attempt.score,
+        score: adjusted.score,
         summary: summariseAttempt(
-          result.attempt.score,
+          adjusted.score,
           largestDeduction(
             result.attempt.metrics,
-            result.attempt.sections.content.checks,
+            adjusted.section_scores.content.checks,
             CONTENT_POINTS,
           ),
         ),
@@ -154,8 +205,13 @@ function readHomeResult(attempt: HomeCompletedAttemptRow): ReadHomeResult {
  * recalculated. An undecodable latest row keeps only a validated standalone
  * overall; without one it is unavailable rather than replaced by an older row.
  */
-export function buildHomeResponseData(rows: unknown): HomeResponseData | null {
+export function buildHomeResponseData(
+  rows: unknown,
+  disputeRows: unknown = [],
+): HomeResponseData | null {
   if (!Array.isArray(rows)) return null
+  const disputesByAttempt = parseDisputeRows(disputeRows)
+  if (!disputesByAttempt) return null
 
   const attempts: HomeCompletedAttemptRow[] = []
   for (const row of rows) {
@@ -166,7 +222,9 @@ export function buildHomeResponseData(rows: unknown): HomeResponseData | null {
   attempts.sort(compareNewestFirst)
 
   const newest = attempts[0] ?? null
-  const results = attempts.map(readHomeResult)
+  const results = attempts.map((attempt) =>
+    readHomeResult(attempt, disputesByAttempt.get(attempt.id) ?? []),
+  )
   const latestResult = results[0] ?? null
   const latest = latestResult?.latest ?? null
   const trendCohort = latestResult?.trendCohort ?? null
