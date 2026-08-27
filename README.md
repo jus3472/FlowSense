@@ -44,6 +44,11 @@ Required application variables:
 - `DEEPGRAM_API_KEY`
 - `DEEPSEEK_API_KEY`
 
+Optional server-only pronunciation evidence uses `AZURE_SPEECH_ENDPOINT`,
+`AZURE_SPEECH_KEY`, and `AZURE_SPEECH_LOCALE`. The guarded adapter accepts only Azure's
+documented 16 kHz PCM WAV and OGG Opus short-audio inputs up to 30 seconds; other recordings
+remain not checked and no pronunciation deductions are applied.
+
 `SUPABASE_DB_URL` is local-only and required only for database migrations and inspection scripts.
 `DEEPGRAM_DEBUG=true` logs raw transcription responses for debugging and should remain disabled by
 default.

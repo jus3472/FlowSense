@@ -7,7 +7,12 @@ import {
   buildContentUserPrompt,
   buildRewriteRetryPrompt,
 } from '@/lib/deepseek/prompt'
-import { deepseekApiKey } from '@/lib/env/server'
+import { azureSpeechConfig, deepseekApiKey } from '@/lib/env/server'
+import { createAzurePronunciationProvider, isAzureAudioSupported } from '@/lib/pronunciation/azure'
+import type {
+  PronunciationEvaluation,
+  PronunciationAssessmentRequest,
+} from '@/lib/pronunciation/contracts'
 import { SCORE_VERSION, assembleScore } from '@/lib/scoring/assemble'
 import { notCheckedContent, type Dispute } from '@/lib/scoring/content'
 import { runContentCheck } from '@/lib/scoring/run-content'
@@ -29,6 +34,7 @@ import { evaluateFluency } from '@/lib/scoring/v2/fluency'
 import { createClient } from '@/lib/supabase/server'
 import type { TranscriptWord } from '@/lib/deepgram/parse'
 import type { AttemptMetrics } from '@/lib/types/metrics'
+import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 
 /** The model call is the slow half. Mechanical metrics take milliseconds. */
 export const maxDuration = 60
@@ -70,6 +76,69 @@ function unavailableProvider(error: unknown): V2ContentDetectorProvider {
   return { name: 'deepseek', complete: async () => Promise.reject(new Error(message)) }
 }
 
+async function pronunciationEvidence(
+  supabase: {
+    storage: {
+      from: (bucket: string) => {
+        download: (
+          path: string,
+        ) => Promise<{ data: Blob | null; error: { message: string } | null }>
+      }
+    }
+  },
+  attempt: {
+    audio_path: string | null
+  },
+  metrics: AttemptMetrics,
+  transcript: string,
+  transcriptWords: readonly TranscriptWord[],
+): Promise<PronunciationEvaluation | null> {
+  const config = azureSpeechConfig()
+  const capture = metrics.capture
+  if (!config || !capture || !attempt.audio_path) return null
+
+  const request: PronunciationAssessmentRequest = {
+    contractVersion: 'v1',
+    provider: { id: 'azure-speech', model: 'short-audio', version: 'rest-v1' },
+    locale: config.locale,
+    scenario: 'scripted',
+    audio: { contentType: capture.mime_type, durationMs: capture.duration_ms },
+    referenceText: transcript,
+    recognizedWords: transcriptWords.map((word) => ({
+      word: word.word,
+      startMs: word.start * 1000,
+      endMs: word.end * 1000,
+    })),
+  }
+
+  if (!isAzureAudioSupported(request.audio.contentType, request.audio.durationMs)) {
+    return {
+      contractVersion: 'v1',
+      provider: {
+        id: 'azure-speech',
+        model: 'short-audio',
+        version: 'rest-v1',
+        locale: config.locale,
+      },
+      status: 'not_checked',
+      words: [],
+      unsupportedWords: [],
+      warnings: [
+        'Azure short-audio assessment does not support this recording format or duration.',
+      ],
+      error: null,
+      eligibleForDeductions: false,
+    }
+  }
+
+  const { data: audio, error } = await supabase.storage
+    .from(RECORDINGS_BUCKET)
+    .download(attempt.audio_path)
+  if (error || !audio) return null
+
+  return createAzurePronunciationProvider(config).assess(request, await audio.arrayBuffer())
+}
+
 export async function POST(request: Request) {
   const supabase = await createClient()
   const {
@@ -90,9 +159,10 @@ export async function POST(request: Request) {
   const { data: attempt, error: readError } = await supabase
     .from('attempts')
     .select(
-      'id, prompt_text, transcript, duration_ms, metrics, score, section_scores, content_result, practice_mode, rubric_version',
+      'id, prompt_text, audio_path, transcript, duration_ms, metrics, score, section_scores, content_result, practice_mode, rubric_version',
     )
     .eq('id', attemptId)
+    .eq('user_id', user.id)
     .maybeSingle()
 
   if (readError) return apiError(readError.message, 500)
@@ -120,6 +190,13 @@ export async function POST(request: Request) {
   }
 
   if (attempt.rubric_version === 'v2' && isPracticeMode(attempt.practice_mode)) {
+    const pronunciation = await pronunciationEvidence(
+      supabase,
+      { audio_path: attempt.audio_path },
+      metrics,
+      transcript,
+      transcriptWords,
+    )
     let provider: V2ContentDetectorProvider
     try {
       provider = contentDetectorFromModel(createDeepSeekModel(deepseekApiKey()))
@@ -139,7 +216,7 @@ export async function POST(request: Request) {
       mode: attempt.practice_mode,
       fluency: evaluateFluency({ capture, words: transcriptWords, transcript }),
       delivery: evaluateDelivery(capture),
-      clarity: analyseClarity(transcriptWords, capture),
+      clarity: analyseClarity(transcriptWords, capture, pronunciation),
       content,
     })
     const nextMetrics = {
@@ -149,6 +226,7 @@ export async function POST(request: Request) {
         content,
         scored_at: new Date().toISOString(),
       },
+      ...(pronunciation ? { pronunciation } : {}),
     }
     const { error: saveError } = await supabase
       .from('attempts')

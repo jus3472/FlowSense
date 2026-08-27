@@ -1,4 +1,5 @@
 import 'server-only'
+import { validateAzureSpeechConfig, type AzureSpeechConfig } from '@/lib/pronunciation/azure'
 
 /**
  * The only module allowed to read the secret keys. The `server-only` import
@@ -28,4 +29,13 @@ export function deepgramApiKey(): string {
 /** Wired up in a later prompt, when content evaluation lands. */
 export function deepseekApiKey(): string {
   return required('DEEPSEEK_API_KEY', process.env.DEEPSEEK_API_KEY)
+}
+
+/** Optional Azure configuration. Invalid or incomplete values disable the adapter. */
+export function azureSpeechConfig(): AzureSpeechConfig | null {
+  return validateAzureSpeechConfig({
+    endpoint: process.env.AZURE_SPEECH_ENDPOINT,
+    key: process.env.AZURE_SPEECH_KEY,
+    locale: process.env.AZURE_SPEECH_LOCALE ?? 'en-US',
+  })
 }

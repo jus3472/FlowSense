@@ -2,6 +2,7 @@ import type { TranscriptWord } from '@/lib/deepgram/parse'
 import { clamp01, median } from '@/lib/scoring/scale'
 import type { ScoreEvidence } from '@/lib/scoring/v2/contracts'
 import type { CaptureMetrics } from '@/lib/types/metrics'
+import type { PronunciationEvaluation } from '@/lib/pronunciation/contracts'
 
 export const LOW_WORD_CONFIDENCE = 0.75
 export const MIN_CLARITY_WORDS = 8
@@ -250,6 +251,7 @@ function wordEvidence(words: readonly TranscriptWord[]): ScoreEvidence[] {
 export function analyseClarity(
   words: readonly TranscriptWord[],
   capture?: CaptureMetrics | null,
+  pronunciation?: PronunciationEvaluation | null,
 ): ClarityResult {
   let measurements = baseMeasurements(words, capture)
   if (!capture) return unavailable(measurements, 'Audio capture evidence was unavailable.')
@@ -328,13 +330,33 @@ export function analyseClarity(
         : `${lowConfidenceWords.length} recognized words had lower transcription confidence.`,
   }
 
+  const pronunciationEvidence =
+    pronunciation?.status === 'completed'
+      ? pronunciation.words
+          .filter(
+            (word) =>
+              word.pronunciationAvailability === 'available' &&
+              word.startMs !== null &&
+              word.endMs !== null &&
+              word.recognizedWord !== null,
+          )
+          .slice(0, MAX_WORD_EVIDENCE)
+          .map((word) => ({
+            source: 'azure_pronunciation',
+            start: (word.startMs as number) / 1000,
+            end: (word.endMs as number) / 1000,
+            quote: word.recognizedWord,
+            detail: 'Provider word-level sound evidence is recorded for review only.',
+          }))
+      : []
+
   return {
     category: 'clarity',
     availability: 'available',
     status: 'scored',
     component,
     measurements,
-    evidence: [summaryEvidence, ...uncertainEvidence, audioEvidence],
+    evidence: [summaryEvidence, ...uncertainEvidence, audioEvidence, ...pronunciationEvidence],
     deductions:
       lowConfidenceWords.length > 0
         ? [
@@ -345,6 +367,9 @@ export function analyseClarity(
             },
           ]
         : [],
-    warnings,
+    warnings:
+      pronunciationEvidence.length > 0
+        ? [...warnings, 'Provider sound evidence is informational and does not change this score.']
+        : warnings,
   }
 }

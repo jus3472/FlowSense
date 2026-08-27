@@ -97,7 +97,7 @@ must not overwrite or silently reinterpret a past result. New shapes must remain
 historical `attempts` data. RLS applies to every user table and the private `recordings` bucket. Add
 explicit insert policies when adding a table or storage path.
 
-Only `src/lib/env/server.ts` may read `SUPABASE_SECRET_KEY`, `DEEPGRAM_API_KEY`, or `DEEPSEEK_API_KEY`. The lint configuration and tests enforce this boundary. Never add secrets to a client component, a public environment variable, documentation examples, or committed local files.
+Only `src/lib/env/server.ts` may read server secrets, including the optional `AZURE_SPEECH_KEY`. The lint configuration and tests enforce this boundary. Never add secrets to a client component, a public environment variable, documentation examples, or committed local files. Azure pronunciation evidence is guarded to documented short-audio formats and is never a deduction.
 
 ## Results and Interface
 
