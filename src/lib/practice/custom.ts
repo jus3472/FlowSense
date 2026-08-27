@@ -2,6 +2,8 @@ import { PRACTICE_MODES, type PracticeMode } from '@/lib/practice/contracts'
 
 export const MAX_CUSTOM_PROMPT_LENGTH = 1_000
 export const MAX_CUSTOM_CONTEXT_LENGTH = 1_000
+/** Leaves room for the authenticated-encryption envelope and cookie attributes. */
+export const MAX_CUSTOM_HANDOFF_INPUT_BYTES = 2_300
 export const MIN_CUSTOM_TARGET_DURATION_SECONDS = 15
 export const MAX_CUSTOM_TARGET_DURATION_SECONDS = 60
 
@@ -15,11 +17,19 @@ export interface CustomPracticeInput {
 function text(value: unknown, limit: number): string | null {
   if (typeof value !== 'string') return null
   const result = value.trim()
-  return result.length <= limit ? result : null
+  return [...result].length <= limit ? result : null
 }
 
-export function parseCustomPracticeInput(value: unknown): CustomPracticeInput | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+export type CustomPracticeInputResult =
+  { ok: true; value: CustomPracticeInput } | { ok: false; reason: 'invalid' | 'too_large' }
+
+function storageBytes(value: CustomPracticeInput): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength
+}
+
+export function validateCustomPracticeInput(value: unknown): CustomPracticeInputResult {
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    return { ok: false, reason: 'invalid' }
   const record = value as Record<string, unknown>
   const promptText = text(record.promptText, MAX_CUSTOM_PROMPT_LENGTH)
   const context = text(record.additionalContext ?? '', MAX_CUSTOM_CONTEXT_LENGTH)
@@ -34,13 +44,21 @@ export function parseCustomPracticeInput(value: unknown): CustomPracticeInput | 
     targetDurationSeconds < MIN_CUSTOM_TARGET_DURATION_SECONDS ||
     targetDurationSeconds > MAX_CUSTOM_TARGET_DURATION_SECONDS
   )
-    return null
-  return {
+    return { ok: false, reason: 'invalid' }
+  const input: CustomPracticeInput = {
     promptText,
     mode: mode as PracticeMode,
     ...(context ? { additionalContext: context } : {}),
     targetDurationSeconds,
   }
+  return storageBytes(input) <= MAX_CUSTOM_HANDOFF_INPUT_BYTES
+    ? { ok: true, value: input }
+    : { ok: false, reason: 'too_large' }
+}
+
+export function parseCustomPracticeInput(value: unknown): CustomPracticeInput | null {
+  const result = validateCustomPracticeInput(value)
+  return result.ok ? result.value : null
 }
 
 export const CUSTOM_SESSION_COOKIE = 'flowsense_custom_session'
@@ -48,17 +66,4 @@ export const CUSTOM_SESSION_COOKIE = 'flowsense_custom_session'
 /** A custom session is only consumed after the action's explicit redirect. */
 export function isCustomPracticeMarker(value: unknown): boolean {
   return value === '1'
-}
-
-export function serializeCustomPracticeInput(value: CustomPracticeInput): string {
-  return encodeURIComponent(JSON.stringify(value))
-}
-
-export function parseCustomPracticeCookie(value: string | undefined): CustomPracticeInput | null {
-  if (!value) return null
-  try {
-    return parseCustomPracticeInput(JSON.parse(decodeURIComponent(value)) as unknown)
-  } catch {
-    return null
-  }
 }

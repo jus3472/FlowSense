@@ -1,15 +1,12 @@
 import type { Metadata } from 'next'
-import { cookies } from 'next/headers'
+import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { RecordFlow } from '@/components/record/record-flow'
 import { RetryButton } from '@/components/system/retry-button'
 import { ButtonLink } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
-import {
-  CUSTOM_SESSION_COOKIE,
-  isCustomPracticeMarker,
-  parseCustomPracticeCookie,
-} from '@/lib/practice/custom'
+import { isCustomPracticeMarker } from '@/lib/practice/custom'
+import { CUSTOM_HANDOFF_HEADER, parseCustomPracticeHeader } from '@/lib/practice/custom-handoff'
 import { parsePracticeMode, parseRecordPromptParam } from '@/lib/practice/navigation'
 import { sanitizeFocusAreas } from '@/lib/focus-areas'
 import {
@@ -61,7 +58,9 @@ export default async function RecordPage({
   }
 
   if (!session && isCustomPracticeMarker(params.custom)) {
-    const custom = parseCustomPracticeCookie((await cookies()).get(CUSTOM_SESSION_COOKIE)?.value)
+    // Proxy validates, user-binds, and clears the encrypted cookie before this
+    // upstream-only header reaches the page.
+    const custom = parseCustomPracticeHeader((await headers()).get(CUSTOM_HANDOFF_HEADER))
     session = custom
       ? parsePracticeSessionDescriptor({
           ...custom,

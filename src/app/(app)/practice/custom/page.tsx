@@ -6,16 +6,20 @@ export default async function CustomPracticePage({
 }: {
   searchParams: Promise<{ error?: string }>
 }) {
-  const error = (await searchParams).error === 'invalid'
+  const { error: errorCode } = await searchParams
+  const error = errorCode === 'invalid'
+  const tooLarge = errorCode === 'too-large'
   return (
     <form action={beginCustomPractice} className="flex flex-col gap-6 pt-4">
       <div>
         <p className="section-label text-muted">Custom practice</p>
         <h1 className="prompt-display text-foreground text-2xl">Practice your own prompt</h1>
       </div>
-      {error ? (
+      {error || tooLarge ? (
         <p role="alert" className="text-negative text-sm">
-          Check the prompt, mode, and target duration.
+          {tooLarge
+            ? 'Your prompt and context are too long. Shorten them and try again.'
+            : 'Check the prompt, mode, and target duration.'}
         </p>
       ) : null}
       <label className="flex flex-col gap-2 text-sm font-medium">

@@ -21,6 +21,11 @@ export function supabaseSecretKey(): string {
   return required('SUPABASE_SECRET_KEY', process.env.SUPABASE_SECRET_KEY)
 }
 
+/** Domain-separated before use by the custom-practice handoff cipher. */
+export function customPracticeHandoffSecret(): string {
+  return supabaseSecretKey()
+}
+
 /** Wired up in a later prompt, when transcription lands. */
 export function deepgramApiKey(): string {
   return required('DEEPGRAM_API_KEY', process.env.DEEPGRAM_API_KEY)

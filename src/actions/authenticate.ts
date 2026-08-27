@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import type { AuthFormState } from '@/lib/forms'
+import { clearCustomPracticeHandoffCookie } from '@/lib/practice/custom-handoff-cookie'
 import { createClient } from '@/lib/supabase/server'
 import { isAuthMode, validateEmail, validatePassword, type AuthMode } from '@/lib/validation'
 
@@ -62,6 +63,7 @@ export async function authenticate(
         fieldErrors: {},
       }
     }
+    await clearCustomPracticeHandoffCookie()
     redirect('/onboarding')
   }
 
@@ -69,5 +71,6 @@ export async function authenticate(
   if (error) {
     return { formError: messageFor(mode, error.message), notice: null, fieldErrors: {} }
   }
+  await clearCustomPracticeHandoffCookie()
   redirect('/home')
 }
