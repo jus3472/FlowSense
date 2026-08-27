@@ -13,7 +13,7 @@ import { parseRecordModeParam } from '@/lib/practice/navigation'
 import {
   invalidExplicitRecordIntent,
   resolveLibraryPromptSession,
-  resolveRetrySession,
+  resolveExplicitRetryIntent,
 } from '@/lib/practice/resolution'
 import {
   parsePracticeSessionDescriptor,
@@ -78,29 +78,27 @@ export default async function RecordPage({
 
   const params = await searchParams
   let session: PracticeSessionDescriptor | null = null
-  const invalidIntent = invalidExplicitRecordIntent(params)
+  const retryResolution = await resolveExplicitRetryIntent(params, async (attemptId) => {
+    try {
+      const { data, error } = await supabase
+        .from('attempts')
+        .select(
+          'id, prompt_id, prompt_text, practice_mode, prompt_source, prompt_difficulty, metrics, status',
+        )
+        .eq('id', attemptId)
+        .eq('user_id', user.id)
+        .maybeSingle()
 
-  if (invalidIntent === 'custom') return <CustomUnavailableState />
-
-  const retryResolution =
-    invalidIntent === 'retry'
-      ? ({ status: 'unavailable' } as const)
-      : await resolveRetrySession(params.retry, async (attemptId) => {
-          const { data, error } = await supabase
-            .from('attempts')
-            .select(
-              'id, prompt_id, prompt_text, practice_mode, prompt_source, prompt_difficulty, metrics, status',
-            )
-            .eq('id', attemptId)
-            .eq('user_id', user.id)
-            .maybeSingle()
-
-          if (error) {
-            logSessionLoadFailure('retry_attempt', error)
-            return dataFailure()
-          }
-          return data ? dataReady(data) : dataEmpty()
-        })
+      if (error) {
+        logSessionLoadFailure('retry_attempt', error)
+        return dataFailure()
+      }
+      return data ? dataReady(data) : dataEmpty()
+    } catch (error) {
+      logSessionLoadFailure('retry_attempt', error)
+      return dataFailure()
+    }
+  })
 
   if (retryResolution.status === 'failure') {
     return (
@@ -116,15 +114,18 @@ export default async function RecordPage({
     return (
       <ErrorState
         title="That retry is not available"
-        description="Open one of your responses and choose Try again."
+        description="Choose a prompt to start a new response."
       >
-        <ButtonLink href="/history" variant="secondary">
-          View responses
+        <ButtonLink href="/practice" variant="secondary">
+          Browse practice
         </ButtonLink>
       </ErrorState>
     )
   }
   session = retryResolution.status === 'ready' ? retryResolution.session : null
+
+  const invalidIntent = invalidExplicitRecordIntent(params)
+  if (invalidIntent === 'custom') return <CustomUnavailableState />
 
   if (!session && isCustomPracticeMarker(params.custom)) {
     // Proxy validates, user-binds, and clears the encrypted cookie before this

@@ -11,18 +11,22 @@ import { isRetryableAttemptStatus } from '@/lib/attempts/lifecycle'
 
 type SearchParam = string | string[] | undefined
 
+export interface RecordSearchParams {
+  retry?: SearchParam
+  prompt?: SearchParam
+  custom?: SearchParam
+  mode?: SearchParam
+}
+
 export type ExplicitSessionResolution =
   | { status: 'none' }
   | { status: 'ready'; session: PracticeSessionDescriptor }
   | { status: 'unavailable' }
   | { status: 'failure' }
 
-export function invalidExplicitRecordIntent(params: {
-  retry?: SearchParam
-  prompt?: SearchParam
-  custom?: SearchParam
-  mode?: SearchParam
-}): 'retry' | 'prompt' | 'custom' | null {
+export function invalidExplicitRecordIntent(
+  params: RecordSearchParams,
+): 'retry' | 'prompt' | 'custom' | null {
   if (
     params.custom !== undefined &&
     (!isCustomPracticeMarker(params.custom) ||
@@ -39,6 +43,24 @@ export function invalidExplicitRecordIntent(params: {
     return 'prompt'
   }
   return null
+}
+
+/**
+ * Resolves explicit retry intent before every other record path. Once a retry
+ * key is present, no malformed value or contradictory query can become an
+ * ordinary prompt request.
+ */
+export async function resolveExplicitRetryIntent(
+  params: RecordSearchParams,
+  loadAttempt: (attemptId: string) => Promise<DataOutcome<unknown>>,
+): Promise<ExplicitSessionResolution> {
+  if (params.retry === undefined) return { status: 'none' }
+  if (params.prompt !== undefined || params.custom !== undefined || params.mode !== undefined) {
+    return { status: 'unavailable' }
+  }
+
+  const resolution = await resolveRetrySession(params.retry, loadAttempt)
+  return resolution.status === 'none' ? { status: 'unavailable' } : resolution
 }
 
 export async function resolveRetrySession(

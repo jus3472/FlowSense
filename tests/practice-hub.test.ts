@@ -30,10 +30,10 @@ describe('practice hub routes', () => {
   it('fails closed for explicit unavailable prompt and retry intent instead of randomizing', () => {
     expect(record).toContain("export const dynamic = 'force-dynamic'")
     expect(record).toContain('resolveLibraryPromptSession(params.prompt, getPromptById)')
-    expect(record).toContain('resolveRetrySession(params.retry')
+    expect(record).toContain('resolveExplicitRetryIntent(params')
     expect(record).toContain('title="That prompt is not available"')
     expect(record).toContain('title="That retry is not available"')
-    expect(record.indexOf('resolveRetrySession(params.retry')).toBeLessThan(
+    expect(record.indexOf('resolveExplicitRetryIntent(params')).toBeLessThan(
       record.indexOf('pickRecordPrompt('),
     )
     expect(record.indexOf('resolveLibraryPromptSession(params.prompt')).toBeLessThan(

@@ -1,6 +1,7 @@
 import { dataEmpty, dataFailure, dataReady } from '@/lib/data/outcome'
 import {
   invalidExplicitRecordIntent,
+  resolveExplicitRetryIntent,
   resolveLibraryPromptSession,
   resolveRetrySession,
 } from '@/lib/practice/resolution'
@@ -45,6 +46,26 @@ describe('explicit practice-session resolution', () => {
     })
     expect(loadAttempt).not.toHaveBeenCalled()
     expect(loadPrompt).not.toHaveBeenCalled()
+  })
+
+  it('keeps missing retry intent on the ordinary record path', async () => {
+    const loader = vi.fn()
+
+    await expect(resolveExplicitRetryIntent({}, loader)).resolves.toEqual({ status: 'none' })
+    expect(loader).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { retry: ATTEMPT_ID, prompt: PROMPT_ID },
+    { retry: ATTEMPT_ID, mode: 'practice' },
+    { retry: ATTEMPT_ID, custom: '1' },
+  ])('fails closed for contradictory retry intent without loading a row', async (params) => {
+    const loader = vi.fn()
+
+    await expect(resolveExplicitRetryIntent(params, loader)).resolves.toEqual({
+      status: 'unavailable',
+    })
+    expect(loader).not.toHaveBeenCalled()
   })
 
   it.each([[''], ['not-a-uuid'], [[ATTEMPT_ID, ATTEMPT_ID]]])(
