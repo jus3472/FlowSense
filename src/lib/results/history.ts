@@ -1,12 +1,14 @@
 import type { Route } from 'next'
 import { dayKey } from '@/lib/streak'
 import type { PracticeMode, PromptSource } from '@/lib/practice/contracts'
+import type { HistoryResultKind } from '@/lib/results/history-cohort'
 
 export interface HistoryEntry {
   id: string
   createdAt: string
   promptText: string
   score: number | null
+  resultKind?: HistoryResultKind
   practiceMode?: PracticeMode | null
   promptSource?: PromptSource | null
   retryOfAttemptId?: string | null
@@ -63,16 +65,8 @@ export function groupByDay(
   return [...groups.values()]
 }
 
-export type HistoryFilter = 'all' | 'high' | 'low'
-
 export type HistoryMetadataFilter =
   'all' | 'general' | 'interview' | 'presentation' | 'conversation' | 'custom' | 'retry'
-
-export const FILTER_LABEL: Record<HistoryFilter, string> = {
-  all: 'All',
-  high: 'High scores',
-  low: 'Low scores',
-}
 
 export const METADATA_FILTER_LABEL: Record<HistoryMetadataFilter, string> = {
   all: 'All responses',
@@ -86,19 +80,16 @@ export const METADATA_FILTER_LABEL: Record<HistoryMetadataFilter, string> = {
 
 export interface HistoryQuery {
   metadata: HistoryMetadataFilter
-  score: HistoryFilter
   page: number
 }
 
 export const DEFAULT_HISTORY_QUERY: HistoryQuery = {
   metadata: 'all',
-  score: 'all',
   page: 1,
 }
 
 export type HistorySearchParams = Record<string, string | string[] | undefined>
 
-const HISTORY_FILTERS: readonly HistoryFilter[] = ['all', 'high', 'low']
 const HISTORY_METADATA_FILTERS: readonly HistoryMetadataFilter[] = [
   'all',
   'general',
@@ -115,15 +106,15 @@ function singular(value: string | string[] | undefined): string | undefined {
 
 export function parseHistoryQuery(
   params: HistorySearchParams,
-): { status: 'valid'; query: HistoryQuery } | { status: 'invalid' } {
+): { status: 'valid'; query: HistoryQuery; canonical?: true } | { status: 'invalid' } {
   if (Array.isArray(params.show) || Array.isArray(params.score) || Array.isArray(params.page))
     return { status: 'invalid' }
   const metadata = singular(params.show) ?? DEFAULT_HISTORY_QUERY.metadata
-  const score = singular(params.score) ?? DEFAULT_HISTORY_QUERY.score
+  const obsoleteScore = singular(params.score)
   const rawPage = singular(params.page)
   if (
     !HISTORY_METADATA_FILTERS.includes(metadata as HistoryMetadataFilter) ||
-    !HISTORY_FILTERS.includes(score as HistoryFilter) ||
+    (obsoleteScore !== undefined && !['all', 'high', 'low'].includes(obsoleteScore)) ||
     (rawPage !== undefined && !/^[1-9]\d{0,4}$/.test(rawPage))
   )
     return { status: 'invalid' }
@@ -131,16 +122,15 @@ export function parseHistoryQuery(
     status: 'valid',
     query: {
       metadata: metadata as HistoryMetadataFilter,
-      score: score as HistoryFilter,
       page: rawPage ? Number(rawPage) : DEFAULT_HISTORY_QUERY.page,
     },
+    ...(obsoleteScore !== undefined ? { canonical: true as const } : {}),
   }
 }
 
 export function historyHref(query: HistoryQuery): Route {
   const params = new URLSearchParams()
   if (query.metadata !== DEFAULT_HISTORY_QUERY.metadata) params.set('show', query.metadata)
-  if (query.score !== DEFAULT_HISTORY_QUERY.score) params.set('score', query.score)
   if (query.page !== DEFAULT_HISTORY_QUERY.page) params.set('page', String(query.page))
   const suffix = params.toString()
   return (suffix ? `/history?${suffix}` : '/history') as Route
@@ -168,7 +158,15 @@ export function historyContext(entry: HistoryEntry): string[] {
     ...(entry.promptSource === 'custom' ? ['Custom prompt'] : []),
     ...(entry.promptSource === 'library' ? ['Library prompt'] : []),
     ...(typeof entry.retryOfAttemptId === 'string' ? ['Retry'] : []),
+    ...(entry.resultKind === 'unsupported' ? ['Unsupported result'] : []),
+    ...(entry.resultKind === 'partial' ? ['Partial result'] : []),
   ]
+}
+
+export function historyScoreLabel(entry: HistoryEntry): string {
+  if (entry.resultKind === 'unsupported') return 'Unsupported'
+  if (entry.score === null) return 'Overall unavailable'
+  return String(entry.score)
 }
 
 export function matchesMetadataFilter(entry: HistoryEntry, filter: HistoryMetadataFilter): boolean {
@@ -176,40 +174,4 @@ export function matchesMetadataFilter(entry: HistoryEntry, filter: HistoryMetada
   if (filter === 'custom') return entry.promptSource === 'custom'
   if (filter === 'retry') return typeof entry.retryOfAttemptId === 'string'
   return historyMode(entry) === filter
-}
-
-export function averageScore(entries: readonly HistoryEntry[]): number {
-  const scores = entries
-    .map((entry) => entry.score)
-    .filter((score): score is number => score !== null)
-  if (scores.length === 0) return 0
-  return scores.reduce((sum, score) => sum + score, 0) / scores.length
-}
-
-/** Split against the speaker's own average rather than a fixed cutoff. */
-export function applyFilter(
-  entries: readonly HistoryEntry[],
-  filter: HistoryFilter,
-): HistoryEntry[] {
-  if (filter === 'all') return [...entries]
-  const average = averageScore(entries)
-  return entries.filter((entry) =>
-    entry.score === null
-      ? false
-      : filter === 'high'
-        ? entry.score >= average
-        : entry.score < average,
-  )
-}
-
-/** Applies metadata first, then the existing score split against the filtered set. */
-export function applyHistoryFilters(
-  entries: readonly HistoryEntry[],
-  metadataFilter: HistoryMetadataFilter,
-  scoreFilter: HistoryFilter,
-): HistoryEntry[] {
-  return applyFilter(
-    entries.filter((entry) => matchesMetadataFilter(entry, metadataFilter)),
-    scoreFilter,
-  )
 }

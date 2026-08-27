@@ -120,12 +120,22 @@ describe('retry comparison', () => {
   })
 
   it('bounds the exact loaded chain and rejects missing, malformed, or cyclic parents', async () => {
-    const loader = async (id: string) =>
-      ({ a: { id: 'a', retryOfAttemptId: 'b' }, b: { id: 'b', retryOfAttemptId: null } })[id] ??
-      null
+    const calls: string[] = []
+    const loader = async (id: string) => {
+      calls.push(id)
+      return (
+        {
+          a: { id: 'a', retryOfAttemptId: 'b' },
+          b: { id: 'b', retryOfAttemptId: 'c' },
+          c: { id: 'c', retryOfAttemptId: null },
+        }[id] ?? null
+      )
+    }
     await expect(loadRetryAncestorChain('a', loader)).resolves.toEqual([
-      { id: 'b', retryOfAttemptId: null },
+      { id: 'b', retryOfAttemptId: 'c' },
+      { id: 'c', retryOfAttemptId: null },
     ])
+    expect(calls).toEqual(['a', 'b', 'c'])
     await expect(loadRetryAncestorChain('a', async () => null)).resolves.toBeNull()
     await expect(
       loadRetryAncestorChain('a', async (id) => ({ id, retryOfAttemptId: id === 'a' ? 'b' : 'a' })),

@@ -64,9 +64,11 @@ vi.mock('@/components/results/v2-results-view', () => ({
 }))
 
 import AttemptPage from '@/app/(app)/attempts/[id]/page'
+import { v2Snapshot } from './helpers/result-snapshots'
 
 const ATTEMPT_ID = '10000000-0000-4000-8000-000000000001'
 const PARENT_ID = '20000000-0000-4000-8000-000000000002'
+const GRANDPARENT_ID = '60000000-0000-4000-8000-000000000006'
 const MISSING_ID = '30000000-0000-4000-8000-000000000003'
 const CROSS_USER_ID = '40000000-0000-4000-8000-000000000004'
 const USER_ID = '50000000-0000-4000-8000-000000000005'
@@ -106,6 +108,7 @@ interface ClientOptions {
   primary?: QueryResponse
   primaryThrows?: boolean
   ancestor?: QueryResponse
+  ancestors?: Record<string, QueryResponse>
   ancestorThrows?: boolean
   signed?: { data: { signedUrl: string } | null; error: unknown }
   signedThrows?: boolean
@@ -147,7 +150,8 @@ function resultQuery(options: ClientOptions, filters: Array<{ column: string; va
       if (!primary && options.ancestorThrows) throw THROWN_ERROR
       return primary
         ? (options.primary ?? { data: attempt(), error: null })
-        : (options.ancestor ?? { data: null, error: null })
+        : (options.ancestors?.[String(selectedId)] ??
+            options.ancestor ?? { data: null, error: null })
     }),
   }
   query.select.mockReturnValue(query)
@@ -511,5 +515,40 @@ describe('owned attempt result loading', () => {
       { column: 'user_id', value: USER_ID },
       { column: 'user_id', value: USER_ID },
     ])
+  })
+
+  it('loads each owned retry ancestor once for a multi-node chain', async () => {
+    mocks.readAttemptResult.mockReturnValue({ kind: 'v2', payload: v2Snapshot() })
+    const setup = client({
+      primary: {
+        data: attempt({ retry_of_attempt_id: PARENT_ID }),
+        error: null,
+      },
+      ancestors: {
+        [PARENT_ID]: {
+          data: attempt({
+            id: PARENT_ID,
+            retry_of_attempt_id: GRANDPARENT_ID,
+          }),
+          error: null,
+        },
+        [GRANDPARENT_ID]: {
+          data: attempt({
+            id: GRANDPARENT_ID,
+            retry_of_attempt_id: null,
+          }),
+          error: null,
+        },
+      },
+    })
+    mocks.createClient.mockResolvedValue(setup.supabase)
+
+    await renderPage()
+
+    const queriedIds = setup.filters
+      .filter((filter) => filter.column === 'id')
+      .map((filter) => filter.value)
+    expect(queriedIds).toEqual([ATTEMPT_ID, PARENT_ID, GRANDPARENT_ID])
+    expect(screen.getByTestId('v2-result')).toHaveAttribute('data-previous', PARENT_ID)
   })
 })

@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildSegments, collectHighlights, mergeHighlights } from '@/lib/results/highlights'
 import {
-  applyFilter,
-  applyHistoryFilters,
-  averageScore,
   dayLabel,
   groupByDay,
   historyContext,
@@ -435,14 +432,6 @@ describe('history grouping', () => {
     expect(groups[1]?.entries).toHaveLength(1)
   })
 
-  it("splits high and low against the speaker's own average", () => {
-    const entries = [entry('a', 0, 90), entry('b', 1, 70), entry('c', 2, 50)]
-    expect(averageScore(entries)).toBe(70)
-    expect(applyFilter(entries, 'high').map((e) => e.id)).toEqual(['a', 'b'])
-    expect(applyFilter(entries, 'low').map((e) => e.id)).toEqual(['c'])
-    expect(applyFilter(entries, 'all')).toHaveLength(3)
-  })
-
   it('classifies legacy metadata as General and keeps stored mode labels', () => {
     const legacy = entry('legacy', 0, 80)
     const interview = { ...entry('interview', 0, 70), practiceMode: 'interview' as const }
@@ -461,18 +450,6 @@ describe('history grouping', () => {
     expect(historyContext(customRetry)).toEqual(['Conversation', 'Custom prompt', 'Retry'])
     expect(matchesMetadataFilter(customRetry, 'custom')).toBe(true)
     expect(matchesMetadataFilter(customRetry, 'retry')).toBe(true)
-  })
-
-  it('combines metadata and existing score filters', () => {
-    const entries = [
-      { ...entry('practice', 0, 90), practiceMode: 'practice' as const },
-      { ...entry('interview-high', 1, 80), practiceMode: 'interview' as const },
-      { ...entry('interview-low', 2, 40), practiceMode: 'interview' as const },
-    ]
-    expect(applyHistoryFilters(entries, 'interview', 'high').map(({ id }) => id)).toEqual([
-      'interview-high',
-    ])
-    expect(applyHistoryFilters(entries, 'conversation', 'all')).toEqual([])
   })
 })
 

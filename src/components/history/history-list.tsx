@@ -14,23 +14,21 @@ import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { deleteAttempt } from '@/lib/results/api'
 import {
-  FILTER_LABEL,
   METADATA_FILTER_LABEL,
-  averageScore,
   DEFAULT_HISTORY_QUERY,
   groupByDay,
   historyContext,
   historyHref,
+  historyScoreLabel,
   timeLabel,
   type HistoryEntry,
-  type HistoryFilter,
   type HistoryMetadataFilter,
   type HistoryQuery,
 } from '@/lib/results/history'
+import type { HistoryScoreSummary } from '@/lib/results/history-cohort'
 import { attemptHref } from '@/lib/routes'
 import { cn } from '@/lib/utils'
 
-const FILTERS: HistoryFilter[] = ['all', 'high', 'low']
 const METADATA_FILTERS: HistoryMetadataFilter[] = [
   'all',
   'general',
@@ -40,6 +38,16 @@ const METADATA_FILTERS: HistoryMetadataFilter[] = [
   'custom',
   'retry',
 ]
+
+const EMPTY_SCORE_SUMMARY: HistoryScoreSummary = {
+  cohort: null,
+  points: [],
+  average: null,
+  scannedCount: 0,
+  excludedCount: 0,
+  scanLimit: 200,
+  truncated: false,
+}
 
 function TrashIcon() {
   return (
@@ -74,6 +82,7 @@ const ICON_BUTTON =
 
 export function HistoryList({
   entries: initial,
+  scoreSummary = EMPTY_SCORE_SUMMARY,
   focusPhrase,
   query = DEFAULT_HISTORY_QUERY,
   hasAnyEntries = initial.length > 0,
@@ -81,6 +90,7 @@ export function HistoryList({
   hasNext = false,
 }: {
   entries: HistoryEntry[]
+  scoreSummary?: HistoryScoreSummary
   focusPhrase: string
   query?: HistoryQuery
   hasAnyEntries?: boolean
@@ -102,10 +112,6 @@ export function HistoryList({
 
   const entries = initial.filter((entry) => !removedIds.has(entry.id))
   const groups = groupByDay(entries)
-  const scores = [...entries]
-    .reverse()
-    .map((entry) => entry.score)
-    .filter((score): score is number => score !== null)
 
   const dismissConfirmation = useCallback((id: string, returnFocus: boolean) => {
     if (returnFocus) focusAfterDismissRef.current = id
@@ -176,6 +182,7 @@ export function HistoryList({
       setRemovedIds((current) => new Set(current).add(id))
       setConfirming(null)
       setAnnouncement('Response deleted.')
+      router.refresh()
     } catch (thrown) {
       setError(thrown instanceof Error ? thrown.message : 'It could not be deleted.')
       dismissConfirmation(id, true)
@@ -206,7 +213,7 @@ export function HistoryList({
       <p role="status" aria-live="polite" className="sr-only">
         {announcement}
       </p>
-      <TrendChart scores={scores} average={averageScore(entries)} />
+      <TrendChart summary={scoreSummary} />
 
       <div className="flex flex-col gap-3">
         <label className="text-muted flex flex-col gap-1 text-sm" htmlFor="history-metadata-filter">
@@ -218,7 +225,6 @@ export function HistoryList({
               router.push(
                 historyHref({
                   metadata: event.target.value as HistoryMetadataFilter,
-                  score: query.score,
                   page: 1,
                 }),
               )
@@ -232,23 +238,6 @@ export function HistoryList({
             ))}
           </select>
         </label>
-        <div role="group" aria-label="Filter responses" className="flex flex-wrap gap-2">
-          {FILTERS.map((value) => (
-            <Link
-              key={value}
-              href={historyHref({ metadata: query.metadata, score: value, page: 1 })}
-              aria-current={query.score === value ? 'page' : undefined}
-              className={cn(
-                'inline-flex min-h-11 items-center rounded-full px-4 text-sm font-medium whitespace-nowrap transition duration-150 ease-out',
-                query.score === value
-                  ? 'bg-accent-soft text-foreground ring-accent ring-2 ring-inset'
-                  : 'bg-surface-sunken text-foreground hover:bg-accent-soft',
-              )}
-            >
-              {FILTER_LABEL[value]}
-            </Link>
-          ))}
-        </div>
       </div>
 
       {error ? (
@@ -296,10 +285,10 @@ export function HistoryList({
                   <span
                     className={cn(
                       'numeric text-foreground shrink-0 text-right',
-                      entry.score === null ? 'w-20 text-xs' : 'w-12 text-lg',
+                      entry.score === null ? 'w-24 text-xs' : 'w-12 text-lg',
                     )}
                   >
-                    {entry.score === null ? 'Incomplete' : entry.score}
+                    {historyScoreLabel(entry)}
                   </span>
                 </Link>
 
