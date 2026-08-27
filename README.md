@@ -65,6 +65,8 @@ default.
 | `npm run test:e2e`                  | Run deterministic Chromium critical flows   |
 | `npm run verify`                    | Run typecheck, lint, and tests              |
 | `npm run db:push`                   | Apply migrations in `supabase/migrations`   |
+| `npm run db:preflight`              | Compare migrations with the database ledger |
+| `npm run test:migrations`           | Test migrations on a disposable database    |
 | `npm run inspect:attempts`          | Inspect stored capture timelines            |
 | `npm run inspect:scores`            | Inspect scored attempt breakdowns           |
 | `npm run inspect:rewrites`          | Audit stored tightened rewrites             |
@@ -95,8 +97,14 @@ for an intelligible accent.
 
 Migrations in `supabase/migrations` run in filename order. `npm run db:push` reads
 `SUPABASE_DB_URL` from the environment or `.env.local`; the application does not read that value.
-Applied migration names are recorded in `supabase_migrations.schema_migrations`, which keeps this
-script compatible with the Supabase CLI.
+FlowSense records full migration filename stems in `supabase_migrations.schema_migrations` and also
+recognizes timestamp-only versions written by the Supabase CLI. Run `npm run db:preflight` before a
+deployment to report missing or unexpected ledger entries without applying anything.
+
+`npm run test:migrations` is destructive only to the database named by
+`FLOWSENSE_MIGRATION_TEST_URL`. It refuses ordinary database names, refuses `SUPABASE_DB_URL`, and
+allows remote hosts only with the explicit confirmation documented by the command's error message.
+Use a disposable database whose name includes `test`, `testing`, `scratch`, or `disposable`.
 
 For Vercel, set the five required application variables for Production, Preview, and Development.
 Add each deployment URL to Supabase Authentication URL Configuration. The three secret variables are
