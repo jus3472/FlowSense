@@ -101,6 +101,13 @@ FlowSense records full migration filename stems in `supabase_migrations.schema_m
 recognizes timestamp-only versions written by the Supabase CLI. Run `npm run db:preflight` before a
 deployment to report missing or unexpected ledger entries without applying anything.
 
+Loopback database connections always disable TLS. A remote database URL without an explicit TLS
+setting uses an encrypted connection with certificate verification disabled for compatibility with
+the configured Supabase certificate chain. This does not provide CA or hostname verification. To
+require strict verification, add `sslmode=verify-full` to `SUPABASE_DB_URL` and provide
+`sslrootcert` when the signing CA is not already trusted by Node. Explicit connection-string TLS
+settings are passed to `pg` unchanged.
+
 `npm run test:migrations` is destructive only to the database named by
 `FLOWSENSE_MIGRATION_TEST_URL`. It refuses ordinary database names, refuses `SUPABASE_DB_URL`, and
 allows remote hosts only with the explicit confirmation documented by the command's error message.
