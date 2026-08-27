@@ -47,6 +47,10 @@ describe('custom practice input', () => {
     expect(recordPage.indexOf('isCustomPracticeMarker(params.custom)')).toBeLessThan(
       recordPage.indexOf('resolveLibraryPromptSession(params.prompt'),
     )
+    expect(recordPage).toContain("if (invalidIntent === 'custom')")
+    expect(recordPage.indexOf("invalidIntent === 'custom'")).toBeLessThan(
+      recordPage.indexOf('pickRecordPrompt('),
+    )
   })
   it('keeps custom prompt transport out of the public prompt library', () => {
     expect(readFileSync('src/actions/custom-practice.ts', 'utf8')).not.toContain(".from('prompts')")

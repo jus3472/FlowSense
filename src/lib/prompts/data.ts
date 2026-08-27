@@ -32,3 +32,8 @@ export function promptRowOutcome(data: unknown, queryFailed: boolean): DataOutco
   const prompt = parseLibraryPrompt(data)
   return prompt ? dataReady(prompt) : dataFailure()
 }
+
+/** Recent history improves variety but never controls prompt-library availability. */
+export function recentPromptIdsOrEmpty(outcome: DataOutcome<string[]>): string[] {
+  return outcome.status === 'ready' ? outcome.data : []
+}

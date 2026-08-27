@@ -6,6 +6,7 @@ import { promptRowOutcome, promptRowsOutcome } from '@/lib/prompts/data'
 import {
   buildPromptBrowseData,
   choosePromptByModePriorityWithRecentFallback,
+  choosePromptForRecord,
   choosePromptWithRecentFallback,
   filterParsedPromptLibrary,
   isPromptId,
@@ -116,6 +117,25 @@ export async function pickPreferredPracticePrompt(
   const prompt = choosePromptByModePriorityWithRecentFallback(
     outcome.data,
     modes,
+    excludeIds,
+    random,
+  )
+  return prompt ? dataReady(prompt) : dataEmpty()
+}
+
+export async function pickRecordPrompt(
+  requestedMode: PracticeMode | undefined,
+  preferredModes: readonly PracticeMode[],
+  excludeIds: readonly string[] = [],
+  random: RandomSource = Math.random,
+): Promise<DataOutcome<LibraryPrompt>> {
+  const outcome = await getPromptLibrary(requestedMode ? { mode: requestedMode } : {})
+  if (outcome.status !== 'ready') return outcome
+
+  const prompt = choosePromptForRecord(
+    outcome.data,
+    requestedMode,
+    preferredModes,
     excludeIds,
     random,
   )

@@ -32,11 +32,20 @@ describe('practice hub routes', () => {
     expect(record).toContain('title="That prompt is not available"')
     expect(record).toContain('title="That retry is not available"')
     expect(record.indexOf('resolveRetrySession(params.retry')).toBeLessThan(
-      record.indexOf('pickPreferredPracticePrompt('),
+      record.indexOf('pickRecordPrompt('),
     )
     expect(record.indexOf('resolveLibraryPromptSession(params.prompt')).toBeLessThan(
-      record.indexOf('pickPreferredPracticePrompt('),
+      record.indexOf('pickRecordPrompt('),
     )
+  })
+
+  it('keeps explicit modes exact and treats recent history only as an exclusion hint', () => {
+    expect(record).toContain('pickRecordPrompt(')
+    expect(record).toContain('requestedMode,')
+    expect(record).not.toContain("recentPromptIdsResult.status === 'failure'")
+    expect(modePage).toContain('const browseOutcome = await getPromptBrowseData(')
+    expect(home).toContain('historyFailed ? [] : recentCompletedLibraryPromptIds(attempts)')
+    expect(home).not.toContain('const recommendedOutcome = historyFailed')
   })
 
   it('keeps filter controls and prompt actions mobile-stable and token based', () => {

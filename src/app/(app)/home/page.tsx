@@ -47,13 +47,11 @@ export default async function HomePage() {
     console.error('[home] data load failed', { operation: 'recent_prompt_history' })
   }
   const attempts = attemptsResult.data ?? []
-  const recommendedOutcome = historyFailed
-    ? null
-    : await pickPreferredPracticePrompt(
-        practiceModePriority(areas),
-        recentCompletedLibraryPromptIds(attempts),
-      )
-  const recommendedPrompt = recommendedOutcome?.status === 'ready' ? recommendedOutcome.data : null
+  const recommendedOutcome = await pickPreferredPracticePrompt(
+    practiceModePriority(areas),
+    historyFailed ? [] : recentCompletedLibraryPromptIds(attempts),
+  )
+  const recommendedPrompt = recommendedOutcome.status === 'ready' ? recommendedOutcome.data : null
   const streak = computeStreak(attempts.map((attempt) => attempt.created_at))
   const scores = attempts
     .map((attempt) => attempt.score)
@@ -87,7 +85,7 @@ export default async function HomePage() {
     <div className="flex flex-col gap-12 pt-4 pb-12">
       {historyFailed ? null : <StreakDisplay streak={streak} />}
 
-      {recommendedOutcome?.status === 'failure' || recommendedOutcome === null ? (
+      {recommendedOutcome.status === 'failure' ? (
         <ErrorState
           title="Your suggested prompt did not load"
           description="The connection to the practice library failed. Try loading it again."
@@ -103,7 +101,7 @@ export default async function HomePage() {
           </p>
         </div>
       ) : null}
-      {recommendedOutcome?.status === 'failure' || recommendedOutcome === null ? null : (
+      {recommendedOutcome.status === 'failure' ? null : (
         <ButtonLink
           href={recommendedPrompt ? recordHrefForPrompt(recommendedPrompt.id) : '/practice/custom'}
           size="lg"

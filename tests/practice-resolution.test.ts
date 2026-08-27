@@ -1,6 +1,6 @@
 import { dataEmpty, dataFailure, dataReady } from '@/lib/data/outcome'
 import {
-  conflictingExplicitRecordIntent,
+  invalidExplicitRecordIntent,
   resolveLibraryPromptSession,
   resolveRetrySession,
 } from '@/lib/practice/resolution'
@@ -21,10 +21,18 @@ const PROMPT: LibraryPrompt = {
 
 describe('explicit practice-session resolution', () => {
   it('rejects contradictory explicit retry or prompt intent', () => {
-    expect(conflictingExplicitRecordIntent({ retry: ATTEMPT_ID, prompt: PROMPT_ID })).toBe('retry')
-    expect(conflictingExplicitRecordIntent({ retry: ATTEMPT_ID, mode: 'practice' })).toBe('retry')
-    expect(conflictingExplicitRecordIntent({ prompt: PROMPT_ID, custom: '1' })).toBe('prompt')
-    expect(conflictingExplicitRecordIntent({ custom: '1' })).toBeNull()
+    expect(invalidExplicitRecordIntent({ retry: ATTEMPT_ID, prompt: PROMPT_ID })).toBe('retry')
+    expect(invalidExplicitRecordIntent({ retry: ATTEMPT_ID, mode: 'practice' })).toBe('retry')
+    expect(invalidExplicitRecordIntent({ prompt: PROMPT_ID, mode: 'practice' })).toBe('prompt')
+  })
+
+  it('rejects malformed, repeated, and contradictory explicit custom intent', () => {
+    expect(invalidExplicitRecordIntent({ custom: 'bad' })).toBe('custom')
+    expect(invalidExplicitRecordIntent({ custom: ['1'] })).toBe('custom')
+    expect(invalidExplicitRecordIntent({ custom: '1', mode: 'practice' })).toBe('custom')
+    expect(invalidExplicitRecordIntent({ custom: '1', prompt: PROMPT_ID })).toBe('custom')
+    expect(invalidExplicitRecordIntent({ custom: '1', retry: ATTEMPT_ID })).toBe('custom')
+    expect(invalidExplicitRecordIntent({ custom: '1' })).toBeNull()
   })
 
   it('does not invoke a loader when no explicit intent is present', async () => {

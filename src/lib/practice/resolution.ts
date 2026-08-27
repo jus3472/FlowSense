@@ -1,4 +1,5 @@
 import type { DataOutcome } from '@/lib/data/outcome'
+import { isCustomPracticeMarker } from '@/lib/practice/custom'
 import { parseRecordPromptParam, parseRecordRetryParam } from '@/lib/practice/navigation'
 import {
   parsePracticeSessionDescriptor,
@@ -15,19 +16,25 @@ export type ExplicitSessionResolution =
   | { status: 'unavailable' }
   | { status: 'failure' }
 
-export function conflictingExplicitRecordIntent(params: {
+export function invalidExplicitRecordIntent(params: {
   retry?: SearchParam
   prompt?: SearchParam
   custom?: SearchParam
   mode?: SearchParam
-}): 'retry' | 'prompt' | null {
+}): 'retry' | 'prompt' | 'custom' | null {
   if (
-    params.retry !== undefined &&
-    (params.prompt !== undefined || params.custom !== undefined || params.mode !== undefined)
+    params.custom !== undefined &&
+    (!isCustomPracticeMarker(params.custom) ||
+      params.retry !== undefined ||
+      params.prompt !== undefined ||
+      params.mode !== undefined)
   ) {
+    return 'custom'
+  }
+  if (params.retry !== undefined && (params.prompt !== undefined || params.mode !== undefined)) {
     return 'retry'
   }
-  if (params.prompt !== undefined && (params.custom !== undefined || params.mode !== undefined)) {
+  if (params.prompt !== undefined && params.mode !== undefined) {
     return 'prompt'
   }
   return null

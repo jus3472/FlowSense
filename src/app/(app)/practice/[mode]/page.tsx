@@ -13,6 +13,7 @@ import {
   parsePracticeMode,
   recordHrefForPrompt,
 } from '@/lib/practice/navigation'
+import { recentPromptIdsOrEmpty } from '@/lib/prompts/data'
 import { getPromptBrowseData, getRecentCompletedLibraryPromptIds } from '@/lib/prompts/server'
 import { createClient } from '@/lib/supabase/server'
 
@@ -72,13 +73,10 @@ export default async function PracticeModePage({
   if (!user) redirect('/login')
 
   const recentPromptIdsOutcome = await getRecentCompletedLibraryPromptIds(user.id)
-  const browseOutcome =
-    recentPromptIdsOutcome.status === 'failure'
-      ? recentPromptIdsOutcome
-      : await getPromptBrowseData(
-          { mode, ...parsedFilters.filters },
-          recentPromptIdsOutcome.status === 'ready' ? recentPromptIdsOutcome.data : [],
-        )
+  const browseOutcome = await getPromptBrowseData(
+    { mode, ...parsedFilters.filters },
+    recentPromptIdsOrEmpty(recentPromptIdsOutcome),
+  )
 
   if (browseOutcome.status === 'failure') {
     return (

@@ -1,6 +1,7 @@
-import { promptRowOutcome, promptRowsOutcome } from '@/lib/prompts/data'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { dataEmpty, dataFailure, dataReady } from '@/lib/data/outcome'
+import { promptRowOutcome, promptRowsOutcome, recentPromptIdsOrEmpty } from '@/lib/prompts/data'
 
 const PROMPT_ID = '11111111-1111-4111-8111-111111111111'
 
@@ -23,6 +24,12 @@ describe('prompt data outcomes', () => {
     expect(promptRowsOutcome([], false)).toEqual({ status: 'empty' })
     expect(promptRowOutcome(null, true)).toEqual({ status: 'failure' })
     expect(promptRowOutcome(null, false)).toEqual({ status: 'empty' })
+  })
+
+  it('treats failed or empty recent history as an optional empty exclusion set', () => {
+    expect(recentPromptIdsOrEmpty(dataFailure())).toEqual([])
+    expect(recentPromptIdsOrEmpty(dataEmpty())).toEqual([])
+    expect(recentPromptIdsOrEmpty(dataReady([PROMPT_ID]))).toEqual([PROMPT_ID])
   })
 
   it('returns validated prompt data only for a complete stable schema row', () => {

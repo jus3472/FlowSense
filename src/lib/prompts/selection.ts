@@ -223,6 +223,29 @@ export function choosePromptByModePriorityWithRecentFallback(
   )
 }
 
+/** Exact query modes never inherit the preference-only General Practice fallback. */
+export function choosePromptForRecord(
+  candidates: readonly LibraryPrompt[],
+  requestedMode: PracticeMode | undefined,
+  preferredModes: readonly PracticeMode[],
+  excludeIds: readonly string[],
+  random: RandomSource = Math.random,
+): LibraryPrompt | null {
+  if (requestedMode) {
+    return choosePromptWithRecentFallback(
+      candidates.filter((candidate) => candidate.mode === requestedMode),
+      excludeIds,
+      random,
+    )
+  }
+  return choosePromptByModePriorityWithRecentFallback(
+    candidates,
+    preferredModes,
+    excludeIds,
+    random,
+  )
+}
+
 /** Derives a complete mode-browse view from one coherent prompt snapshot. */
 export function buildPromptBrowseData(
   prompts: readonly LibraryPrompt[],

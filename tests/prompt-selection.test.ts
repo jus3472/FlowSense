@@ -3,6 +3,7 @@ import {
   buildPromptBrowseData,
   choosePrompt,
   choosePromptByModePriority,
+  choosePromptForRecord,
   choosePromptWithRecentFallback,
   derivePromptCollections,
   filterPromptLibrary,
@@ -150,6 +151,15 @@ describe('prompt selection', () => {
     expect(
       choosePromptWithRecentFallback(candidates, [FIRST_ID, SECOND_ID, THIRD_ID], () => 0.5),
     ).toEqual(candidates[1])
+  })
+
+  it('never falls back to General Practice for an explicit empty mode', () => {
+    const practice = prompt(FIRST_ID)
+
+    expect(choosePromptForRecord([practice], 'interview', [], [], () => 0)).toBeNull()
+    expect(choosePromptForRecord([practice], undefined, ['interview'], [], () => 0)).toEqual(
+      practice,
+    )
   })
 
   it('derives browse prompts, collections, and recommendation from one prompt snapshot', () => {

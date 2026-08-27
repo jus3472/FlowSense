@@ -14,7 +14,7 @@ import {
 } from '@/lib/practice/custom'
 import { parseRecordModeParam } from '@/lib/practice/navigation'
 import {
-  conflictingExplicitRecordIntent,
+  invalidExplicitRecordIntent,
   resolveLibraryPromptSession,
   resolveRetrySession,
 } from '@/lib/practice/resolution'
@@ -22,10 +22,11 @@ import {
   parsePracticeSessionDescriptor,
   type PracticeSessionDescriptor,
 } from '@/lib/practice/session'
+import { recentPromptIdsOrEmpty } from '@/lib/prompts/data'
 import {
   getPromptById,
   getRecentCompletedLibraryPromptIds,
-  pickPreferredPracticePrompt,
+  pickRecordPrompt,
 } from '@/lib/prompts/server'
 import { createClient } from '@/lib/supabase/server'
 
@@ -49,6 +50,19 @@ function logSessionLoadFailure(operation: string, error: unknown): void {
   })
 }
 
+function CustomUnavailableState() {
+  return (
+    <ErrorState
+      title="Your custom prompt is not available"
+      description="Enter the prompt again to start this practice."
+    >
+      <ButtonLink href="/practice/custom" variant="secondary">
+        Enter a custom prompt
+      </ButtonLink>
+    </ErrorState>
+  )
+}
+
 export default async function RecordPage({
   searchParams,
 }: {
@@ -67,10 +81,12 @@ export default async function RecordPage({
 
   const params = await searchParams
   let session: PracticeSessionDescriptor | null = null
-  const intentConflict = conflictingExplicitRecordIntent(params)
+  const invalidIntent = invalidExplicitRecordIntent(params)
+
+  if (invalidIntent === 'custom') return <CustomUnavailableState />
 
   const retryResolution =
-    intentConflict === 'retry'
+    invalidIntent === 'retry'
       ? ({ status: 'unavailable' } as const)
       : await resolveRetrySession(params.retry, async (attemptId) => {
           const { data, error } = await supabase
@@ -126,22 +142,13 @@ export default async function RecordPage({
       : null
 
     if (!session) {
-      return (
-        <ErrorState
-          title="Your custom prompt is not available"
-          description="Enter the prompt again to start this practice."
-        >
-          <ButtonLink href="/practice/custom" variant="secondary">
-            Enter a custom prompt
-          </ButtonLink>
-        </ErrorState>
-      )
+      return <CustomUnavailableState />
     }
   }
 
   if (!session) {
     const promptResolution =
-      intentConflict === 'prompt'
+      invalidIntent === 'prompt'
         ? ({ status: 'unavailable' } as const)
         : await resolveLibraryPromptSession(params.prompt, getPromptById)
     if (promptResolution.status === 'failure') {
@@ -187,11 +194,13 @@ export default async function RecordPage({
     }
 
     const [profileResult, recentPromptIdsResult] = await Promise.all([
-      supabase.from('profiles').select('focus_areas').eq('id', user.id).maybeSingle(),
+      requestedMode
+        ? Promise.resolve(null)
+        : supabase.from('profiles').select('focus_areas').eq('id', user.id).maybeSingle(),
       getRecentCompletedLibraryPromptIds(user.id),
     ])
-    if (profileResult.error || recentPromptIdsResult.status === 'failure') {
-      if (profileResult.error) logSessionLoadFailure('profile_focus_areas', profileResult.error)
+    if (profileResult?.error) {
+      logSessionLoadFailure('profile_focus_areas', profileResult.error)
       return (
         <ErrorState
           title="Your prompt did not load"
@@ -202,10 +211,11 @@ export default async function RecordPage({
       )
     }
 
-    const areas = sanitizeFocusAreas(profileResult.data?.focus_areas ?? [])
-    const promptOutcome = await pickPreferredPracticePrompt(
-      requestedMode ? [requestedMode] : practiceModePriority(areas),
-      recentPromptIdsResult.status === 'ready' ? recentPromptIdsResult.data : [],
+    const areas = sanitizeFocusAreas(profileResult?.data?.focus_areas ?? [])
+    const promptOutcome = await pickRecordPrompt(
+      requestedMode,
+      requestedMode ? [] : practiceModePriority(areas),
+      recentPromptIdsOrEmpty(recentPromptIdsResult),
     )
     if (promptOutcome.status === 'failure') {
       return (
