@@ -69,10 +69,38 @@ describe('v2 result helpers', () => {
       ...score.categories,
       fluency: { ...score.categories.fluency, component: 0.4, earned_points: 9 },
       clarity: { ...score.categories.clarity, component: 0.7, earned_points: 14 },
+      vocabulary: { ...score.categories.vocabulary, component: 0.9, earned_points: 11 },
+      grammar: { ...score.categories.grammar, component: 0.8, earned_points: 10 },
+      structure: {
+        ...score.categories.structure,
+        status: 'not_checked' as const,
+        component: null,
+        earned_points: null,
+      },
+      delivery: {
+        ...score.categories.delivery,
+        availability: 'unavailable' as const,
+        status: 'unavailable' as const,
+        component: null,
+        earned_points: null,
+      },
     }
     const partial = { ...score, categories, total_earned_points: null }
     expect(strongestV2Category(partial)?.label).toBe('Vocabulary')
     expect(priorityV2Category(partial)?.label).toBe('Fluency')
+  })
+
+  it('returns no unique strongest or priority category when the extremum is tied', () => {
+    const score = payload()
+    expect(strongestV2Category(score)).toBeNull()
+    expect(priorityV2Category(score)).toBeNull()
+
+    const categories = {
+      ...score.categories,
+      fluency: { ...score.categories.fluency, component: 0.5, earned_points: 11 },
+      clarity: { ...score.categories.clarity, component: 0.5, earned_points: 10 },
+    }
+    expect(priorityV2Category({ ...score, categories, total_earned_points: 79 })).toBeNull()
   })
 
   it('formats concrete measurement values and mode-specific feedback', () => {
@@ -385,6 +413,57 @@ describe('v2 result helpers', () => {
     expect(v2OverallTakeaway(score)).toBe('No category lost points in this response.')
     expect(v2OverallTakeaway({ ...score, total_earned_points: null })).toBe(
       'Some categories were not checked, so the overall result is unavailable.',
+    )
+  })
+
+  it('uses a persisted deduction only from the uniquely lowest scored category', () => {
+    const score = payload()
+    const categories = {
+      ...score.categories,
+      fluency: {
+        ...score.categories.fluency,
+        component: 0.7,
+        earned_points: 15,
+        deductions: [{ id: 'filler_rate', detail: 'Two fillers affected fluency.' }],
+      },
+      grammar: {
+        ...score.categories.grammar,
+        component: 0.5,
+        earned_points: 6,
+        deductions: [
+          {
+            kind: 'sentence_boundary',
+            observation: 'One sentence boundary made the response harder to follow.',
+          },
+        ],
+      },
+    }
+
+    expect(v2OverallTakeaway({ ...score, categories, total_earned_points: 79 })).toBe(
+      'One sentence boundary made the response harder to follow.',
+    )
+  })
+
+  it('uses neutral overall points when the lowest scored component is tied', () => {
+    const score = payload()
+    const categories = {
+      ...score.categories,
+      fluency: {
+        ...score.categories.fluency,
+        component: 0.5,
+        earned_points: 11,
+        deductions: [{ id: 'filler_rate', detail: 'Fluency deduction.' }],
+      },
+      clarity: {
+        ...score.categories.clarity,
+        component: 0.5,
+        earned_points: 10,
+        deductions: [{ id: 'recognition_uncertainty', detail: 'Clarity deduction.' }],
+      },
+    }
+
+    expect(v2OverallTakeaway({ ...score, categories, total_earned_points: 79 })).toBe(
+      'This response has 79 of 100 points.',
     )
   })
 

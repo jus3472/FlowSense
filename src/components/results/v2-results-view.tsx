@@ -81,7 +81,9 @@ export function V2ResultsView({
           const status =
             result.status === 'scored'
               ? `${result.earned_points} / ${result.max_points}`
-              : 'Not checked'
+              : result.status === 'not_checked'
+                ? 'Not checked'
+                : 'Unavailable'
           return (
             <Card key={category} className="p-4">
               <details>
@@ -124,11 +126,13 @@ export function V2ResultsView({
           <p className="text-muted text-sm">
             Your strongest scored area is {strongest.label.toLowerCase()}.
           </p>
-        ) : null}
+        ) : (
+          <p className="text-muted text-sm">No single strongest scored area is available.</p>
+        )}
         {priority ? (
           <p className="text-muted text-sm">Focus next on {priority.label.toLowerCase()}.</p>
         ) : (
-          <p className="text-muted text-sm">No scored focus area is available.</p>
+          <p className="text-muted text-sm">No single scored focus area is available.</p>
         )}
       </Card>
 
