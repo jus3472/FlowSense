@@ -103,6 +103,54 @@ describe('custom handoff session refresh', () => {
     expect(response.cookies.get(CUSTOM_SESSION_COOKIE)?.value).toBe('')
   })
 
+  it('preserves a Secure Supabase cookie through handoff and the final redirect', async () => {
+    const token = sealCustomPracticeHandoff(practice, userId, secret, { now: Date.now() })
+    expect(token).not.toBeNull()
+    mocks.createServerClient.mockImplementation(
+      (
+        _url: string,
+        _key: string,
+        options: {
+          cookies: {
+            setAll: (
+              values: Array<{
+                name: string
+                value: string
+                options: { path: string; secure: boolean; sameSite: 'lax' }
+              }>,
+            ) => void
+          }
+        },
+      ) => ({
+        auth: {
+          getUser: async () => {
+            options.cookies.setAll([
+              {
+                name: 'sb-refresh',
+                value: 'fresh-token',
+                options: { path: '/', secure: true, sameSite: 'lax' },
+              },
+            ])
+            return { data: { user: { id: userId, user_metadata: {} } } }
+          },
+        },
+      }),
+    )
+    const request = new NextRequest('https://flowsense.example/record?custom=1', {
+      headers: { cookie: `sb-refresh=old-token; ${CUSTOM_SESSION_COOKIE}=${token}` },
+    })
+
+    const response = await updateSession(request)
+
+    expect(response.headers.get('location')).toBe('https://flowsense.example/onboarding')
+    expect(response.cookies.get('sb-refresh')).toMatchObject({
+      value: 'fresh-token',
+      path: '/',
+      secure: true,
+      sameSite: 'lax',
+    })
+  })
+
   it('preserves the onboarding redirect for an incomplete authenticated user', async () => {
     mocks.createServerClient.mockReturnValue({
       auth: {
