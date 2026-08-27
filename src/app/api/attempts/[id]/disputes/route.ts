@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server'
 import { apiError } from '@/lib/api/responses'
-import { authenticatedAttemptContext, logAttemptDiagnostic } from '@/lib/attempts/server'
+import {
+  authenticatedAttemptContext,
+  logAttemptDiagnostic,
+  safeDiagnosticCode,
+} from '@/lib/attempts/server'
 import { isUuid } from '@/lib/practice/session'
-import { recomputeScore, type StoredContentResult } from '@/lib/scoring/assemble'
-import { CHECK_NAMES } from '@/lib/scoring/content'
-import type { DeliveryMetricName } from '@/lib/scoring/mechanical'
-
-const SPAN_NOTE = 'word_choice_span'
-const ALLOWED = new Set<string>([...CHECK_NAMES, SPAN_NOTE])
+import { readAttemptResult } from '@/lib/results/attempt-result'
+import { recomputeScore } from '@/lib/scoring/assemble'
+import { resolveLegacyDispute, sameDispute, validLegacyDisputes } from '@/lib/scoring/disputes'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -28,18 +29,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return apiError('The request body was not valid JSON.', 400)
   }
 
-  const noteType = isRecord(body) && typeof body.noteType === 'string' ? body.noteType : ''
-  const quote = isRecord(body) && typeof body.quote === 'string' ? body.quote : null
-  if (!ALLOWED.has(noteType)) {
-    return apiError(
-      'That finding cannot be disputed. Measurements are counts, not judgements.',
-      400,
-    )
-  }
+  const noteType = isRecord(body) ? body.noteType : undefined
+  const quote = isRecord(body) ? body.quote : undefined
 
   const { data: attempt, error: readError } = await admin
     .from('attempts')
-    .select('content_result, section_scores')
+    .select(
+      'id, prompt_text, transcript, duration_ms, created_at, score, section_scores, metrics, content_result',
+    )
     .eq('id', id)
     .eq('user_id', userId)
     .maybeSingle()
@@ -48,8 +45,32 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return apiError('That could not be saved.', 500)
   }
   if (!attempt) return apiError('That attempt does not exist.', 404)
-  if (!attempt.content_result || !attempt.section_scores) {
+
+  const storedResult = readAttemptResult({
+    id: attempt.id,
+    promptText: attempt.prompt_text,
+    transcript: attempt.transcript,
+    durationMs: attempt.duration_ms,
+    createdAt: attempt.created_at,
+    audioUrl: null,
+    score: attempt.score,
+    sectionScores: attempt.section_scores,
+    metrics: attempt.metrics,
+    contentResult: attempt.content_result,
+  })
+  if (storedResult.kind === 'incomplete') {
     return apiError('That attempt has not been scored yet.', 400)
+  }
+  if (storedResult.kind !== 'legacy') {
+    return apiError('That finding cannot be applied to this result.', 400)
+  }
+
+  const resolved = resolveLegacyDispute(storedResult.attempt.content, noteType, quote)
+  if (!resolved.ok) {
+    return apiError(
+      'That finding cannot be disputed. Measurements are counts, not judgements.',
+      400,
+    )
   }
 
   const { data: disputeRows, error: disputeError } = await admin
@@ -62,28 +83,39 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return apiError('That could not be saved.', 500)
   }
 
+  const existing = validLegacyDisputes(
+    storedResult.attempt.content,
+    (disputeRows ?? []).map((row) => ({ note_type: row.note_type, quote: row.quote })),
+  )
+  const alreadyStored = existing.some((row) => sameDispute(row, resolved.dispute))
+  const disputes = alreadyStored ? existing : [...existing, resolved.dispute]
+
   let rescored
   try {
-    const stored = attempt.content_result as unknown as StoredContentResult
-    const sections = attempt.section_scores as unknown as {
-      delivery: { metrics: Record<DeliveryMetricName, number> }
-    }
-    rescored = recomputeScore(stored, sections.delivery.metrics, [
-      ...(disputeRows ?? []).map((row) => ({ note_type: row.note_type, quote: row.quote })),
-      { note_type: noteType, quote },
-    ])
+    rescored = recomputeScore(
+      storedResult.attempt.content,
+      storedResult.attempt.sections.delivery.metrics,
+      disputes,
+    )
   } catch (error) {
     logAttemptDiagnostic('recompute_dispute', 'dispute_result_invalid', id, error)
     return apiError('That finding could not be applied.', 400)
   }
 
+  if (alreadyStored) {
+    return NextResponse.json({ score: rescored.score, section_scores: rescored.section_scores })
+  }
+
   const { error: insertError } = await admin.from('note_feedback').insert({
     user_id: userId,
     attempt_id: id,
-    note_type: noteType,
-    quote,
+    note_type: resolved.dispute.note_type,
+    quote: resolved.dispute.quote,
   })
   if (insertError) {
+    if (safeDiagnosticCode(insertError) === '23505') {
+      return NextResponse.json({ score: rescored.score, section_scores: rescored.section_scores })
+    }
     logAttemptDiagnostic('save_dispute', 'dispute_insert_failed', id, insertError)
     return apiError('That could not be saved.', 500)
   }
