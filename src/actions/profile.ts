@@ -30,15 +30,26 @@ export async function updateProfile(
     }
   }
 
-  const { error } = await supabase
+  const expectedDisplayName = displayName.length > 0 ? displayName : null
+  const { data: profile, error } = await supabase
     .from('profiles')
-    .update({
-      display_name: displayName.length > 0 ? displayName : null,
-      focus_areas: focusAreas,
-    })
-    .eq('id', user.id)
+    .upsert(
+      {
+        id: user.id,
+        display_name: expectedDisplayName,
+        focus_areas: focusAreas,
+      },
+      { onConflict: 'id' },
+    )
+    .select('id, display_name, focus_areas')
+    .maybeSingle()
 
-  if (error) {
+  if (
+    error ||
+    profile?.id !== user.id ||
+    profile.display_name !== expectedDisplayName ||
+    JSON.stringify(sanitizeFocusAreas(profile.focus_areas)) !== JSON.stringify(focusAreas)
+  ) {
     return {
       status: 'error',
       message: 'Your changes did not save. Check your connection and try again.',

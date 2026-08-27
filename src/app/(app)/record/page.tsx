@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { cookies } from 'next/headers'
+import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { RecordFlow } from '@/components/record/record-flow'
 import { RetryButton } from '@/components/system/retry-button'
@@ -7,11 +7,8 @@ import { ButtonLink } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
 import { dataEmpty, dataFailure, dataReady } from '@/lib/data/outcome'
 import { practiceModePriority, sanitizeFocusAreas } from '@/lib/focus-areas'
-import {
-  CUSTOM_SESSION_COOKIE,
-  isCustomPracticeMarker,
-  parseCustomPracticeCookie,
-} from '@/lib/practice/custom'
+import { isCustomPracticeMarker } from '@/lib/practice/custom'
+import { CUSTOM_HANDOFF_HEADER, parseCustomPracticeHeader } from '@/lib/practice/custom-handoff'
 import { parseRecordModeParam } from '@/lib/practice/navigation'
 import {
   invalidExplicitRecordIntent,
@@ -130,7 +127,9 @@ export default async function RecordPage({
   session = retryResolution.status === 'ready' ? retryResolution.session : null
 
   if (!session && isCustomPracticeMarker(params.custom)) {
-    const custom = parseCustomPracticeCookie((await cookies()).get(CUSTOM_SESSION_COOKIE)?.value)
+    // Proxy validates, user-binds, and clears the encrypted cookie before this
+    // upstream-only header reaches the page.
+    const custom = parseCustomPracticeHeader((await headers()).get(CUSTOM_HANDOFF_HEADER))
     session = custom
       ? parsePracticeSessionDescriptor({
           ...custom,
