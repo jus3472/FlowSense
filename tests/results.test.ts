@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { buildSegments, collectHighlights, mergeHighlights } from '@/lib/results/highlights'
 import {
   applyFilter,
+  applyHistoryFilters,
   averageScore,
   dayLabel,
   groupByDay,
+  historyContext,
+  historyMode,
+  matchesMetadataFilter,
   timeLabel,
   type HistoryEntry,
 } from '@/lib/results/history'
@@ -305,6 +309,38 @@ describe('history grouping', () => {
     expect(applyFilter(entries, 'high').map((e) => e.id)).toEqual(['a', 'b'])
     expect(applyFilter(entries, 'low').map((e) => e.id)).toEqual(['c'])
     expect(applyFilter(entries, 'all')).toHaveLength(3)
+  })
+
+  it('classifies legacy metadata as General and keeps stored mode labels', () => {
+    const legacy = entry('legacy', 0, 80)
+    const interview = { ...entry('interview', 0, 70), practiceMode: 'interview' as const }
+    expect(historyMode(legacy)).toBe('general')
+    expect(historyContext(legacy)).toEqual(['General'])
+    expect(historyContext(interview)).toEqual(['Interview'])
+  })
+
+  it('identifies custom prompts and retries from stored metadata', () => {
+    const customRetry = {
+      ...entry('custom-retry', 0, 80),
+      practiceMode: 'conversation' as const,
+      promptSource: 'custom' as const,
+      retryOfAttemptId: 'prior-attempt',
+    }
+    expect(historyContext(customRetry)).toEqual(['Conversation', 'Custom prompt', 'Retry'])
+    expect(matchesMetadataFilter(customRetry, 'custom')).toBe(true)
+    expect(matchesMetadataFilter(customRetry, 'retry')).toBe(true)
+  })
+
+  it('combines metadata and existing score filters', () => {
+    const entries = [
+      { ...entry('practice', 0, 90), practiceMode: 'practice' as const },
+      { ...entry('interview-high', 1, 80), practiceMode: 'interview' as const },
+      { ...entry('interview-low', 2, 40), practiceMode: 'interview' as const },
+    ]
+    expect(applyHistoryFilters(entries, 'interview', 'high').map(({ id }) => id)).toEqual([
+      'interview-high',
+    ])
+    expect(applyHistoryFilters(entries, 'conversation', 'all')).toEqual([])
   })
 })
 
