@@ -63,6 +63,20 @@ export function exactTranscriptRange(
   return validTranscriptCharacterRange(transcript, evidence.start, evidence.end, evidence.quote)
 }
 
+/**
+ * Historical v2 filler evidence used source=transcript with exact integer
+ * character offsets before coordinate metadata existed. That known shape is
+ * safe to preserve; every other coordinate-less source remains fail-closed.
+ */
+export function exactOrLegacyTranscriptRange(
+  transcript: string,
+  evidence: Pick<ScoreEvidence, 'source' | 'start' | 'end' | 'quote' | 'coordinate'>,
+): TranscriptCharacterRange | null {
+  const exact = exactTranscriptRange(transcript, evidence)
+  if (exact || evidence.coordinate !== undefined || evidence.source !== 'transcript') return exact
+  return validTranscriptCharacterRange(transcript, evidence.start, evidence.end, evidence.quote)
+}
+
 export function transcriptEvidenceForWord(
   words: readonly TranscriptWord[],
   transcript: string | undefined,

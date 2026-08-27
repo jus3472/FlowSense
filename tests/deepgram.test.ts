@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { DeepgramParseError, parseDeepgramResponse } from '@/lib/deepgram/parse'
+import {
+  DeepgramParseError,
+  deepgramQualityMetrics,
+  parseDeepgramResponse,
+} from '@/lib/deepgram/parse'
 import { buildDeepgramUrl, deepgramAuthHeader, isFillerToken } from '@/lib/deepgram/request'
 
 /** Shaped after a real nova-3 response with filler_words=true and punctuate=true. */
@@ -174,6 +178,7 @@ describe('parseDeepgramResponse', () => {
     expect(parsed.words.map((word) => word.word)).toEqual(['um', 'one'])
     expect(parsed.quality.status).toBe('degraded')
     expect(parsed.quality.diagnostics.join(' ')).toMatch(/confidence/)
+    expect(deepgramQualityMetrics(parsed)).toEqual({ quality: parsed.quality })
   })
 
   it.each([

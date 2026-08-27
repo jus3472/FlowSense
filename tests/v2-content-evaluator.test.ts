@@ -369,6 +369,37 @@ describe('v2 content evidence exclusions', () => {
     expect(invalid.categories.grammar.warnings.join(' ')).toMatch(/coordinates did not match/)
   })
 
+  it('keeps distinct exact occurrences of the same quote and deduplicates only overlap', () => {
+    const repeated = 'clear then clear'
+    const finding = (start: number, observation: string) => ({
+      kind: 'grammatical_error',
+      severity: 'minor',
+      quote: 'clear',
+      start,
+      end: start + 5,
+      observation,
+      suggestion: null,
+    })
+    const parsed = parseV2ContentResponse(
+      response({
+        grammar: {
+          findings: [
+            finding(0, 'The first occurrence is independent.'),
+            finding(11, 'The second occurrence is independent.'),
+            finding(11, 'This duplicates the second span.'),
+          ],
+        },
+      }),
+      { transcript: repeated },
+    )
+
+    expect(parsed.categories.grammar.findings.map((item) => item.evidence[0])).toEqual([
+      { start: 0, end: 5 },
+      { start: 11, end: 16 },
+    ])
+    expect(parsed.categories.grammar.warnings.join(' ')).toMatch(/overlaps an earlier v2 finding/)
+  })
+
   it('ignores invalid confidence and offset evidence rather than charging from it', () => {
     const parsed = parseV2ContentResponse(
       response({

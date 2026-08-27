@@ -1,7 +1,11 @@
 import type { Segment } from '@/lib/results/highlights'
 import type { PracticeMode, SkillCategory } from '@/lib/practice/contracts'
 import type { V2PersistedCategoryScore, V2ScorePayload } from '@/lib/scoring/v2/assemble'
-import { exactTranscriptRange, validTranscriptCharacterRange } from '@/lib/scoring/v2/evidence'
+import {
+  exactOrLegacyTranscriptRange,
+  exactTranscriptRange,
+  validTranscriptCharacterRange,
+} from '@/lib/scoring/v2/evidence'
 
 interface TranscriptCandidate {
   quote: string
@@ -147,7 +151,7 @@ function exactEvidenceCandidate(
   evidence: V2PersistedCategoryScore['evidence'][number],
 ): TranscriptCandidate[] {
   const quote = nonEmptyString(evidence.quote)
-  const range = exactTranscriptRange(transcript, evidence)
+  const range = exactOrLegacyTranscriptRange(transcript, evidence)
   return quote && range ? [{ quote, detail: evidence.detail, label, ...range }] : []
 }
 

@@ -296,6 +296,67 @@ describe('v2 result helpers', () => {
     ).toEqual([])
   })
 
+  it('preserves exact legacy transcript offsets without coordinate metadata', () => {
+    const score = payload()
+    const categories = {
+      ...score.categories,
+      fluency: {
+        ...score.categories.fluency,
+        component: 0.8,
+        earned_points: 18,
+        deductions: [{ id: 'filler_rate', detail: 'Fillers reduced fluency.' }],
+        evidence: [
+          {
+            source: 'transcript',
+            start: 8,
+            end: 10,
+            quote: 'um',
+            detail: 'Filler detected in the transcript.',
+          },
+          {
+            source: 'transcript',
+            start: 3,
+            end: 5,
+            quote: 'um',
+            detail: 'Filler detected in the transcript.',
+          },
+        ],
+      },
+    }
+    const highlights = v2TranscriptSegments('um then um', { ...score, categories }).filter(
+      (segment) => segment.type === 'highlight',
+    )
+    expect(highlights.map((segment) => segment.text)).toEqual(['um'])
+    expect(highlights[0]).toMatchObject({ text: 'um', label: expect.stringContaining('Fluency') })
+  })
+
+  it('does not reinterpret legacy Clarity seconds as transcript characters', () => {
+    const score = payload()
+    const categories = {
+      ...score.categories,
+      clarity: {
+        ...score.categories.clarity,
+        component: 0.8,
+        earned_points: 16,
+        deductions: [{ id: 'recognition_uncertainty', detail: 'Lower recognition.' }],
+        evidence: [
+          {
+            source: 'deepgram_word_confidence',
+            start: 0,
+            end: 2,
+            quote: 'um',
+            detail: 'Recognition confidence for this word was 0.40.',
+          },
+        ],
+      },
+    }
+    expect(
+      v2TranscriptSegments('um then um', { ...score, categories }).filter(
+        (segment) => segment.type === 'highlight',
+      ),
+    ).toEqual([])
+  })
+
   it('formats stored feedback safely without serializing malformed deductions', () => {
     expect(
       formatV2Feedback({

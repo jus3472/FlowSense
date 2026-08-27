@@ -159,7 +159,6 @@ interface ParseContext {
   mechanicallyCounted: readonly MechanicallyCountedSpan[]
   unreliable: readonly TranscriptEvidenceSpan[]
   claimed: TranscriptEvidenceSpan[]
-  claimedQuotes: Set<string>
 }
 
 function explicitEvidence(
@@ -219,13 +218,7 @@ function acceptableQuote(
     warnings.push(`${label}: quote overlaps an earlier v2 finding`)
     return null
   }
-  const normalizedQuote = quote.toLocaleLowerCase()
-  if (context.claimedQuotes.has(normalizedQuote)) {
-    warnings.push(`${label}: quote was already claimed by an earlier v2 finding`)
-    return null
-  }
   context.claimed.push(evidence)
-  context.claimedQuotes.add(normalizedQuote)
   return evidence
 }
 
@@ -362,7 +355,6 @@ export function parseV2ContentResponse(
       validSpan(span, input.transcript),
     ),
     claimed: [],
-    claimedQuotes: new Set(),
   }
   const categories = {
     structure: parseStructure(payload.structure, context),

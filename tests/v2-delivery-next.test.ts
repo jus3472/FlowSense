@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import {
   DELIVERY_NEXT_CALIBRATION_BASELINES,
   DELIVERY_NEXT_CALIBRATION_LABELS,
@@ -90,5 +91,18 @@ describe('next-version Delivery calibration evidence', () => {
       )
     }
     expect(runDeliveryNextCalibration()).toMatchObject({ ok: true, differences: [] })
+  })
+
+  it('is not selected by the current route, rubric, assembler, or snapshot decoder', () => {
+    for (const path of [
+      'src/app/api/score/route.ts',
+      'src/lib/scoring/v2/rubrics.ts',
+      'src/lib/scoring/v2/assemble.ts',
+      'src/lib/results/attempt-result.ts',
+    ]) {
+      const source = readFileSync(path, 'utf8')
+      expect(source, path).not.toContain('evaluateDeliveryNext')
+      expect(source, path).not.toContain('applyStructurePrecedenceVNext')
+    }
   })
 })
