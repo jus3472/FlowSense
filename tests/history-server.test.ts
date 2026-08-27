@@ -5,6 +5,7 @@ import {
   HISTORY_SCORE_SCAN_SIZE,
   loadHistoryPage,
 } from '@/lib/results/history-server'
+import type { AttemptStatus } from '@/lib/attempts/lifecycle'
 import type { Database, Json, PracticeMode, PromptSource } from '@/lib/types/database'
 
 vi.mock('server-only', () => ({}))
@@ -19,6 +20,7 @@ interface FakeAttempt {
   practice_mode: PracticeMode | null
   prompt_source: PromptSource | null
   retry_of_attempt_id: string | null
+  status: AttemptStatus
 }
 
 interface Operation {
@@ -37,6 +39,7 @@ function attempt(index: number, over: Partial<FakeAttempt> = {}): FakeAttempt {
     practice_mode: 'practice',
     prompt_source: 'library',
     retry_of_attempt_id: null,
+    status: 'done',
     ...over,
   }
 }
@@ -119,8 +122,6 @@ class FakeQuery implements PromiseLike<{ data: FakeAttempt[] | null; error: unkn
         output = output.filter((row) => row.retry_of_attempt_id !== null)
       if (operation.method === 'or' && value === undefined) {
         const filters = String(column)
-        if (filters.includes('section_scores'))
-          output = output.filter((row) => row.score !== null || row.section_scores !== null)
         if (filters.includes('practice_mode'))
           output = output.filter(
             (row) => row.practice_mode === 'practice' || row.practice_mode === null,
@@ -205,13 +206,18 @@ describe('history server loading', () => {
       expect(retry.data.entries.map((entry) => entry.id)).toEqual(['attempt-099'])
   })
 
-  it('includes legacy, v2, and partial snapshots but excludes unfinished and cross-user rows', async () => {
+  it('includes done legacy, v2, and partial rows but excludes every other lifecycle status', async () => {
     const setup = fakeSupabase([
       attempt(1, { score: 61, section_scores: null, practice_mode: null, prompt_source: null }),
       attempt(2, { score: 82, section_scores: { score_version: 'v2' } }),
       attempt(3, { score: null, section_scores: { score_version: 'v2-partial' } }),
-      attempt(4, { score: null, section_scores: null }),
-      attempt(5, { user_id: 'user-2' }),
+      attempt(4, { status: 'uploading', score: 99 }),
+      attempt(5, { status: 'transcribing', section_scores: { stale: true } }),
+      attempt(6, { status: 'scoring', score: 98, section_scores: { stale: true } }),
+      attempt(7, { status: 'failed', score: 97, section_scores: { stale: true } }),
+      attempt(8, { status: 'timed_out', score: 96, section_scores: { stale: true } }),
+      attempt(9, { user_id: 'user-2' }),
+      attempt(10, { status: 'done', score: null, section_scores: null }),
     ])
 
     const result = await loadHistoryPage(setup.client, 'user-1', {
@@ -221,6 +227,7 @@ describe('history server loading', () => {
     })
     if (result.status !== 'ready') throw new Error('expected ready history')
     expect(result.data.entries.map((entry) => [entry.id, entry.score])).toEqual([
+      ['attempt-010', null],
       ['attempt-003', null],
       ['attempt-002', 82],
       ['attempt-001', 61],
@@ -233,6 +240,7 @@ describe('history server loading', () => {
     })
     if (general.status !== 'ready') throw new Error('expected ready general history')
     expect(general.data.entries.map((entry) => entry.id)).toEqual([
+      'attempt-010',
       'attempt-003',
       'attempt-002',
       'attempt-001',

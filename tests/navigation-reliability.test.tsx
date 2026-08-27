@@ -68,11 +68,12 @@ describe('attempt navigation', () => {
     expect(screen.getByText('No score yet')).toBeInTheDocument()
   })
 
-  it('keeps Home selection owned, result-bearing, and free of removed result routes', () => {
+  it('keeps Home selection owned, lifecycle-complete, and free of removed result routes', () => {
     const home = readFileSync('src/app/(app)/home/page.tsx', 'utf8')
     const lastScore = readFileSync('src/components/home/last-score.tsx', 'utf8')
     expect(home).toContain(".eq('user_id', user.id)")
-    expect(home).toContain(".or('score.not.is.null,section_scores.not.is.null')")
+    expect(home.match(/\.eq\('status', 'done'\)/g)).toHaveLength(2)
+    expect(home).not.toContain(".or('score.not.is.null,section_scores.not.is.null')")
     expect(home).toContain('.limit(1)')
     expect(lastScore).toContain('attemptHref(attemptId)')
     expect(`${home}\n${lastScore}`).not.toMatch(/(?:href=|redirect\()["'`]\/results/)

@@ -12,8 +12,6 @@ import {
   recentCompletedLibraryPromptIds,
   type LibraryPrompt,
 } from '@/lib/prompts/selection'
-import { SKILL_CATEGORIES } from '@/lib/practice/contracts'
-import { rubricFor } from '@/lib/scoring/v2/rubrics'
 
 const FIRST_ID = '11111111-1111-4111-8111-111111111111'
 const SECOND_ID = '22222222-2222-4222-8222-222222222222'
@@ -36,31 +34,6 @@ function prompt(id: string): LibraryPrompt {
   const parsed = parseLibraryPrompt(row({ id }))
   if (!parsed) throw new Error('Test prompt was malformed.')
   return parsed
-}
-
-function partialV2Snapshot() {
-  const rubric = rubricFor('practice')
-  return {
-    version: 'v2.score.1',
-    rubric_version: 'v2',
-    mode: 'practice',
-    total_earned_points: null,
-    total_max_points: 100,
-    categories: Object.fromEntries(
-      SKILL_CATEGORIES.map((category) => [
-        category,
-        {
-          category,
-          availability: 'available',
-          status: 'not_checked',
-          component: null,
-          earned_points: null,
-          max_points: rubric.categories[category].weight,
-        },
-      ]),
-    ),
-    warnings: [],
-  }
 }
 
 describe('prompt selection', () => {
@@ -183,25 +156,32 @@ describe('prompt selection', () => {
     })
   })
 
-  it('treats a completed partial v2 snapshot as recent even when overall score is null', () => {
-    const partial = partialV2Snapshot()
-    expect(isCompletedPromptAttempt({ score: null, section_scores: partial })).toBe(true)
+  it('uses lifecycle status for recent prompts regardless of stored score payloads', () => {
+    expect(isCompletedPromptAttempt({ status: 'done' })).toBe(true)
+    for (const status of ['uploading', 'transcribing', 'scoring', 'failed', 'timed_out']) {
+      expect(isCompletedPromptAttempt({ status })).toBe(false)
+    }
     expect(
       recentCompletedLibraryPromptIds([
         {
           prompt_id: FIRST_ID,
           prompt_source: 'library',
-          score: null,
-          section_scores: partial,
+          status: 'done',
         },
         {
           prompt_id: SECOND_ID,
           prompt_source: null,
+          status: 'failed',
           score: 72,
-          section_scores: null,
+          section_scores: { stale: true },
+        },
+        {
+          prompt_id: THIRD_ID,
+          prompt_source: null,
+          status: 'done',
         },
       ]),
-    ).toEqual([FIRST_ID, SECOND_ID])
+    ).toEqual([FIRST_ID, THIRD_ID])
   })
 
   it('returns empty collections and no selection for empty candidates', () => {

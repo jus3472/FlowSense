@@ -4,7 +4,6 @@ import {
   type PracticeMode,
   type PromptDifficulty,
 } from '@/lib/practice/contracts'
-import { hasStoredScorePayload } from '@/lib/scoring/v2/assemble'
 
 const PROMPT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -43,6 +42,8 @@ export interface PromptBrowseData {
 export interface RecentPromptAttempt {
   prompt_id?: unknown
   prompt_source?: unknown
+  status?: unknown
+  /** Historical callers may still pass payload fields. Completion never depends on them. */
   score?: unknown
   section_scores?: unknown
 }
@@ -291,10 +292,6 @@ export function recentCompletedLibraryPromptIds(
   return ids
 }
 
-/** Interim completion seam until the lifecycle migration can switch this to `status = done`. */
 export function isCompletedPromptAttempt(attempt: RecentPromptAttempt): boolean {
-  return (
-    (typeof attempt.score === 'number' && Number.isFinite(attempt.score)) ||
-    hasStoredScorePayload(attempt.section_scores)
-  )
+  return attempt.status === 'done'
 }

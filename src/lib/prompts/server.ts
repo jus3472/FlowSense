@@ -160,8 +160,9 @@ export async function getRecentCompletedLibraryPromptIds(
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('attempts')
-    .select('prompt_id, prompt_source, score, section_scores')
+    .select('prompt_id, prompt_source, status')
     .eq('user_id', userId)
+    .eq('status', 'done')
     .not('prompt_id', 'is', null)
     .order('created_at', { ascending: false })
     .limit(RECENT_PROMPT_CANDIDATE_LIMIT)

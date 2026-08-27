@@ -10,6 +10,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parseAttemptRow(value: unknown): ProgressRetryAttemptInput | null {
   if (!isRecord(value)) return null
+  if (value.status !== 'done') return null
   if (typeof value.id !== 'string' || value.id.length === 0) return null
   if (typeof value.created_at !== 'string') return null
   if (value.retry_of_attempt_id !== null && typeof value.retry_of_attempt_id !== 'string') {

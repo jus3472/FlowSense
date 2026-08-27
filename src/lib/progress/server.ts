@@ -27,8 +27,9 @@ export async function getProgressDashboardData(
     const supabase = await createClient()
     const { data, error } = await supabase
       .from('attempts')
-      .select('id, created_at, section_scores, retry_of_attempt_id')
+      .select('id, created_at, section_scores, retry_of_attempt_id, status')
       .eq('user_id', userId)
+      .eq('status', 'done')
       .order('created_at', { ascending: true })
 
     const rows = readProgressAttemptRows(data, error !== null)
@@ -40,8 +41,6 @@ export async function getProgressDashboardData(
       return rows
     }
 
-    // Task B can add `status = done` here once its lifecycle column is present in
-    // the shared database types. Stored snapshots remain the authority meanwhile.
     return {
       status: 'ready',
       data: {
