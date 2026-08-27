@@ -79,14 +79,14 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
       .eq('id', id)
       .eq('user_id', user.id)
       .maybeSingle()
-  } catch {
-    logAttemptDiagnostic('load_attempt_result', 'attempt_result_read_failed', null)
+  } catch (error) {
+    logAttemptDiagnostic('load_attempt_result', 'attempt_result_read_failed', id, error)
     return resultLoadError()
   }
 
   const { data: attempt, error: attemptError } = attemptResponse
   if (attemptError) {
-    logAttemptDiagnostic('load_attempt_result', 'attempt_result_read_failed', null)
+    logAttemptDiagnostic('load_attempt_result', 'attempt_result_read_failed', id, attemptError)
     return resultLoadError()
   }
 
@@ -101,13 +101,27 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         .createSignedUrl(attempt.audio_path, SIGNED_URL_SECONDS)
       if (error || !data?.signedUrl) {
         audioUnavailable = true
-        logAttemptDiagnostic('sign_attempt_result_audio', 'signed_audio_url_failed', null)
+        if (error) {
+          logAttemptDiagnostic(
+            'sign_attempt_result_audio',
+            'signed_audio_url_failed',
+            attempt.id,
+            error,
+          )
+        } else {
+          logAttemptDiagnostic('sign_attempt_result_audio', 'signed_audio_url_failed', attempt.id)
+        }
       } else {
         audioUrl = data.signedUrl
       }
-    } catch {
+    } catch (error) {
       audioUnavailable = true
-      logAttemptDiagnostic('sign_attempt_result_audio', 'signed_audio_url_failed', null)
+      logAttemptDiagnostic(
+        'sign_attempt_result_audio',
+        'signed_audio_url_failed',
+        attempt.id,
+        error,
+      )
     }
   }
 
@@ -178,14 +192,14 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
             .eq('user_id', user.id)
             .maybeSingle()
           if (response.error) {
-            throw new Error('Retry ancestor query failed.')
+            throw response.error
           }
           return response.data
             ? { ...response.data, retryOfAttemptId: response.data.retry_of_attempt_id }
             : null
         })
-      } catch {
-        logAttemptDiagnostic('load_retry_ancestor', 'retry_ancestor_read_failed', null)
+      } catch (error) {
+        logAttemptDiagnostic('load_retry_ancestor', 'retry_ancestor_read_failed', attempt.id, error)
         chain = null
       }
       const parent = chain?.[0] ?? null
@@ -262,13 +276,18 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
       .select('note_type, quote')
       .eq('attempt_id', id)
       .eq('user_id', user.id)
-  } catch {
-    logAttemptDiagnostic('load_result_disputes', 'result_disputes_read_failed', null)
+  } catch (error) {
+    logAttemptDiagnostic('load_result_disputes', 'result_disputes_read_failed', attempt.id, error)
     return resultLoadError()
   }
   const { data: disputeRows, error: disputeError } = disputeResponse
   if (disputeError) {
-    logAttemptDiagnostic('load_result_disputes', 'result_disputes_read_failed', null)
+    logAttemptDiagnostic(
+      'load_result_disputes',
+      'result_disputes_read_failed',
+      attempt.id,
+      disputeError,
+    )
     return resultLoadError()
   }
 

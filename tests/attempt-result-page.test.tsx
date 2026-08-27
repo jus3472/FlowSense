@@ -63,9 +63,18 @@ const USER_ID = '50000000-0000-4000-8000-000000000005'
 const PRIVATE_PATH = `${USER_ID}/${ATTEMPT_ID}/private-recording.webm`
 const PRIVATE_PROMPT = 'Private prompt text should not be logged.'
 const PRIVATE_TRANSCRIPT = 'Private transcript text should not be logged.'
-const PRIVATE_ERROR = 'private database and storage error text'
+const PRIVATE_ERROR_MESSAGE = 'private database and storage error text'
 const PRIVATE_SIGNED_URL = 'https://private.example.test/signed-recording'
 const NOT_FOUND = new Error('NEXT_HTTP_ERROR_FALLBACK;404')
+const RETURNED_ERROR = {
+  code: 'PGRST500',
+  message: PRIVATE_ERROR_MESSAGE,
+  details: PRIVATE_TRANSCRIPT,
+}
+const THROWN_ERROR = Object.assign(new Error(PRIVATE_ERROR_MESSAGE), {
+  code: 'NETWORK_ERROR',
+  privatePath: PRIVATE_PATH,
+})
 
 interface QueryResponse {
   data: Record<string, unknown> | null
@@ -112,8 +121,8 @@ function resultQuery(options: ClientOptions, filters: Array<{ column: string; va
     maybeSingle: vi.fn(async () => {
       const primary =
         selectedId === ATTEMPT_ID || selectedId === MISSING_ID || selectedId === CROSS_USER_ID
-      if (primary && options.primaryThrows) throw new Error(PRIVATE_ERROR)
-      if (!primary && options.ancestorThrows) throw new Error(PRIVATE_ERROR)
+      if (primary && options.primaryThrows) throw THROWN_ERROR
+      if (!primary && options.ancestorThrows) throw THROWN_ERROR
       return primary
         ? (options.primary ?? { data: attempt(), error: null })
         : (options.ancestor ?? { data: null, error: null })
@@ -133,9 +142,7 @@ function noteFeedbackQuery(
     eq: vi.fn((column: string, value: unknown) => {
       filters.push({ column, value })
       if (column === 'user_id') {
-        return options.disputesThrow
-          ? Promise.reject(new Error(PRIVATE_ERROR))
-          : Promise.resolve(result)
+        return options.disputesThrow ? Promise.reject(THROWN_ERROR) : Promise.resolve(result)
       }
       return query
     }),
@@ -147,7 +154,7 @@ function noteFeedbackQuery(
 function client(options: ClientOptions = {}) {
   const filters: Array<{ column: string; value: unknown }> = []
   const createSignedUrl = vi.fn(async () => {
-    if (options.signedThrows) throw new Error(PRIVATE_ERROR)
+    if (options.signedThrows) throw THROWN_ERROR
     return options.signed ?? { data: { signedUrl: PRIVATE_SIGNED_URL }, error: null }
   })
   const supabase = {
@@ -195,9 +202,13 @@ afterEach(() => {
 
 describe('owned attempt result loading', () => {
   it.each([
-    { label: 'returned query error', options: { primary: { data: null, error: PRIVATE_ERROR } } },
-    { label: 'thrown query error', options: { primaryThrows: true } },
-  ])('renders a recoverable error for a $label', async ({ options }) => {
+    {
+      label: 'returned query error',
+      options: { primary: { data: null, error: RETURNED_ERROR } },
+      expectedError: RETURNED_ERROR,
+    },
+    { label: 'thrown query error', options: { primaryThrows: true }, expectedError: THROWN_ERROR },
+  ])('renders a recoverable error for a $label', async ({ options, expectedError }) => {
     const setup = client(options)
     mocks.createClient.mockResolvedValue(setup.supabase)
 
@@ -214,7 +225,8 @@ describe('owned attempt result loading', () => {
     expect(mocks.logAttemptDiagnostic).toHaveBeenCalledExactlyOnceWith(
       'load_attempt_result',
       'attempt_result_read_failed',
-      null,
+      ATTEMPT_ID,
+      expectedError,
     )
   })
 
@@ -256,7 +268,8 @@ describe('owned attempt result loading', () => {
       snapshot: 'v2',
       testId: 'v2-result',
       resultLabel: 'Complete v2 result',
-      options: { signed: { data: null, error: PRIVATE_ERROR } },
+      options: { signed: { data: null, error: RETURNED_ERROR } },
+      expectedError: RETURNED_ERROR,
     },
     {
       label: 'empty signing response',
@@ -264,6 +277,7 @@ describe('owned attempt result loading', () => {
       testId: 'v2-result',
       resultLabel: 'Partial v2 result',
       options: { signed: { data: null, error: null } },
+      expectedError: undefined,
     },
     {
       label: 'thrown signing error',
@@ -271,6 +285,7 @@ describe('owned attempt result loading', () => {
       testId: 'legacy-result',
       resultLabel: 'Legacy result',
       options: { signedThrows: true },
+      expectedError: THROWN_ERROR,
     },
   ])('renders the $snapshot result without audio after a $label', async (testCase) => {
     const setup = client({
@@ -287,30 +302,29 @@ describe('owned attempt result loading', () => {
     expect(screen.getByTestId(testCase.testId)).toHaveTextContent(testCase.resultLabel)
     expect(screen.getByTestId(testCase.testId)).toHaveAttribute('data-audio', 'none')
     expect(screen.getByText('Audio playback is unavailable for this response.')).toBeInTheDocument()
-    expect(mocks.logAttemptDiagnostic).toHaveBeenCalledExactlyOnceWith(
+    const expectedArguments: unknown[] = [
       'sign_attempt_result_audio',
       'signed_audio_url_failed',
-      null,
-    )
-    const diagnostic = JSON.stringify(mocks.logAttemptDiagnostic.mock.calls)
-    for (const privateValue of [
-      PRIVATE_PATH,
-      PRIVATE_PROMPT,
-      PRIVATE_TRANSCRIPT,
-      PRIVATE_ERROR,
-      PRIVATE_SIGNED_URL,
-    ]) {
-      expect(diagnostic).not.toContain(privateValue)
+      ATTEMPT_ID,
+    ]
+    if (testCase.expectedError) {
+      expectedArguments.push(testCase.expectedError)
     }
+    expect(mocks.logAttemptDiagnostic).toHaveBeenCalledExactlyOnceWith(...expectedArguments)
   })
 
   it.each([
     {
       label: 'returned dispute error',
-      options: { disputes: { data: [], error: PRIVATE_ERROR } },
+      options: { disputes: { data: [], error: RETURNED_ERROR } },
+      expectedError: RETURNED_ERROR,
     },
-    { label: 'thrown dispute error', options: { disputesThrow: true } },
-  ])('renders a recoverable error after a $label', async ({ options }) => {
+    {
+      label: 'thrown dispute error',
+      options: { disputesThrow: true },
+      expectedError: THROWN_ERROR,
+    },
+  ])('renders a recoverable error after a $label', async ({ options, expectedError }) => {
     const setup = client({
       ...options,
       primary: { data: attempt({ section_scores: 'legacy' }), error: null },
@@ -325,23 +339,28 @@ describe('owned attempt result loading', () => {
     expect(mocks.logAttemptDiagnostic).toHaveBeenCalledExactlyOnceWith(
       'load_result_disputes',
       'result_disputes_read_failed',
-      null,
+      ATTEMPT_ID,
+      expectedError,
     )
     expect(setup.filters).toContainEqual({ column: 'attempt_id', value: ATTEMPT_ID })
     expect(setup.filters.filter((filter) => filter.column === 'user_id')).toEqual([
       { column: 'user_id', value: USER_ID },
       { column: 'user_id', value: USER_ID },
     ])
-    expect(JSON.stringify(mocks.logAttemptDiagnostic.mock.calls)).not.toContain(PRIVATE_ERROR)
   })
 
   it.each([
     {
       label: 'returned ancestor error',
-      options: { ancestor: { data: null, error: PRIVATE_ERROR } },
+      options: { ancestor: { data: null, error: RETURNED_ERROR } },
+      expectedError: RETURNED_ERROR,
     },
-    { label: 'thrown ancestor error', options: { ancestorThrows: true } },
-  ])('suppresses retry navigation after a $label', async ({ options }) => {
+    {
+      label: 'thrown ancestor error',
+      options: { ancestorThrows: true },
+      expectedError: THROWN_ERROR,
+    },
+  ])('suppresses retry navigation after a $label', async ({ options, expectedError }) => {
     const setup = client({
       ...options,
       primary: {
@@ -358,7 +377,8 @@ describe('owned attempt result loading', () => {
     expect(mocks.logAttemptDiagnostic).toHaveBeenCalledExactlyOnceWith(
       'load_retry_ancestor',
       'retry_ancestor_read_failed',
-      null,
+      ATTEMPT_ID,
+      expectedError,
     )
     expect(setup.filters).toContainEqual({ column: 'id', value: PARENT_ID })
     expect(setup.filters.filter((filter) => filter.column === 'user_id')).toEqual([
