@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { AnchorHTMLAttributes, ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { HistoryList } from '@/components/history/history-list'
@@ -67,6 +67,39 @@ describe('HistoryList', () => {
     })
   })
 
+  it('exposes a named modal alert dialog and hides the covered row controls', async () => {
+    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Delete this response?' })
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    const coveredLink = screen.getByText('Describe a place you know well.').closest('a')
+    expect(coveredLink).toHaveAttribute('aria-hidden', 'true')
+    expect(coveredLink).toHaveAttribute('tabindex', '-1')
+    expect(screen.queryByRole('link', { name: /Describe a place/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Delete response' })).not.toBeInTheDocument()
+  })
+
+  it('cycles Tab and Shift+Tab within Confirm and Cancel', async () => {
+    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Delete this response?' })
+    const confirm = screen.getByRole('button', { name: 'Confirm delete' })
+    const cancel = screen.getByRole('button', { name: 'Cancel delete' })
+
+    await waitFor(() => expect(confirm).toHaveFocus())
+    fireEvent.keyDown(dialog, { key: 'Tab' })
+    expect(cancel).toHaveFocus()
+    fireEvent.keyDown(dialog, { key: 'Tab' })
+    expect(confirm).toHaveFocus()
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true })
+    expect(cancel).toHaveFocus()
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true })
+    expect(confirm).toHaveFocus()
+  })
+
   it('dismisses delete confirmation on cancel and restores focus to delete', async () => {
     render(<HistoryList entries={entries} focusPhrase="with less filler" />)
 
@@ -104,6 +137,64 @@ describe('HistoryList', () => {
     expect(screen.queryByText('Delete this response?')).not.toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Delete response' })).toHaveFocus()
+    })
+  })
+
+  it('keeps dialog controls focusable while busy, then announces success and focuses a remaining row', async () => {
+    let finishDelete: (() => void) | undefined
+    vi.mocked(deleteAttempt).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishDelete = resolve
+      }),
+    )
+    render(
+      <HistoryList
+        entries={[
+          entries[0]!,
+          {
+            ...entries[0]!,
+            id: 'attempt-2',
+            promptText: 'Explain one useful routine.',
+          },
+        ]}
+        focusPhrase="with less filler"
+      />,
+    )
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete response' })[0]!)
+    const confirm = await screen.findByRole('button', { name: 'Confirm delete' })
+    fireEvent.click(confirm)
+
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete this response?' })
+    const cancel = screen.getByRole('button', { name: 'Cancel delete' })
+    expect(dialog).toHaveAttribute('aria-busy', 'true')
+    expect(confirm).toHaveAttribute('aria-disabled', 'true')
+    expect(cancel).toHaveAttribute('aria-disabled', 'true')
+    expect(confirm).not.toBeDisabled()
+    expect(cancel).not.toBeDisabled()
+    expect(confirm).toHaveFocus()
+    fireEvent.keyDown(dialog, { key: 'Tab' })
+    expect(cancel).toHaveFocus()
+
+    await act(async () => finishDelete?.())
+
+    await waitFor(() => {
+      expect(screen.queryByText('Describe a place you know well.')).not.toBeInTheDocument()
+      expect(screen.getByRole('status')).toHaveTextContent('Response deleted.')
+      expect(screen.getByRole('button', { name: 'Delete response' })).toHaveFocus()
+    })
+  })
+
+  it('focuses the History container after deleting the final visible row', async () => {
+    vi.mocked(deleteAttempt).mockResolvedValueOnce()
+    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm delete' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Response deleted.')
+      expect(screen.getByRole('region', { name: 'History responses' })).toHaveFocus()
     })
   })
 
