@@ -47,6 +47,10 @@ export interface V2CategoryView {
   result: V2PersistedCategoryScore
 }
 
+type ScoredV2CategoryView = V2CategoryView & {
+  result: V2PersistedCategoryScore & { status: 'scored'; component: number }
+}
+
 export function v2CategoryViews(payload: V2ScorePayload): V2CategoryView[] {
   return V2_CATEGORY_ORDER.map((category) => ({
     category,
@@ -55,26 +59,27 @@ export function v2CategoryViews(payload: V2ScorePayload): V2CategoryView[] {
   }))
 }
 
-function scoredCategories(payload: V2ScorePayload): V2CategoryView[] {
+function scoredCategories(payload: V2ScorePayload): ScoredV2CategoryView[] {
   return v2CategoryViews(payload).filter(
-    ({ result }) => result.status === 'scored' && result.component !== null,
+    (view): view is ScoredV2CategoryView =>
+      view.result.status === 'scored' && view.result.component !== null,
   )
 }
 
 export function strongestV2Category(payload: V2ScorePayload): V2CategoryView | null {
-  return scoredCategories(payload).reduce<V2CategoryView | null>((best, candidate) => {
-    if (!best || candidate.result.component! > best.result.component!) return candidate
-    return best
-  }, null)
+  const candidates = scoredCategories(payload)
+  if (candidates.length === 0) return null
+  const strongestComponent = Math.max(...candidates.map(({ result }) => result.component))
+  const strongest = candidates.filter(({ result }) => result.component === strongestComponent)
+  return strongest.length === 1 ? (strongest[0] ?? null) : null
 }
 
 export function priorityV2Category(payload: V2ScorePayload): V2CategoryView | null {
-  return scoredCategories(payload)
-    .filter(({ result }) => result.component! < 1)
-    .reduce<V2CategoryView | null>((priority, candidate) => {
-      if (!priority || candidate.result.component! < priority.result.component!) return candidate
-      return priority
-    }, null)
+  const candidates = scoredCategories(payload).filter(({ result }) => result.component < 1)
+  if (candidates.length === 0) return null
+  const priorityComponent = Math.min(...candidates.map(({ result }) => result.component))
+  const priority = candidates.filter(({ result }) => result.component === priorityComponent)
+  return priority.length === 1 ? (priority[0] ?? null) : null
 }
 
 export function v2ModeFeedback(mode: PracticeMode): string {
@@ -180,13 +185,11 @@ function deductionEvidence(transcript: string, payload: V2ScorePayload): Transcr
   })
 }
 
-function storedDeductionDetail(payload: V2ScorePayload): string | null {
-  for (const { result } of v2CategoryViews(payload)) {
-    for (const deduction of result.deductions) {
-      if (!isRecord(deduction)) continue
-      const detail = nonEmptyString(deduction.detail) ?? nonEmptyString(deduction.observation)
-      if (detail) return detail
-    }
+function storedDeductionDetail(result: V2PersistedCategoryScore): string | null {
+  for (const deduction of result.deductions) {
+    if (!isRecord(deduction)) continue
+    const detail = nonEmptyString(deduction.detail) ?? nonEmptyString(deduction.observation)
+    if (detail) return detail
   }
   return null
 }
@@ -196,15 +199,19 @@ function storedDeductionDetail(payload: V2ScorePayload): string | null {
  * factual and derives only from persisted deductions and category results.
  */
 export function v2OverallTakeaway(payload: V2ScorePayload): string {
+  const priority = priorityV2Category(payload)
+  if (priority) {
+    const deduction = storedDeductionDetail(priority.result)
+    if (deduction) return deduction
+    if (priority.result.earned_points !== null) {
+      return `${priority.label} has ${priority.result.earned_points} of ${priority.result.max_points} points in this response.`
+    }
+  }
   if (payload.total_earned_points === null) {
     return 'Some categories were not checked, so the overall result is unavailable.'
   }
-  const deduction = storedDeductionDetail(payload)
-  if (deduction) return deduction
-
-  const lowest = priorityV2Category(payload)
-  if (lowest && lowest.result.earned_points !== null) {
-    return `${lowest.label} has ${lowest.result.earned_points} of ${lowest.result.max_points} points in this response.`
+  if (payload.total_earned_points < payload.total_max_points) {
+    return `This response has ${payload.total_earned_points} of ${payload.total_max_points} points.`
   }
   return 'No category lost points in this response.'
 }

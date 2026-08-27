@@ -73,6 +73,8 @@ describe('V2ResultsView', () => {
     }
     expect(screen.getByText('100')).toBeInTheDocument()
     expect(screen.getByText('No category lost points in this response.')).toBeInTheDocument()
+    expect(screen.getByText('No single strongest scored area is available.')).toBeInTheDocument()
+    expect(screen.getByText('No single scored focus area is available.')).toBeInTheDocument()
     expect(screen.getByLabelText('Play Your answer')).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'Try Again' })).toHaveLength(1)
   })
@@ -85,6 +87,59 @@ describe('V2ResultsView', () => {
       screen.getByText('Some categories were not checked, so the overall result is unavailable.'),
     ).toBeInTheDocument()
     expect(screen.queryByText('100')).not.toBeInTheDocument()
+  })
+
+  it('distinguishes unavailable categories from categories that were not checked', () => {
+    const partial = payload(true)
+    const categories = {
+      ...partial.categories,
+      clarity: {
+        ...partial.categories.clarity,
+        availability: 'unavailable' as const,
+        status: 'unavailable' as const,
+        component: null,
+        earned_points: null,
+      },
+    }
+
+    render(
+      <V2ResultsView
+        {...props}
+        audioUrl={null}
+        payload={{ ...partial, categories, total_earned_points: null }}
+      />,
+    )
+
+    expect(screen.getByText('Not checked')).toBeInTheDocument()
+    expect(screen.getByText('Unavailable')).toBeInTheDocument()
+  })
+
+  it('renders unique strongest and focus categories without choosing a tied category', () => {
+    const score = payload()
+    const categories = Object.fromEntries(
+      Object.entries(score.categories).map(([category, result]) => [
+        category,
+        {
+          ...result,
+          component: category === 'vocabulary' ? 0.9 : category === 'fluency' ? 0.4 : 0.8,
+          earned_points: Math.round(
+            (category === 'vocabulary' ? 0.9 : category === 'fluency' ? 0.4 : 0.8) *
+              result.max_points,
+          ),
+        },
+      ]),
+    ) as V2ScorePayload['categories']
+    const total = Object.values(categories).reduce(
+      (sum, category) => sum + (category.earned_points ?? 0),
+      0,
+    )
+
+    render(
+      <V2ResultsView {...props} payload={{ ...score, categories, total_earned_points: total }} />,
+    )
+
+    expect(screen.getByText('Your strongest scored area is vocabulary.')).toBeInTheDocument()
+    expect(screen.getByText('Focus next on fluency.')).toBeInTheDocument()
   })
 
   it('renders neutral previous-to-current rows and a separate previous-response link', () => {

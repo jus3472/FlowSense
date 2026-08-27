@@ -209,6 +209,95 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function isStringArray(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+function validEvidenceCoordinate(value: unknown): boolean {
+  if (value === undefined || value === null) return true
+  if (!isRecord(value) || Object.keys(value).length !== 2) return false
+  return (
+    (value.space === 'transcript' && value.unit === 'utf16_code_unit') ||
+    (value.space === 'audio_timeline' && (value.unit === 'millisecond' || value.unit === 'second'))
+  )
+}
+
+function validEvidenceBounds(value: Record<string, unknown>): boolean {
+  const { start, end, coordinate, quote } = value
+  if (start === null || end === null) return start === null && end === null
+  if (
+    typeof start !== 'number' ||
+    typeof end !== 'number' ||
+    !Number.isFinite(start) ||
+    !Number.isFinite(end) ||
+    start < 0 ||
+    end < start
+  ) {
+    return false
+  }
+  if (
+    isRecord(coordinate) &&
+    coordinate.space === 'transcript' &&
+    coordinate.unit === 'utf16_code_unit'
+  ) {
+    return (
+      Number.isInteger(start) &&
+      Number.isInteger(end) &&
+      end > start &&
+      (quote === null || (typeof quote === 'string' && quote.length === end - start))
+    )
+  }
+  return true
+}
+
+function validStoredEvidence(value: unknown): value is ScoreEvidence {
+  return (
+    isRecord(value) &&
+    typeof value.source === 'string' &&
+    typeof value.detail === 'string' &&
+    (typeof value.quote === 'string' || value.quote === null) &&
+    validEvidenceCoordinate(value.coordinate) &&
+    validEvidenceBounds(value)
+  )
+}
+
+function validDeductionEvidence(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.start === 'number' &&
+    Number.isInteger(value.start) &&
+    value.start >= 0 &&
+    typeof value.end === 'number' &&
+    Number.isInteger(value.end) &&
+    value.end > value.start &&
+    (value.confidence === undefined || inUnitInterval(value.confidence))
+  )
+}
+
+function validStoredDeduction(value: unknown): boolean {
+  if (!isRecord(value)) return false
+
+  for (const key of ['id', 'check', 'kind', 'severity', 'detail', 'observation']) {
+    if (value[key] !== undefined && typeof value[key] !== 'string') return false
+  }
+  for (const key of ['quote', 'suggestion']) {
+    if (value[key] !== undefined && value[key] !== null && typeof value[key] !== 'string') {
+      return false
+    }
+  }
+  for (const key of ['component', 'component_reduction', 'deduction']) {
+    if (value[key] !== undefined && !inUnitInterval(value[key])) return false
+  }
+  if (
+    value.evidence !== undefined &&
+    (!Array.isArray(value.evidence) || !value.evidence.every(validDeductionEvidence))
+  ) {
+    return false
+  }
+
+  return typeof value.detail === 'string' || typeof value.observation === 'string'
+}
+
 function validStoredCategory(value: unknown, category: SkillCategory, mode: PracticeMode): boolean {
   if (!isRecord(value)) return false
   const maxPoints = rubricFor(mode).categories[category].weight
@@ -221,7 +310,19 @@ function validStoredCategory(value: unknown, category: SkillCategory, mode: Prac
         earnedPoints >= 0 &&
         earnedPoints <= maxPoints)) &&
     (component === null || inUnitInterval(component))
-  if (!pointsAreValid || value.category !== category || value.max_points !== maxPoints) return false
+  if (
+    !pointsAreValid ||
+    value.category !== category ||
+    value.max_points !== maxPoints ||
+    !('measurements' in value) ||
+    !Array.isArray(value.evidence) ||
+    !value.evidence.every(validStoredEvidence) ||
+    !Array.isArray(value.deductions) ||
+    !value.deductions.every(validStoredDeduction) ||
+    !isStringArray(value.warnings)
+  ) {
+    return false
+  }
 
   if (value.status === 'scored') {
     return (
@@ -256,7 +357,8 @@ export function isV2ScorePayload(value: unknown): value is V2ScorePayload {
     value.rubric_version !== RUBRIC_VERSION ||
     !isPracticeMode(mode) ||
     value.total_max_points !== 100 ||
-    !isRecord(categoryValues)
+    !isRecord(categoryValues) ||
+    !isStringArray(value.warnings)
   ) {
     return false
   }
