@@ -49,9 +49,10 @@ describe('prompt data outcomes', () => {
     })
   })
 
-  it('keeps recent completion on the isolated result-snapshot seam', () => {
+  it('loads recent exclusions only from completed lifecycle rows', () => {
     const source = readFileSync('src/lib/prompts/server.ts', 'utf8')
-    expect(source).toContain("select('prompt_id, prompt_source, score, section_scores')")
+    expect(source).toContain("select('prompt_id, prompt_source, status')")
+    expect(source).toContain(".eq('status', 'done')")
     expect(source).toContain('recentCompletedLibraryPromptIds(data')
     expect(source).not.toContain(".not('score', 'is', null)")
   })

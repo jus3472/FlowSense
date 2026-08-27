@@ -44,6 +44,7 @@ async function loadFilteredScoreAverage(
       .from('attempts')
       .select('score')
       .eq('user_id', userId)
+      .eq('status', 'done')
       .not('score', 'is', null)
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
@@ -71,7 +72,7 @@ export async function loadHistoryPage(
     .from('attempts')
     .select('id')
     .eq('user_id', userId)
-    .or('score.not.is.null,section_scores.not.is.null')
+    .eq('status', 'done')
     .limit(1)
 
   const averageResult =
@@ -88,7 +89,7 @@ export async function loadHistoryPage(
       'id, created_at, prompt_text, score, section_scores, practice_mode, prompt_source, retry_of_attempt_id',
     )
     .eq('user_id', userId)
-    .or('score.not.is.null,section_scores.not.is.null')
+    .eq('status', 'done')
   pageQuery = applyMetadataFilter(pageQuery, historyQuery.metadata)
   if (historyQuery.score !== 'all') {
     if (averageResult.average === null) {

@@ -32,18 +32,19 @@ export default async function HomePage() {
     supabase
       .from('attempts')
       .select(
-        'id, prompt_id, prompt_text, prompt_source, transcript, duration_ms, created_at, score, section_scores, metrics, content_result',
+        'id, prompt_id, prompt_text, prompt_source, transcript, duration_ms, created_at, score, section_scores, metrics, content_result, status',
       )
       .eq('user_id', user.id)
+      .eq('status', 'done')
       .order('created_at', { ascending: false })
       .limit(30),
     supabase
       .from('attempts')
       .select(
-        'id, prompt_text, transcript, duration_ms, created_at, score, section_scores, metrics, content_result',
+        'id, prompt_text, transcript, duration_ms, created_at, score, section_scores, metrics, content_result, status',
       )
       .eq('user_id', user.id)
-      .or('score.not.is.null,section_scores.not.is.null')
+      .eq('status', 'done')
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
       .limit(1)
