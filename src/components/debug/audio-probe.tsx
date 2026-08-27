@@ -57,7 +57,13 @@ const MEDIA_EVENTS = [
  * between "playback is broken" and knowing which of readyState, duration, or
  * seekable is the one lying.
  */
-export function AudioProbe({ items }: { items: ProbeItem[] }) {
+export function AudioProbe({
+  items,
+  emptyMessage = 'No attempts with audio to probe.',
+}: {
+  items: ProbeItem[]
+  emptyMessage?: string
+}) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const startedAt = useRef<number>(0)
   const [selected, setSelected] = useState(0)
@@ -140,7 +146,7 @@ export function AudioProbe({ items }: { items: ProbeItem[] }) {
   }
 
   if (!item) {
-    return <p className="text-muted text-base">No attempts with audio to probe.</p>
+    return <p className="text-muted text-base">{emptyMessage}</p>
   }
 
   return (

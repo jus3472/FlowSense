@@ -26,6 +26,11 @@ export function customPracticeHandoffSecret(): string {
   return supabaseSecretKey()
 }
 
+/** Diagnostic routes are local/test tools and must not exist in production. */
+export function audioDebugRouteEnabled(): boolean {
+  return process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test'
+}
+
 /** Wired up in a later prompt, when transcription lands. */
 export function deepgramApiKey(): string {
   return required('DEEPGRAM_API_KEY', process.env.DEEPGRAM_API_KEY)
