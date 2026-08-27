@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { MIN_PROCESSABLE_RECORDING_MS } from '../../src/lib/recording/capture-readiness'
 
 const MOCK = 'http://127.0.0.1:54321'
 const APP = 'http://127.0.0.1:3100'
@@ -50,6 +51,8 @@ async function processingMocks(page: Page, failure = false) {
 async function recordOne(page: Page) {
   await page.getByRole('button', { name: "I'm ready" }).click()
   await expect(page.getByText('Recording', { exact: true })).toBeVisible({ timeout: 10_000 })
+  // This is an intentional capture duration, not a wait for UI state.
+  await page.waitForTimeout(MIN_PROCESSABLE_RECORDING_MS + 150)
   await page.getByRole('button', { name: 'Stop' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Transcribing' })).toBeVisible()
   await expect(page.getByRole('status').filter({ hasText: 'Scoring' })).toBeVisible()

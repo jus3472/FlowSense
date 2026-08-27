@@ -26,12 +26,19 @@ function round(value: number, places: number): number {
  */
 export function createAudioSampler(stream: MediaStream): AudioSampler {
   const context = new AudioContext()
-  const source = context.createMediaStreamSource(stream)
-  const analyser = context.createAnalyser()
-  analyser.fftSize = FFT_SIZE
-  // Raw frames. Smoothing here would quietly corrupt the measurements later.
-  analyser.smoothingTimeConstant = 0
-  source.connect(analyser)
+  let source: MediaStreamAudioSourceNode
+  let analyser: AnalyserNode
+  try {
+    source = context.createMediaStreamSource(stream)
+    analyser = context.createAnalyser()
+    analyser.fftSize = FFT_SIZE
+    // Raw frames. Smoothing here would quietly corrupt the measurements later.
+    analyser.smoothingTimeConstant = 0
+    source.connect(analyser)
+  } catch (error) {
+    void context.close().catch(() => undefined)
+    throw error
+  }
 
   const frame = new Float32Array(analyser.fftSize)
   const amplitude: AmplitudeSample[] = []
@@ -40,8 +47,10 @@ export function createAudioSampler(stream: MediaStream): AudioSampler {
   let timer: ReturnType<typeof setInterval> | null = null
   let startedAt = 0
   let latestRms = 0
+  let closed = false
 
   const sample = () => {
+    if (closed) return
     analyser.getFloatTimeDomainData(frame)
     const tMs = Math.round(performance.now() - startedAt)
 
@@ -55,7 +64,7 @@ export function createAudioSampler(stream: MediaStream): AudioSampler {
 
   return {
     start() {
-      if (timer !== null) return
+      if (closed || timer !== null) return
       startedAt = performance.now()
       timer = setInterval(sample, SAMPLE_INTERVAL_MS)
     },
@@ -71,10 +80,25 @@ export function createAudioSampler(stream: MediaStream): AudioSampler {
       return latestRms
     },
     close() {
-      this.stop()
+      if (closed) return
+      closed = true
+      if (timer !== null) {
+        clearInterval(timer)
+        timer = null
+      }
+      latestRms = 0
       try {
         source.disconnect()
-        void context.close()
+      } catch {
+        // Already disconnected by the browser during teardown.
+      }
+      try {
+        analyser.disconnect()
+      } catch {
+        // Already disconnected by the browser during teardown.
+      }
+      try {
+        void context.close().catch(() => undefined)
       } catch {
         // Already closed by the browser during teardown.
       }
