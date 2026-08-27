@@ -12,7 +12,16 @@ const USERS = {
   owner: '20000000-0000-4000-8000-000000000002',
   other: '30000000-0000-4000-8000-000000000003',
 }
+const UPLOAD_ATTEMPTS = {
+  owner: '50000000-0000-4000-8000-000000000005',
+  other: '60000000-0000-4000-8000-000000000006',
+  corrupt: '70000000-0000-4000-8000-000000000007',
+}
 const LEGACY_CREATED_AT = '2024-02-03T04:05:06.000Z'
+
+function recordingPath(userId, attemptId) {
+  return `${userId}/${attemptId}.webm`
+}
 
 loadEnvFile('.env.local')
 
@@ -128,6 +137,12 @@ async function applyAll(migrations) {
   for (const migration of migrations) await applyMigration(client, migration)
 }
 
+async function reapplyStorageHardening(migrations, label) {
+  const migration = migrations.find(({ name }) => name === 'recording_storage_rls')
+  assert(migration, `${label}: recording storage hardening migration is missing`)
+  await applyMigration(client, migration)
+}
+
 async function assertPromptCoverage(label) {
   const summary = await client.query(`
     select count(*)::integer as total,
@@ -201,6 +216,33 @@ async function assertAttemptSecurity(label) {
   `)
   assert(rls.rows[0]?.relrowsecurity === true, `${label}: attempts RLS must stay enabled`)
 
+  const storagePrivileges = await client.query(`
+    select privilege_type
+    from information_schema.role_table_grants
+    where table_schema = 'storage'
+      and table_name = 'objects'
+      and grantee = 'authenticated'
+    order by privilege_type
+  `)
+  assert(
+    JSON.stringify(storagePrivileges.rows.map((row) => row.privilege_type)) ===
+      '["INSERT","SELECT","UPDATE"]',
+    `${label}: authenticated storage privileges must exclude DELETE`,
+  )
+
+  const storagePolicies = await client.query(`
+    select policyname, cmd
+    from pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname like 'recordings_%'
+    order by cmd
+  `)
+  assert(
+    JSON.stringify(storagePolicies.rows.map((row) => row.cmd)) === '["INSERT","SELECT","UPDATE"]',
+    `${label}: recording policies must exclude authenticated DELETE`,
+  )
+
   const ownAttempt = await client.query(
     `insert into public.attempts (user_id, prompt_text, status, finished_at)
      values ($1, 'Owned snapshot', 'done', now())
@@ -211,6 +253,27 @@ async function assertAttemptSecurity(label) {
     `insert into public.attempts (user_id, prompt_text, status, finished_at)
      values ($1, 'Other snapshot', 'done', now())`,
     [USERS.other],
+  )
+  const ownerStoragePath = recordingPath(USERS.owner, UPLOAD_ATTEMPTS.owner)
+  const otherStoragePath = recordingPath(USERS.other, UPLOAD_ATTEMPTS.other)
+  const corruptCrossUserPath = recordingPath(USERS.other, UPLOAD_ATTEMPTS.corrupt)
+  await client.query(
+    `insert into public.attempts (id, user_id, prompt_text, status, metrics)
+     values ($1, $2, 'Owned upload', 'uploading',
+       jsonb_build_object('upload', jsonb_build_object('storage_path', $3::text)))`,
+    [UPLOAD_ATTEMPTS.owner, USERS.owner, ownerStoragePath],
+  )
+  await client.query(
+    `insert into public.attempts (id, user_id, prompt_text, status, metrics)
+     values ($1, $2, 'Other upload', 'uploading',
+       jsonb_build_object('upload', jsonb_build_object('storage_path', $3::text)))`,
+    [UPLOAD_ATTEMPTS.other, USERS.other, otherStoragePath],
+  )
+  await client.query(
+    `insert into public.attempts (id, user_id, prompt_text, status, metrics)
+     values ($1, $2, 'Corrupt legacy upload path', 'uploading',
+       jsonb_build_object('upload', jsonb_build_object('storage_path', $3::text)))`,
+    [UPLOAD_ATTEMPTS.corrupt, USERS.owner, corruptCrossUserPath],
   )
 
   await setAuthenticatedUser(USERS.owner)
@@ -253,29 +316,155 @@ async function assertAttemptSecurity(label) {
       `${label}: authenticated attempt insert`,
     )
 
-    await client.query(
+    const uploaded = await client.query(
       `insert into storage.objects (bucket_id, name)
-       values ('recordings', $1)`,
-      [`${USERS.owner}/owned.webm`],
+       values ('recordings', $1)
+       returning name`,
+      [ownerStoragePath],
     )
+    assert(uploaded.rowCount === 1, `${label}: exact active attempt upload was denied`)
+
+    const retried = await client.query(
+      `update storage.objects
+       set name = name
+       where bucket_id = 'recordings' and name = $1
+       returning name`,
+      [ownerStoragePath],
+    )
+    assert(retried.rowCount === 1, `${label}: active upload retry was denied`)
+
+    await expectPgError(
+      () =>
+        client.query(
+          `insert into storage.objects (bucket_id, name)
+           values ('recordings', $1)`,
+          [`${USERS.owner}/orphan.webm`],
+        ),
+      '42501',
+      `${label}: arbitrary owner-prefix upload`,
+    )
+    await expectPgError(
+      () =>
+        client.query(
+          `insert into storage.objects (bucket_id, name)
+           values ('recordings', $1)`,
+          [otherStoragePath],
+        ),
+      '42501',
+      `${label}: cross-user upload`,
+    )
+    await expectPgError(
+      () =>
+        client.query(
+          `insert into storage.objects (bucket_id, name)
+           values ('recordings', $1)`,
+          [corruptCrossUserPath],
+        ),
+      '42501',
+      `${label}: corrupt owned attempt cross-user upload`,
+    )
+    await expectPgError(
+      () =>
+        client.query(
+          `update storage.objects
+           set name = $2
+           where bucket_id = 'recordings' and name = $1`,
+          [ownerStoragePath, `${USERS.owner}/renamed.webm`],
+        ),
+      '42501',
+      `${label}: upload path rewrite`,
+    )
+
     const storageRows = await client.query('select name from storage.objects')
-    assert(storageRows.rowCount === 1, `${label}: owner storage read or upload failed`)
+    assert(
+      storageRows.rowCount === 1 && storageRows.rows[0]?.name === ownerStoragePath,
+      `${label}: owner storage read or upload failed`,
+    )
   } finally {
     await resetRole()
   }
 
-  await client.query(
-    `insert into storage.objects (bucket_id, name)
-     values ('recordings', $1)`,
-    [`${USERS.other}/other.webm`],
-  )
+  await client.query('set role service_role')
+  try {
+    const serviceInsert = await client.query(
+      `insert into storage.objects (bucket_id, name)
+       values ('recordings', $1)
+       returning name`,
+      [otherStoragePath],
+    )
+    assert(serviceInsert.rowCount === 1, `${label}: service-role storage insert failed`)
+  } finally {
+    await resetRole()
+  }
+
   await setAuthenticatedUser(USERS.owner)
   try {
     const storageRows = await client.query('select name from storage.objects')
     assert(
-      storageRows.rows.every((row) => row.name.startsWith(`${USERS.owner}/`)),
+      storageRows.rowCount === 1 && storageRows.rows[0]?.name === ownerStoragePath,
       `${label}: owner could read another user's recording`,
     )
+  } finally {
+    await resetRole()
+  }
+
+  await client.query("update public.attempts set status = 'transcribing' where id = $1", [
+    UPLOAD_ATTEMPTS.owner,
+  ])
+  await setAuthenticatedUser(USERS.owner)
+  try {
+    const postUploadRewrite = await client.query(
+      `update storage.objects
+       set name = name
+       where bucket_id = 'recordings' and name = $1
+       returning name`,
+      [ownerStoragePath],
+    )
+    assert(
+      postUploadRewrite.rowCount === 0,
+      `${label}: processed recording remained authenticated-updateable`,
+    )
+    await expectPgError(
+      () =>
+        client.query(
+          `insert into storage.objects (bucket_id, name)
+           values ('recordings', $1)`,
+          [ownerStoragePath],
+        ),
+      '42501',
+      `${label}: processed recording reinsert`,
+    )
+    await expectPgError(
+      () =>
+        client.query(
+          `delete from storage.objects
+           where bucket_id = 'recordings' and name = $1`,
+          [ownerStoragePath],
+        ),
+      '42501',
+      `${label}: authenticated recording delete`,
+    )
+  } finally {
+    await resetRole()
+  }
+
+  await client.query('set role service_role')
+  try {
+    const serviceUpdate = await client.query(
+      `update storage.objects
+       set name = name
+       where bucket_id = 'recordings' and name = $1
+       returning name`,
+      [ownerStoragePath],
+    )
+    assert(serviceUpdate.rowCount === 1, `${label}: service-role recording update failed`)
+    const serviceDelete = await client.query(
+      `delete from storage.objects
+       where bucket_id = 'recordings' and name = $1
+       returning name`,
+      [ownerStoragePath],
+    )
+    assert(serviceDelete.rowCount === 1, `${label}: service-role recording delete failed`)
   } finally {
     await resetRole()
   }
@@ -377,6 +566,7 @@ async function runFresh(migrations) {
   await seedAuthUser(USERS.owner, 'Fresh Owner')
   await seedAuthUser(USERS.other, 'Fresh Other')
   await applyAll(migrations)
+  await reapplyStorageHardening(migrations, 'fresh')
 
   const profiles = await client.query('select id from public.profiles order by id')
   assert(profiles.rowCount === 3, 'fresh: existing auth users were not backfilled')
@@ -430,6 +620,7 @@ async function runUpgrade(migrations) {
     [USERS.owner, JSON.stringify({ version: 'v2.score.1', total_earned_points: null })],
   )
   await applyAll(migrations.slice(6))
+  await reapplyStorageHardening(migrations, 'upgrade')
 
   const preserved = await client.query(
     `select id, prompt_text, transcript, duration_ms, score, section_scores, metrics,
@@ -485,7 +676,7 @@ async function runUpgrade(migrations) {
 try {
   await client.connect()
   const migrations = loadMigrations()
-  assert(migrations.length >= 7, 'Expected the full migration chain including the foundation.')
+  assert(migrations.length >= 8, 'Expected the full migration chain including storage hardening.')
   await runFresh(migrations)
   await runUpgrade(migrations)
   console.log('Migration integration harness passed.')
