@@ -30,6 +30,7 @@ import {
   createAudioSampler,
   type AudioSampler,
 } from '@/lib/recording/audio-sampler'
+import { assessCaptureReadiness } from '@/lib/recording/capture-readiness'
 import { countdownSecondsFor } from '@/lib/recording/countdown'
 import {
   INITIAL_PROCESSING_STATE,
@@ -80,8 +81,6 @@ export function RecordFlow({ session }: RecordFlowProps) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [recording, setRecording] = useState<AttemptRecording | null>(null)
 
-  useActiveRecordingExitGuard(phase.name === 'recording' || phase.name === 'processing')
-
   // Everything below survives re-renders without driving them, and gives the
   // retry path a way to skip work that already succeeded.
   const streamRef = useRef<MediaStream | null>(null)
@@ -91,21 +90,42 @@ export function RecordFlow({ session }: RecordFlowProps) {
   const attemptRef = useRef<{ attemptId: string; storagePath: string } | null>(null)
   const uploadedRef = useRef(false)
   const savedRef = useRef(false)
+  const mountedRef = useRef(false)
+  const requestingMicrophoneRef = useRef(false)
 
   const releaseStream = useCallback(() => {
-    samplerRef.current?.close()
+    const sampler = samplerRef.current
     samplerRef.current = null
+    sampler?.close()
     const stream = streamRef.current
+    streamRef.current = null
     if (stream) {
-      for (const track of stream.getTracks()) track.stop()
-      streamRef.current = null
+      for (const track of stream.getTracks()) {
+        try {
+          track.stop()
+        } catch {
+          // The browser already ended this track during teardown.
+        }
+      }
     }
   }, [])
+
+  const cancelCaptureForHistoryTraversal = useCallback(() => {
+    recorderRef.current?.cancel()
+    releaseStream()
+  }, [releaseStream])
+
+  const { allowNextNavigation } = useActiveRecordingExitGuard(
+    phase.name === 'recording' || phase.name === 'processing',
+    cancelCaptureForHistoryTraversal,
+  )
 
   // Covers navigating away mid recording: the tracks stop and the microphone
   // indicator goes out rather than staying lit on an abandoned page.
   useEffect(() => {
+    mountedRef.current = true
     return () => {
+      mountedRef.current = false
       recorderRef.current?.cancel()
       releaseStream()
       if (objectUrlRef.current) {
@@ -163,15 +183,25 @@ export function RecordFlow({ session }: RecordFlowProps) {
 
       const final = await runProcessingPipeline(steps, setProcessing)
       const attempt = attemptRef.current
-      if (final.stage === 'done' && attempt) {
-        router.replace(`/attempts/${attempt.attemptId}`)
+      if (final.stage === 'done' && attempt && mountedRef.current) {
+        const resultHref = `/attempts/${attempt.attemptId}` as const
+        allowNextNavigation(resultHref)
+        router.replace(resultHref)
       }
     },
-    [router, session],
+    [allowNextNavigation, router, session],
   )
 
   const handleRecorded = useCallback(
     (recording: AttemptRecording) => {
+      if (!mountedRef.current) return
+      const readiness = assessCaptureReadiness(recording)
+      if (!readiness.ok) {
+        recorderRef.current = null
+        setPhase({ name: 'recorder-failed', message: readiness.message })
+        return
+      }
+
       const url = URL.createObjectURL(recording.blob)
       objectUrlRef.current = url
       setRecording(recording)
@@ -194,43 +224,64 @@ export function RecordFlow({ session }: RecordFlowProps) {
         // Cancellation is the unmount path and needs no screen.
         if (error instanceof RecorderError && error.message.includes('cancelled')) return
         releaseStream()
-        setPhase({ name: 'recorder-failed', message: describeError(error) })
+        if (mountedRef.current) {
+          setPhase({ name: 'recorder-failed', message: describeError(error) })
+        }
       })
   }, [handleRecorded, releaseStream])
 
   const start = useCallback(async () => {
+    if (!mountedRef.current || requestingMicrophoneRef.current) return
     if (!support.ok) {
       setPhase({ name: 'unavailable', reason: support.reason })
       return
     }
 
+    requestingMicrophoneRef.current = true
     setPhase({ name: 'requesting' })
 
     let stream: MediaStream
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     } catch (error) {
-      const name = error instanceof DOMException ? error.name : ''
-      setPhase(
-        name === 'NotFoundError' || name === 'DevicesNotFoundError'
-          ? { name: 'unavailable', reason: 'missing' }
-          : { name: 'blocked' },
-      )
+      if (mountedRef.current) {
+        const name = error instanceof DOMException ? error.name : ''
+        setPhase(
+          name === 'NotFoundError' || name === 'DevicesNotFoundError'
+            ? { name: 'unavailable', reason: 'missing' }
+            : { name: 'blocked' },
+        )
+      }
+      requestingMicrophoneRef.current = false
+      return
+    }
+
+    requestingMicrophoneRef.current = false
+    if (!mountedRef.current) {
+      for (const track of stream.getTracks()) track.stop()
       return
     }
 
     streamRef.current = stream
-    const sampler = createAudioSampler(stream)
-    samplerRef.current = sampler
+    try {
+      const sampler = createAudioSampler(stream)
+      samplerRef.current = sampler
 
-    // One recorder, one stream, one attempt. AttemptRecorder refuses a second start.
-    recorderRef.current = new AttemptRecorder({
-      mimeType: support.mimeType,
-      createRecorder: (mimeType) => new MediaRecorder(stream, { mimeType }),
-      sampler,
-      maxDurationMs: MAX_RECORDING_MS,
-      onRelease: releaseStream,
-    })
+      // One recorder, one stream, one attempt. AttemptRecorder refuses a second start.
+      recorderRef.current = new AttemptRecorder({
+        mimeType: support.mimeType,
+        createRecorder: (mimeType) => new MediaRecorder(stream, { mimeType }),
+        sampler,
+        maxDurationMs: MAX_RECORDING_MS,
+        onRelease: releaseStream,
+      })
+    } catch (error) {
+      releaseStream()
+      if (mountedRef.current) {
+        setPhase({ name: 'recorder-failed', message: describeError(error) })
+      }
+      return
+    }
 
     setPhase({ name: 'countdown' })
   }, [releaseStream, support])

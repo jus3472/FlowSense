@@ -14,6 +14,7 @@ class FakeMediaRecorder implements MediaRecorderLike {
   onstop: ((event: Event) => void) | null = null
   onerror: ((event: ErrorEvent) => void) | null = null
   startCalls = 0
+  stopCalls = 0
 
   start(): void {
     this.startCalls += 1
@@ -21,6 +22,7 @@ class FakeMediaRecorder implements MediaRecorderLike {
   }
 
   stop(): void {
+    this.stopCalls += 1
     this.state = 'inactive'
     this.emitChunk('audio-bytes')
     this.onstop?.(new Event('stop'))
@@ -217,6 +219,7 @@ describe('AttemptRecorder', () => {
     recorder.stop()
     await promise
     expect(onRelease).toHaveBeenCalledTimes(1)
+    expect(recorder.isStarted).toBe(true)
   })
 
   it('releases the stream and rejects when cancelled mid recording', async () => {
@@ -227,6 +230,35 @@ describe('AttemptRecorder', () => {
 
     await expect(promise).rejects.toBeInstanceOf(RecorderError)
     expect(onRelease).toHaveBeenCalledTimes(1)
-    expect(sampler.stops).toBeGreaterThan(0)
+    expect(sampler.stops).toBe(1)
+  })
+
+  it('detaches every MediaRecorder handler after a normal stop', async () => {
+    const { recorder, created } = build()
+    const promise = recorder.start()
+    recorder.stop()
+    await promise
+
+    expect(created[0]?.ondataavailable).toBeNull()
+    expect(created[0]?.onstop).toBeNull()
+    expect(created[0]?.onerror).toBeNull()
+    expect(created[0]?.stopCalls).toBe(1)
+  })
+
+  it('tears down exactly once when the recorder reports an error', async () => {
+    const onRelease = vi.fn()
+    const { recorder, created, sampler } = build({ onRelease })
+    const promise = recorder.start()
+    created[0]?.onerror?.({} as ErrorEvent)
+
+    await expect(promise).rejects.toBeInstanceOf(RecorderError)
+    recorder.cancel()
+
+    expect(created[0]?.stopCalls).toBe(1)
+    expect(created[0]?.ondataavailable).toBeNull()
+    expect(created[0]?.onstop).toBeNull()
+    expect(created[0]?.onerror).toBeNull()
+    expect(sampler.stops).toBe(1)
+    expect(onRelease).toHaveBeenCalledTimes(1)
   })
 })

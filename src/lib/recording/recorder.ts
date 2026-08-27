@@ -78,6 +78,8 @@ export class AttemptRecorder {
   private durationMs = 0
   private stopRequested = false
   private settled = false
+  private released = false
+  private samplerStopped = false
 
   constructor(private readonly options: AttemptRecorderOptions) {
     this.maxDurationMs = options.maxDurationMs ?? MAX_RECORDING_MS
@@ -147,11 +149,15 @@ export class AttemptRecorder {
     this.stopRequested = true
     this.clearAutoStop()
     this.durationMs = Math.max(0, Date.now() - this.startedAtMs)
-    this.options.sampler.stop()
+    this.stopSampler()
 
     const recorder = this.recorder
     if (recorder && recorder.state !== 'inactive') {
-      recorder.stop()
+      try {
+        recorder.stop()
+      } catch (error) {
+        this.fail(error)
+      }
     } else {
       this.finish()
     }
@@ -160,32 +166,38 @@ export class AttemptRecorder {
   /** Stops without producing a recording, for unmount mid recording. */
   cancel(): void {
     if (this.settled) return
+    const reject = this.rejectResult
     // Settle first. Stopping the recorder below fires onstop, and without the
     // flag already set that path would resolve the promise this call is about
     // to reject.
     this.settle()
     this.stopRequested = true
-    this.options.sampler.stop()
+    this.stopSampler()
+    this.detachRecorderHandlers()
     try {
       if (this.recorder && this.recorder.state !== 'inactive') this.recorder.stop()
     } catch {
       // The recorder was already torn down by the browser. Nothing to undo.
     }
     this.release()
-    this.rejectResult?.(new RecorderError('Recording was cancelled.'))
+    this.clearResultHandlers()
+    reject?.(new RecorderError('Recording was cancelled.'))
   }
 
   private finish(): void {
     if (this.settled) return
+    const resolve = this.resolveResult
+    this.settle()
+    this.stopSampler()
 
-    // Read the timelines before settling. settle() runs onRelease, which tears
-    // down the sampler and the stream behind it.
+    // Read the timelines before release tears down the sampler and stream.
     const { amplitude, pitch } = this.options.sampler.snapshot()
     const blob = new Blob(this.chunks, { type: this.actualMimeType })
-    this.settle()
+    this.detachRecorderHandlers()
     this.release()
+    this.clearResultHandlers()
 
-    this.resolveResult?.({
+    resolve?.({
       blob,
       mimeType: this.actualMimeType,
       durationMs: this.durationMs || Math.max(0, Date.now() - this.startedAtMs),
@@ -197,10 +209,18 @@ export class AttemptRecorder {
 
   private fail(error: unknown): void {
     if (this.settled) return
+    const reject = this.rejectResult
     this.settle()
-    this.options.sampler.stop()
+    this.stopSampler()
+    this.detachRecorderHandlers()
+    try {
+      if (this.recorder && this.recorder.state !== 'inactive') this.recorder.stop()
+    } catch {
+      // The recorder is already failing. Releasing its stream is sufficient.
+    }
     this.release()
-    this.rejectResult?.(error)
+    this.clearResultHandlers()
+    reject?.(error)
   }
 
   /** Closes the door on every other completion path. */
@@ -210,7 +230,27 @@ export class AttemptRecorder {
   }
 
   private release(): void {
+    if (this.released) return
+    this.released = true
     this.options.onRelease?.()
+  }
+
+  private stopSampler(): void {
+    if (this.samplerStopped) return
+    this.samplerStopped = true
+    this.options.sampler.stop()
+  }
+
+  private detachRecorderHandlers(): void {
+    if (!this.recorder) return
+    this.recorder.ondataavailable = null
+    this.recorder.onstop = null
+    this.recorder.onerror = null
+  }
+
+  private clearResultHandlers(): void {
+    this.resolveResult = null
+    this.rejectResult = null
   }
 
   private clearAutoStop(): void {
