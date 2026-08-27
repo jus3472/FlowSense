@@ -18,6 +18,8 @@ describe('practice hub routes', () => {
     expect(modePage).toContain("from '@/lib/prompts/server'")
     expect(modePage).toContain('parsePracticeMode')
     expect(modePage).toContain('if (!mode) notFound()')
+    expect(modePage).toContain('href={practiceBrowseHref(mode)}')
+    expect(modePage).not.toContain('href={`/practice/${mode}`}')
     expect(modePage).toContain('getPromptBrowseData(')
     expect(modePage).not.toContain('getPromptCollections(')
     expect(modePage).not.toContain('getPromptLibrary(')

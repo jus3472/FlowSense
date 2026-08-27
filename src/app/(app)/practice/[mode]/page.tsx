@@ -11,6 +11,7 @@ import {
   formatExpectedDuration,
   parsePracticeBrowseParams,
   parsePracticeMode,
+  practiceBrowseHref,
   recordHrefForPrompt,
 } from '@/lib/practice/navigation'
 import { recentPromptIdsOrEmpty } from '@/lib/prompts/data'
@@ -58,7 +59,7 @@ export default async function PracticeModePage({
           title="Those filters are not available"
           description="Clear the filters and choose from the current practice library."
         >
-          <ButtonLink href={`/practice/${mode}`} variant="secondary">
+          <ButtonLink href={practiceBrowseHref(mode)} variant="secondary">
             Clear filters
           </ButtonLink>
         </ErrorState>
