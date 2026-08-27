@@ -1,7 +1,7 @@
 import type { ProgressRetryAttemptInput } from '@/lib/progress/retries'
 
 export type ProgressAttemptRowsOutcome =
-  | { status: 'ready'; attempts: readonly ProgressRetryAttemptInput[] }
+  | { status: 'ready'; attempts: readonly ProgressRetryAttemptInput[]; truncated: boolean }
   | { status: 'failure'; reason: 'query' | 'invalid_response' }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -25,13 +25,20 @@ function parseAttemptRow(value: unknown): ProgressRetryAttemptInput | null {
   }
 }
 
-/** Keeps a legitimate empty query distinct from a query or response-shape failure. */
+/**
+ * Keeps a legitimate empty query distinct from failure and removes the final
+ * lookahead row from a newest-first bounded response.
+ */
 export function readProgressAttemptRows(
   data: unknown,
   queryFailed: boolean,
+  includedAttemptLimit: number,
 ): ProgressAttemptRowsOutcome {
   if (queryFailed) return { status: 'failure', reason: 'query' }
   if (!Array.isArray(data)) return { status: 'failure', reason: 'invalid_response' }
+  if (!Number.isSafeInteger(includedAttemptLimit) || includedAttemptLimit < 1) {
+    return { status: 'failure', reason: 'invalid_response' }
+  }
 
   const attempts: ProgressRetryAttemptInput[] = []
   for (const row of data) {
@@ -39,7 +46,11 @@ export function readProgressAttemptRows(
     if (!attempt) return { status: 'failure', reason: 'invalid_response' }
     attempts.push(attempt)
   }
-  return { status: 'ready', attempts }
+  return {
+    status: 'ready',
+    attempts: attempts.slice(0, includedAttemptLimit),
+    truncated: attempts.length > includedAttemptLimit,
+  }
 }
 
 /** Returns only a bounded diagnostic code, never provider text or row contents. */
