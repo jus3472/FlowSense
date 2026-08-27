@@ -6,12 +6,19 @@ const baselineSecurityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
 ]
 
+function shouldEmitHsts(): boolean {
+  const vercelEnvironment = process.env.VERCEL_ENV
+  return vercelEnvironment === undefined
+    ? process.env.NODE_ENV === 'production'
+    : vercelEnvironment === 'production'
+}
+
 const nextConfig: NextConfig = {
   typedRoutes: true,
   reactStrictMode: true,
   async headers() {
     const headers = [...baselineSecurityHeaders]
-    if (process.env.NODE_ENV === 'production') {
+    if (shouldEmitHsts()) {
       // Preload is intentionally omitted because it is a long-lived external commitment.
       headers.push({ key: 'Strict-Transport-Security', value: 'max-age=31536000' })
     }
