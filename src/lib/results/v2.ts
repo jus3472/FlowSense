@@ -47,6 +47,11 @@ export interface V2CategoryView {
   result: V2PersistedCategoryScore
 }
 
+export interface V2CategoryStatusView {
+  label: string
+  description: string | null
+}
+
 type ScoredV2CategoryView = V2CategoryView & {
   result: V2PersistedCategoryScore & { status: 'scored'; component: number }
 }
@@ -57,6 +62,27 @@ export function v2CategoryViews(payload: V2ScorePayload): V2CategoryView[] {
     label: V2_CATEGORY_LABELS[category],
     result: payload.categories[category],
   }))
+}
+
+/** Maps every persisted category state to literal, non-scored presentation copy. */
+export function v2CategoryStatusView(result: V2PersistedCategoryScore): V2CategoryStatusView {
+  switch (result.status) {
+    case 'scored':
+      return {
+        label: `${result.earned_points} / ${result.max_points}`,
+        description: null,
+      }
+    case 'not_checked':
+      return {
+        label: 'Not checked',
+        description: 'This check was available, but it did not return a result.',
+      }
+    case 'unavailable':
+      return {
+        label: 'Unavailable',
+        description: 'The evidence needed for this category was unavailable.',
+      }
+  }
 }
 
 function scoredCategories(payload: V2ScorePayload): ScoredV2CategoryView[] {
@@ -208,7 +234,20 @@ export function v2OverallTakeaway(payload: V2ScorePayload): string {
     }
   }
   if (payload.total_earned_points === null) {
-    return 'Some categories were not checked, so the overall result is unavailable.'
+    const statuses = v2CategoryViews(payload).map(({ result }) => result.status)
+    const hasNotChecked = statuses.includes('not_checked')
+    const hasUnavailable = statuses.includes('unavailable')
+
+    if (hasNotChecked && hasUnavailable) {
+      return 'Some categories were not checked, and some lacked required evidence, so the overall result is unavailable.'
+    }
+    if (hasUnavailable) {
+      return 'Required evidence was unavailable for some categories, so the overall result is unavailable.'
+    }
+    if (hasNotChecked) {
+      return 'Some categories were not checked, so the overall result is unavailable.'
+    }
+    return 'The overall result is unavailable.'
   }
   if (payload.total_earned_points < payload.total_max_points) {
     return `This response has ${payload.total_earned_points} of ${payload.total_max_points} points.`

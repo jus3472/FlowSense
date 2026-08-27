@@ -102,6 +102,126 @@ describe('transcript highlights', () => {
     expect(highlights[0]?.label).toBe('Explained your reasoning')
   })
 
+  it('allocates one deterministic occurrence for one repeated quoted finding', () => {
+    const transcript = 'Clear first, then clear again.'
+    const highlights = collectHighlights(
+      input({
+        transcript,
+        words: wordsFrom(transcript),
+        extraSpans: [{ text: 'clear', category: 'imprecise' }],
+      }),
+    )
+
+    expect(highlights).toEqual([
+      { from: 0, to: 5, kind: 'word_choice', label: 'Word choice, imprecise' },
+    ])
+  })
+
+  it('allocates two independent findings to two distinct repeated occurrences', () => {
+    const transcript = 'Clear first, then clear again.'
+    const highlights = collectHighlights(
+      input({
+        transcript,
+        words: wordsFrom(transcript),
+        extraSpans: [{ text: 'clear', category: 'imprecise' }],
+        checks: checks({
+          explained: {
+            passed: false,
+            severity: 'minor',
+            quote: 'clear',
+            observation: 'The reason was not included.',
+            suggestion: null,
+          },
+        }),
+      }),
+    )
+
+    expect(highlights.map(({ from, to, label }) => ({ from, to, label }))).toEqual([
+      { from: 0, to: 5, label: 'Word choice, imprecise' },
+      { from: 18, to: 23, label: 'Explained your reasoning' },
+    ])
+  })
+
+  it('deduplicates repeated stored word-choice findings and rejects overlaps', () => {
+    const transcript = 'Clear first, then clear again.'
+    const highlights = collectHighlights(
+      input({
+        transcript,
+        words: wordsFrom(transcript),
+        extraSpans: [
+          { text: 'clear', category: 'imprecise' },
+          { text: 'Clear', category: 'padding' },
+          { text: 'clear first', category: 'padding' },
+        ],
+        checks: checks({
+          word_choice: {
+            passed: false,
+            severity: 'minor',
+            quote: 'clear',
+            observation: 'Use a specific description.',
+            suggestion: null,
+          },
+        }),
+      }),
+    )
+
+    expect(highlights).toEqual([
+      { from: 0, to: 5, kind: 'word_choice', label: 'Word choice, imprecise' },
+    ])
+  })
+
+  it('caps repetition marks at the occurrences stored in mechanical evidence', () => {
+    const transcript = 'Make it clear, then make it clear, and make it clear.'
+    const highlights = collectHighlights(
+      input({
+        transcript,
+        words: wordsFrom(transcript),
+        checks: checks({
+          no_repetition: {
+            passed: false,
+            severity: 'clear',
+            quote: 'make it clear',
+            observation: 'The phrase repeated.',
+            suggestion: null,
+          },
+        }),
+        repeatedPhrases: [{ phrase: 'make it clear', count: 2 }],
+      }),
+    )
+
+    expect(highlights).toHaveLength(2)
+    expect(highlights.map(({ from, to }) => transcript.slice(from, to))).toEqual([
+      'Make it clear',
+      'make it clear',
+    ])
+  })
+
+  it('uses stored repetition evidence when the provider finding has no quote', () => {
+    const transcript = 'Make it clear, then make it clear, and make it clear.'
+    const highlights = collectHighlights(
+      input({
+        transcript,
+        words: wordsFrom(transcript),
+        checks: checks({
+          no_repetition: {
+            passed: false,
+            severity: 'clear',
+            quote: null,
+            observation: 'The phrase repeated.',
+            suggestion: null,
+          },
+        }),
+        repeatedPhrases: [{ phrase: 'make it clear', count: 2 }],
+      }),
+    )
+
+    expect(highlights).toHaveLength(2)
+    expect(highlights.map(({ from, to }) => transcript.slice(from, to))).toEqual([
+      'Make it clear',
+      'make it clear',
+    ])
+  })
+
   it('merges touching spans with the same label into one continuous highlight', () => {
     // "abc um, uh, def": the two filler tokens sit either side of one space.
     const merged = mergeHighlights(
@@ -164,6 +284,18 @@ describe('transcript highlights', () => {
       'um and then uh',
     )
     expect(merged).toHaveLength(2)
+  })
+
+  it('does not expand an earlier mark with overlapping later evidence', () => {
+    expect(
+      mergeHighlights(
+        [
+          { from: 0, to: 5, kind: 'word_choice', label: 'Word choice' },
+          { from: 3, to: 11, kind: 'explained', label: 'Explained your reasoning' },
+        ],
+        'clear first',
+      ),
+    ).toEqual([{ from: 0, to: 5, kind: 'word_choice', label: 'Word choice' }])
   })
 
   it('marks only pauses that cost points', () => {

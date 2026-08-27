@@ -5,6 +5,7 @@ import {
   formatV2Measurements,
   priorityV2Category,
   strongestV2Category,
+  v2CategoryStatusView,
   v2CategoryViews,
   v2ModeFeedback,
   v2OverallTakeaway,
@@ -101,6 +102,86 @@ describe('v2 result helpers', () => {
       clarity: { ...score.categories.clarity, component: 0.5, earned_points: 10 },
     }
     expect(priorityV2Category({ ...score, categories, total_earned_points: 79 })).toBeNull()
+  })
+
+  it('does not invent a winner when the only scored categories tie in a partial result', () => {
+    const score = payload()
+    const categories = Object.fromEntries(
+      Object.entries(score.categories).map(([category, result]) => [
+        category,
+        category === 'fluency' || category === 'clarity'
+          ? { ...result, component: 0.6, earned_points: Math.round(result.max_points * 0.6) }
+          : {
+              ...result,
+              availability: 'unavailable' as const,
+              status: 'unavailable' as const,
+              component: null,
+              earned_points: null,
+            },
+      ]),
+    ) as V2ScorePayload['categories']
+    const partial = { ...score, categories, total_earned_points: null }
+
+    expect(strongestV2Category(partial)).toBeNull()
+    expect(priorityV2Category(partial)).toBeNull()
+    expect(v2OverallTakeaway(partial)).toBe(
+      'Required evidence was unavailable for some categories, so the overall result is unavailable.',
+    )
+  })
+
+  it('describes mixed partial states without collapsing their meanings', () => {
+    const score = payload()
+    const categories = {
+      ...score.categories,
+      grammar: {
+        ...score.categories.grammar,
+        status: 'not_checked' as const,
+        component: null,
+        earned_points: null,
+      },
+      delivery: {
+        ...score.categories.delivery,
+        availability: 'unavailable' as const,
+        status: 'unavailable' as const,
+        component: null,
+        earned_points: null,
+      },
+    }
+
+    expect(v2OverallTakeaway({ ...score, categories, total_earned_points: null })).toBe(
+      'Some categories were not checked, and some lacked required evidence, so the overall result is unavailable.',
+    )
+  })
+
+  it('maps scored, not-checked, and unavailable states to distinct literal copy', () => {
+    const score = payload()
+    expect(v2CategoryStatusView(score.categories.fluency)).toEqual({
+      label: '22 / 22',
+      description: null,
+    })
+    expect(
+      v2CategoryStatusView({
+        ...score.categories.grammar,
+        status: 'not_checked',
+        component: null,
+        earned_points: null,
+      }),
+    ).toEqual({
+      label: 'Not checked',
+      description: 'This check was available, but it did not return a result.',
+    })
+    expect(
+      v2CategoryStatusView({
+        ...score.categories.clarity,
+        availability: 'unavailable',
+        status: 'unavailable',
+        component: null,
+        earned_points: null,
+      }),
+    ).toEqual({
+      label: 'Unavailable',
+      description: 'The evidence needed for this category was unavailable.',
+    })
   })
 
   it('formats concrete measurement values and mode-specific feedback', () => {
@@ -412,7 +493,7 @@ describe('v2 result helpers', () => {
     expect(v2OverallTakeaway(mechanical)).toBe('165 words per minute.')
     expect(v2OverallTakeaway(score)).toBe('No category lost points in this response.')
     expect(v2OverallTakeaway({ ...score, total_earned_points: null })).toBe(
-      'Some categories were not checked, so the overall result is unavailable.',
+      'The overall result is unavailable.',
     )
   })
 

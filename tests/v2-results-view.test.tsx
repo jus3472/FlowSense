@@ -112,6 +112,47 @@ describe('V2ResultsView', () => {
 
     expect(screen.getByText('Not checked')).toBeInTheDocument()
     expect(screen.getByText('Unavailable')).toBeInTheDocument()
+    expect(
+      screen.getByText('This check was available, but it did not return a result.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('The evidence needed for this category was unavailable.'),
+    ).toBeInTheDocument()
+    for (const points of ['22 / 22', '12 / 12', '18 / 18', '16 / 16']) {
+      expect(screen.getByText(points)).toBeInTheDocument()
+    }
+    expect(screen.queryByText(/null \/|\/ null/)).not.toBeInTheDocument()
+  })
+
+  it('keeps strongest and focus copy neutral for a tied partial result', () => {
+    const score = payload()
+    const categories = Object.fromEntries(
+      Object.entries(score.categories).map(([category, result]) => [
+        category,
+        category === 'fluency' || category === 'clarity'
+          ? { ...result, component: 0.6, earned_points: Math.round(result.max_points * 0.6) }
+          : {
+              ...result,
+              availability: 'unavailable' as const,
+              status: 'unavailable' as const,
+              component: null,
+              earned_points: null,
+            },
+      ]),
+    ) as V2ScorePayload['categories']
+
+    render(
+      <V2ResultsView
+        {...props}
+        audioUrl={null}
+        payload={{ ...score, categories, total_earned_points: null }}
+      />,
+    )
+
+    expect(screen.getByText('No single strongest scored area is available.')).toBeInTheDocument()
+    expect(screen.getByText('No single scored focus area is available.')).toBeInTheDocument()
+    expect(screen.queryByText(/strongest scored area is fluency/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/focus next on fluency/i)).not.toBeInTheDocument()
   })
 
   it('renders unique strongest and focus categories without choosing a tied category', () => {
