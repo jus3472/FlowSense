@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   logAttemptDiagnostic: vi.fn(),
   notFound: vi.fn(),
   readAttemptResult: vi.fn(),
+  reconcileCurrentUserStaleAttempts: vi.fn(),
   redirect: vi.fn(),
   refresh: vi.fn(),
 }))
@@ -20,6 +21,9 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: mocks.createClient }))
 vi.mock('@/lib/attempts/server', () => ({ logAttemptDiagnostic: mocks.logAttemptDiagnostic }))
+vi.mock('@/lib/attempts/reconciliation', () => ({
+  reconcileCurrentUserStaleAttempts: mocks.reconcileCurrentUserStaleAttempts,
+}))
 vi.mock('@/lib/results/attempt-result', () => ({ readAttemptResult: mocks.readAttemptResult }))
 
 vi.mock('@/components/results/results-view', () => ({
@@ -204,6 +208,7 @@ async function renderPage(id = ATTEMPT_ID) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.reconcileCurrentUserStaleAttempts.mockResolvedValue({ status: 'ready', reconciled: [] })
   mocks.notFound.mockImplementation(() => {
     throw NOT_FOUND
   })
@@ -255,6 +260,9 @@ describe('owned attempt result loading', () => {
     expect(screen.queryByRole('link', { name: /try/i })).not.toBeInTheDocument()
     expect(mocks.readAttemptResult).not.toHaveBeenCalled()
     expect(setup.createSignedUrl).not.toHaveBeenCalled()
+    expect(mocks.reconcileCurrentUserStaleAttempts).toHaveBeenCalledWith(USER_ID, {
+      attemptId: ATTEMPT_ID,
+    })
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh result' }))
     expect(mocks.refresh).toHaveBeenCalledTimes(1)

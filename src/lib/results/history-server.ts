@@ -1,5 +1,6 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { reconcileCurrentUserStaleAttempts } from '@/lib/attempts/reconciliation'
 import {
   readHistoryStoredResult,
   summarizeHistoryScoreCohort,
@@ -104,6 +105,10 @@ export async function loadHistoryPage(
   userId: string,
   historyQuery: HistoryQuery,
 ): Promise<HistoryPageResult> {
+  // Close old active rows before the terminal-only queries so abandoned work
+  // becomes visible and recoverable in this same History response.
+  await reconcileCurrentUserStaleAttempts(userId)
+
   const existencePromise = supabase
     .from('attempts')
     .select('id')
