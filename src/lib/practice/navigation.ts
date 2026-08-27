@@ -5,7 +5,7 @@ import {
   type PracticeMode,
   type PromptDifficulty,
 } from '@/lib/practice/contracts'
-import { isPromptId } from '@/lib/prompts/selection'
+import { isPromptCollectionId, isPromptId } from '@/lib/prompts/selection'
 
 type SearchParam = string | string[] | undefined
 
@@ -40,6 +40,13 @@ function singleValue(value: SearchParam): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
+export type PracticeBrowseParamsResult =
+  | {
+      status: 'valid'
+      filters: { difficulty?: PromptDifficulty; collectionId?: string }
+    }
+  | { status: 'invalid' }
+
 export function parsePracticeMode(value: unknown): PracticeMode | null {
   return includes(PRACTICE_MODES, value) ? value : null
 }
@@ -47,13 +54,23 @@ export function parsePracticeMode(value: unknown): PracticeMode | null {
 export function parsePracticeBrowseParams(params: {
   difficulty?: SearchParam
   collection?: SearchParam
-}): { difficulty?: PromptDifficulty; collectionId?: string } {
+}): PracticeBrowseParamsResult {
   const difficulty = singleValue(params.difficulty)
   const collectionId = singleValue(params.collection)
 
+  if (
+    (params.difficulty !== undefined && !includes(PROMPT_DIFFICULTIES, difficulty)) ||
+    (params.collection !== undefined && (!collectionId || !isPromptCollectionId(collectionId)))
+  ) {
+    return { status: 'invalid' }
+  }
+
   return {
-    ...(includes(PROMPT_DIFFICULTIES, difficulty) ? { difficulty } : {}),
-    ...(collectionId && /^[a-z]+(?:_[a-z]+)*$/.test(collectionId) ? { collectionId } : {}),
+    status: 'valid',
+    filters: {
+      ...(includes(PROMPT_DIFFICULTIES, difficulty) ? { difficulty } : {}),
+      ...(collectionId ? { collectionId } : {}),
+    },
   }
 }
 
@@ -62,6 +79,18 @@ export function parseRecordPromptParam(value: SearchParam): string | null | unde
   if (value === undefined) return undefined
   const promptId = singleValue(value)
   return promptId && isPromptId(promptId) ? promptId : null
+}
+
+/** Retry identifiers use the same singular UUID contract as direct prompt identifiers. */
+export function parseRecordRetryParam(value: SearchParam): string | null | undefined {
+  return parseRecordPromptParam(value)
+}
+
+/** Missing mode is allowed; an explicit malformed or repeated mode fails closed. */
+export function parseRecordModeParam(value: SearchParam): PracticeMode | null | undefined {
+  if (value === undefined) return undefined
+  const mode = singleValue(value)
+  return mode && includes(PRACTICE_MODES, mode) ? mode : null
 }
 
 export function practiceBrowseHref(
