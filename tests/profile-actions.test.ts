@@ -162,4 +162,34 @@ describe('settings profile persistence', () => {
       displayNameError: null,
     })
   })
+
+  it('round-trips an ordered valid name and practice-goal selection', async () => {
+    const setup = fakeClient({
+      profileResult: {
+        data: {
+          id: userId,
+          display_name: 'River',
+          focus_areas: ['difficult-conversations', 'general-speaking'],
+        },
+        error: null,
+      },
+    })
+    mocks.createClient.mockResolvedValue(setup.client)
+    const formData = new FormData()
+    formData.set('display_name', 'River')
+    formData.append('focus', 'difficult-conversations')
+    formData.append('focus', 'general-speaking')
+
+    await expect(
+      updateProfile({ status: 'idle', message: null, displayNameError: null }, formData),
+    ).resolves.toEqual({ status: 'saved', message: 'Saved.', displayNameError: null })
+    expect(setup.upsert).toHaveBeenCalledWith(
+      {
+        id: userId,
+        display_name: 'River',
+        focus_areas: ['difficult-conversations', 'general-speaking'],
+      },
+      { onConflict: 'id' },
+    )
+  })
 })
