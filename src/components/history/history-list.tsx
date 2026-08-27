@@ -2,7 +2,13 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react'
 import { TrendChart } from '@/components/history/trend-chart'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -64,7 +70,7 @@ function CloseIcon() {
 }
 
 const ICON_BUTTON =
-  'text-muted hover:bg-surface-sunken hover:text-foreground flex size-11 items-center justify-center rounded-full transition duration-150 ease-out disabled:pointer-events-none disabled:opacity-60'
+  'text-muted hover:bg-surface-sunken hover:text-foreground flex size-11 items-center justify-center rounded-full transition duration-150 ease-out disabled:pointer-events-none disabled:opacity-60 aria-disabled:pointer-events-none aria-disabled:opacity-60'
 
 export function HistoryList({
   entries: initial,
@@ -86,9 +92,13 @@ export function HistoryList({
   const [confirming, setConfirming] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [announcement, setAnnouncement] = useState('')
+  const historyContainerRef = useRef<HTMLDivElement>(null)
   const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement>())
   const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null)
+  const cancelDeleteButtonRef = useRef<HTMLButtonElement>(null)
   const focusAfterDismissRef = useRef<string | null>(null)
+  const focusAfterDeleteRef = useRef<{ targetId: string | null } | null>(null)
 
   const entries = initial.filter((entry) => !removedIds.has(entry.id))
   const groups = groupByDay(entries)
@@ -114,6 +124,17 @@ export function HistoryList({
   }, [confirming])
 
   useEffect(() => {
+    const pending = focusAfterDeleteRef.current
+    if (!pending) return
+
+    const nextControl = pending.targetId
+      ? deleteButtonRefs.current.get(pending.targetId)
+      : undefined
+    ;(nextControl ?? historyContainerRef.current)?.focus()
+    focusAfterDeleteRef.current = null
+  }, [removedIds])
+
+  useEffect(() => {
     if (!confirming || busy === confirming) return
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -127,13 +148,34 @@ export function HistoryList({
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [busy, confirming, dismissConfirmation])
 
+  const trapConfirmationFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab') return
+
+    const confirm = confirmDeleteButtonRef.current
+    const cancel = cancelDeleteButtonRef.current
+    if (!confirm || !cancel) return
+
+    event.preventDefault()
+    if (event.shiftKey) {
+      ;(document.activeElement === confirm ? cancel : confirm).focus()
+    } else {
+      ;(document.activeElement === cancel ? confirm : cancel).focus()
+    }
+  }
+
   const remove = async (id: string) => {
+    if (busy === id) return
     setBusy(id)
     setError(null)
     try {
       await deleteAttempt(id)
+      const removedIndex = entries.findIndex((entry) => entry.id === id)
+      focusAfterDeleteRef.current = {
+        targetId: entries[removedIndex + 1]?.id ?? entries[removedIndex - 1]?.id ?? null,
+      }
       setRemovedIds((current) => new Set(current).add(id))
       setConfirming(null)
+      setAnnouncement('Response deleted.')
     } catch (thrown) {
       setError(thrown instanceof Error ? thrown.message : 'It could not be deleted.')
       dismissConfirmation(id, true)
@@ -154,7 +196,16 @@ export function HistoryList({
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div
+      ref={historyContainerRef}
+      role="region"
+      tabIndex={-1}
+      aria-label="History responses"
+      className="focus-visible:ring-accent-soft flex flex-col gap-6 focus-visible:ring-2 focus-visible:outline-none"
+    >
+      <p role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
       <TrendChart scores={scores} average={averageScore(entries)} />
 
       <div className="flex flex-col gap-3">
@@ -226,6 +277,8 @@ export function HistoryList({
               <li key={entry.id} className="relative">
                 <Link
                   href={attemptHref(entry.id)}
+                  aria-hidden={confirming === entry.id || undefined}
+                  tabIndex={confirming === entry.id ? -1 : undefined}
                   className="bg-surface rounded-card hover:bg-surface-sunken focus:ring-accent-soft flex min-h-20 cursor-pointer items-start justify-between gap-4 p-6 pr-16 transition duration-150 ease-out focus:ring-2"
                 >
                   <div className="min-w-0 flex-1">
@@ -251,26 +304,38 @@ export function HistoryList({
                 </Link>
 
                 {confirming === entry.id ? (
-                  <div className="bg-surface rounded-card absolute inset-0 z-10 flex items-center justify-between gap-4 px-6">
-                    <p className="text-foreground text-sm">Delete this response?</p>
+                  <div
+                    role="alertdialog"
+                    aria-modal="true"
+                    aria-labelledby={`delete-confirmation-${entry.id}`}
+                    aria-busy={busy === entry.id || undefined}
+                    onKeyDown={trapConfirmationFocus}
+                    className="bg-surface rounded-card absolute inset-0 z-10 flex items-center justify-between gap-4 px-6"
+                  >
+                    <p id={`delete-confirmation-${entry.id}`} className="text-foreground text-sm">
+                      Delete this response?
+                    </p>
                     <span className="flex shrink-0 items-center gap-1">
                       <button
                         ref={confirmDeleteButtonRef}
                         type="button"
                         aria-label="Confirm delete"
+                        aria-disabled={busy === entry.id || undefined}
                         title="Delete response"
-                        disabled={busy === entry.id}
                         onClick={() => void remove(entry.id)}
                         className={ICON_BUTTON}
                       >
                         <TrashIcon />
                       </button>
                       <button
+                        ref={cancelDeleteButtonRef}
                         type="button"
                         aria-label="Cancel delete"
+                        aria-disabled={busy === entry.id || undefined}
                         title="Cancel"
-                        disabled={busy === entry.id}
-                        onClick={() => dismissConfirmation(entry.id, true)}
+                        onClick={() => {
+                          if (busy !== entry.id) dismissConfirmation(entry.id, true)
+                        }}
                         className={ICON_BUTTON}
                       >
                         <CloseIcon />
@@ -289,7 +354,10 @@ export function HistoryList({
                     type="button"
                     aria-label="Delete response"
                     title="Delete response"
-                    onClick={() => setConfirming(entry.id)}
+                    onClick={() => {
+                      setAnnouncement('')
+                      setConfirming(entry.id)
+                    }}
                     className={`${ICON_BUTTON} absolute top-4 right-3`}
                   >
                     <TrashIcon />
