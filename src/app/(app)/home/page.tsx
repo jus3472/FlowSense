@@ -6,13 +6,9 @@ import { TrendStrip } from '@/components/home/trend-strip'
 import { RetryButton } from '@/components/system/retry-button'
 import { ButtonLink } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
-import {
-  defaultPracticeMode,
-  focusPhrase,
-  practiceModePriority,
-  sanitizeFocusAreas,
-} from '@/lib/focus-areas'
+import { focusPhrase, practiceModePriority, sanitizeFocusAreas } from '@/lib/focus-areas'
 import { formatExpectedDuration, recordHrefForPrompt } from '@/lib/practice/navigation'
+import { recentCompletedLibraryPromptIds } from '@/lib/prompts/selection'
 import { pickPreferredPracticePrompt } from '@/lib/prompts/server'
 import { legacyAttemptForHome } from '@/lib/results/attempt-result'
 import { largestDeduction, summariseAttempt } from '@/lib/results/summary'
@@ -36,7 +32,7 @@ export default async function HomePage() {
     supabase
       .from('attempts')
       .select(
-        'id, prompt_text, transcript, duration_ms, created_at, score, section_scores, metrics, content_result',
+        'id, prompt_id, prompt_text, prompt_source, transcript, duration_ms, created_at, score, section_scores, metrics, content_result',
       )
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
@@ -45,11 +41,17 @@ export default async function HomePage() {
 
   const areas = sanitizeFocusAreas(profileResult.data?.focus_areas ?? [])
   const phrase = focusPhrase(areas)
-  const recommendedMode = defaultPracticeMode(areas)
-  const recommendedPrompt = await pickPreferredPracticePrompt(practiceModePriority(areas))
 
   const historyFailed = Boolean(attemptsResult.error)
+  if (historyFailed) {
+    console.error('[home] data load failed', { operation: 'recent_prompt_history' })
+  }
   const attempts = attemptsResult.data ?? []
+  const recommendedOutcome = await pickPreferredPracticePrompt(
+    practiceModePriority(areas),
+    historyFailed ? [] : recentCompletedLibraryPromptIds(attempts),
+  )
+  const recommendedPrompt = recommendedOutcome.status === 'ready' ? recommendedOutcome.data : null
   const streak = computeStreak(attempts.map((attempt) => attempt.created_at))
   const scores = attempts
     .map((attempt) => attempt.score)
@@ -83,7 +85,14 @@ export default async function HomePage() {
     <div className="flex flex-col gap-12 pt-4 pb-12">
       {historyFailed ? null : <StreakDisplay streak={streak} />}
 
-      {recommendedPrompt ? (
+      {recommendedOutcome.status === 'failure' ? (
+        <ErrorState
+          title="Your suggested prompt did not load"
+          description="The connection to the practice library failed. Try loading it again."
+        >
+          <RetryButton />
+        </ErrorState>
+      ) : recommendedPrompt ? (
         <div className="border-border bg-surface flex flex-col gap-2 rounded-lg border p-4">
           <p className="text-muted text-sm">Suggested prompt</p>
           <p className="text-foreground font-medium">{recommendedPrompt.text}</p>
@@ -92,17 +101,15 @@ export default async function HomePage() {
           </p>
         </div>
       ) : null}
-      <ButtonLink
-        href={
-          recommendedPrompt
-            ? recordHrefForPrompt(recommendedPrompt.id)
-            : `/record?mode=${recommendedMode}`
-        }
-        size="lg"
-        fullWidth
-      >
-        Start a response
-      </ButtonLink>
+      {recommendedOutcome.status === 'failure' ? null : (
+        <ButtonLink
+          href={recommendedPrompt ? recordHrefForPrompt(recommendedPrompt.id) : '/practice/custom'}
+          size="lg"
+          fullWidth
+        >
+          {recommendedPrompt ? 'Start a response' : 'Enter a custom prompt'}
+        </ButtonLink>
+      )}
       <ButtonLink href="/practice" variant="secondary" fullWidth>
         Browse practice
       </ButtonLink>

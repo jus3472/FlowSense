@@ -77,7 +77,7 @@ export function parsePracticeSessionDescriptor(value: unknown): PracticeSessionD
     return null
   }
   if (
-    (value.source === 'library' && promptId === null) ||
+    (value.source === 'library' && promptId === null && retryOfAttemptId === null) ||
     (value.source === 'custom' && promptId !== null)
   ) {
     return null
@@ -99,36 +99,77 @@ export function parsePracticeSessionDescriptor(value: unknown): PracticeSessionD
 export function retrySessionFromAttempt(value: unknown): PracticeSessionDescriptor | null {
   if (!isRecord(value) || !isUuid(value.id)) return null
 
-  const inferredSource: PromptSource =
-    value.prompt_source === 'library' || value.prompt_source === 'custom'
-      ? value.prompt_source
-      : isUuid(value.prompt_id)
+  const promptId =
+    value.prompt_id === null ? null : isUuid(value.prompt_id) ? value.prompt_id : undefined
+  const source: PromptSource | null = includes(PROMPT_SOURCES, value.prompt_source)
+    ? value.prompt_source
+    : value.prompt_source === null || value.prompt_source === undefined
+      ? promptId
         ? 'library'
         : 'custom'
+      : null
+  const mode: PracticeMode | null = includes(PRACTICE_MODES, value.practice_mode)
+    ? value.practice_mode
+    : value.practice_mode === null || value.practice_mode === undefined
+      ? 'practice'
+      : null
+  const difficulty: PromptDifficulty | null = includes(PROMPT_DIFFICULTIES, value.prompt_difficulty)
+    ? value.prompt_difficulty
+    : value.prompt_difficulty === null || value.prompt_difficulty === undefined
+      ? 'beginner'
+      : null
+
+  if (!source || !mode || !difficulty || promptId === undefined) return null
+  if (source === 'custom' && promptId !== null) return null
+
+  const metrics = value.metrics
+  if (metrics !== null && metrics !== undefined && !isRecord(metrics)) return null
+  const practice = isRecord(metrics) ? metrics.practice : undefined
+  if (practice !== null && practice !== undefined && !isRecord(practice)) return null
+
+  const storedDuration = isRecord(practice) ? practice.target_duration_seconds : undefined
+  const directDuration = value.target_duration_seconds
+  if (
+    (directDuration !== null &&
+      directDuration !== undefined &&
+      !isTargetDuration(directDuration)) ||
+    (storedDuration !== null && storedDuration !== undefined && !isTargetDuration(storedDuration))
+  ) {
+    return null
+  }
+  if (
+    isTargetDuration(directDuration) &&
+    isTargetDuration(storedDuration) &&
+    directDuration !== storedDuration
+  ) {
+    return null
+  }
+
+  const storedContext = isRecord(practice) ? practice.additional_context : undefined
+  if (
+    storedContext !== null &&
+    storedContext !== undefined &&
+    (typeof storedContext !== 'string' ||
+      storedContext.trim().length === 0 ||
+      storedContext.trim().length > 1_000)
+  ) {
+    return null
+  }
 
   return parsePracticeSessionDescriptor({
     promptText: value.prompt_text,
-    promptId: inferredSource === 'library' ? value.prompt_id : null,
-    mode: includes(PRACTICE_MODES, value.practice_mode) ? value.practice_mode : 'practice',
-    difficulty: includes(PROMPT_DIFFICULTIES, value.prompt_difficulty)
-      ? value.prompt_difficulty
-      : 'beginner',
-    source: inferredSource,
+    promptId: source === 'library' ? promptId : null,
+    mode,
+    difficulty,
+    source,
     // Attempts before session descriptors did not snapshot this value.
-    targetDurationSeconds: isTargetDuration(value.target_duration_seconds)
-      ? value.target_duration_seconds
-      : isRecord(value.metrics) &&
-          isRecord(value.metrics.practice) &&
-          isTargetDuration(value.metrics.practice.target_duration_seconds)
-        ? value.metrics.practice.target_duration_seconds
+    targetDurationSeconds: isTargetDuration(directDuration)
+      ? directDuration
+      : isTargetDuration(storedDuration)
+        ? storedDuration
         : 60,
     retryOfAttemptId: value.id,
-    additionalContext:
-      isRecord(value.metrics) &&
-      isRecord(value.metrics.practice) &&
-      typeof value.metrics.practice.additional_context === 'string'
-        ? value.metrics.practice.additional_context
-        : undefined,
+    additionalContext: typeof storedContext === 'string' ? storedContext : undefined,
   })
 }
 

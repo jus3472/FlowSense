@@ -66,7 +66,29 @@ describe('practice session descriptor', () => {
     })
   })
 
-  it('returns no retry session for an unavailable or contradictory stored snapshot', () => {
+  it('retries an owned library snapshot after its public prompt row is deleted', () => {
+    expect(
+      retrySessionFromAttempt({
+        id: ATTEMPT_ID,
+        prompt_id: null,
+        prompt_text: LIBRARY_SESSION.promptText,
+        practice_mode: 'presentation',
+        prompt_source: 'library',
+        prompt_difficulty: 'intermediate',
+        metrics: { practice: { target_duration_seconds: 45 } },
+      }),
+    ).toEqual({
+      promptText: LIBRARY_SESSION.promptText,
+      promptId: null,
+      mode: 'presentation',
+      difficulty: 'intermediate',
+      source: 'library',
+      targetDurationSeconds: 45,
+      retryOfAttemptId: ATTEMPT_ID,
+    })
+  })
+
+  it('returns no retry session for unavailable or contradictory stored metadata', () => {
     expect(retrySessionFromAttempt(null)).toBeNull()
     expect(
       retrySessionFromAttempt({
@@ -74,6 +96,33 @@ describe('practice session descriptor', () => {
         prompt_id: null,
         prompt_text: LIBRARY_SESSION.promptText,
         prompt_source: 'library',
+        practice_mode: 'debate',
+      }),
+    ).toBeNull()
+    expect(
+      retrySessionFromAttempt({
+        id: ATTEMPT_ID,
+        prompt_id: PROMPT_ID,
+        prompt_text: LIBRARY_SESSION.promptText,
+        prompt_source: 'custom',
+      }),
+    ).toBeNull()
+    expect(
+      retrySessionFromAttempt({
+        id: ATTEMPT_ID,
+        prompt_id: PROMPT_ID,
+        prompt_text: LIBRARY_SESSION.promptText,
+        prompt_source: 'library',
+        metrics: { practice: { target_duration_seconds: 10 } },
+      }),
+    ).toBeNull()
+    expect(
+      retrySessionFromAttempt({
+        id: ATTEMPT_ID,
+        prompt_id: null,
+        prompt_text: LIBRARY_SESSION.promptText,
+        prompt_source: 'custom',
+        metrics: { practice: { additional_context: 'x'.repeat(1_001) } },
       }),
     ).toBeNull()
   })

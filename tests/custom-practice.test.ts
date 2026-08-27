@@ -45,7 +45,11 @@ describe('custom practice input', () => {
     expect(recordPage).toContain('if (!session && isCustomPracticeMarker(params.custom))')
     expect(recordPage).toContain('title="Your custom prompt is not available"')
     expect(recordPage.indexOf('isCustomPracticeMarker(params.custom)')).toBeLessThan(
-      recordPage.indexOf('parseRecordPromptParam(params.prompt)'),
+      recordPage.indexOf('resolveLibraryPromptSession(params.prompt'),
+    )
+    expect(recordPage).toContain("if (invalidIntent === 'custom')")
+    expect(recordPage.indexOf("invalidIntent === 'custom'")).toBeLessThan(
+      recordPage.indexOf('pickRecordPrompt('),
     )
   })
   it('keeps custom prompt transport out of the public prompt library', () => {

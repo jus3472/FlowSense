@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildPromptBrowseData,
   choosePrompt,
   choosePromptByModePriority,
+  choosePromptForRecord,
+  choosePromptWithRecentFallback,
   derivePromptCollections,
   filterPromptLibrary,
+  isCompletedPromptAttempt,
   parseLibraryPrompt,
+  recentCompletedLibraryPromptIds,
   type LibraryPrompt,
 } from '@/lib/prompts/selection'
+import { SKILL_CATEGORIES } from '@/lib/practice/contracts'
+import { rubricFor } from '@/lib/scoring/v2/rubrics'
 
 const FIRST_ID = '11111111-1111-4111-8111-111111111111'
 const SECOND_ID = '22222222-2222-4222-8222-222222222222'
@@ -29,6 +36,31 @@ function prompt(id: string): LibraryPrompt {
   const parsed = parseLibraryPrompt(row({ id }))
   if (!parsed) throw new Error('Test prompt was malformed.')
   return parsed
+}
+
+function partialV2Snapshot() {
+  const rubric = rubricFor('practice')
+  return {
+    version: 'v2.score.1',
+    rubric_version: 'v2',
+    mode: 'practice',
+    total_earned_points: null,
+    total_max_points: 100,
+    categories: Object.fromEntries(
+      SKILL_CATEGORIES.map((category) => [
+        category,
+        {
+          category,
+          availability: 'available',
+          status: 'not_checked',
+          component: null,
+          earned_points: null,
+          max_points: rubric.categories[category].weight,
+        },
+      ]),
+    ),
+    warnings: [],
+  }
 }
 
 describe('prompt selection', () => {
@@ -108,6 +140,68 @@ describe('prompt selection', () => {
 
     expect(filterPromptLibrary(rows, { excludeIds: [FIRST_ID] })).toEqual([])
     expect(filterPromptLibrary(rows)).toEqual([prompt(FIRST_ID)])
+  })
+
+  it('prefers a non-recent prompt and falls back after the eligible pool is exhausted', () => {
+    const candidates = [prompt(FIRST_ID), prompt(SECOND_ID), prompt(THIRD_ID)]
+
+    expect(choosePromptWithRecentFallback(candidates, [FIRST_ID, SECOND_ID], () => 0)).toEqual(
+      candidates[2],
+    )
+    expect(
+      choosePromptWithRecentFallback(candidates, [FIRST_ID, SECOND_ID, THIRD_ID], () => 0.5),
+    ).toEqual(candidates[1])
+  })
+
+  it('never falls back to General Practice for an explicit empty mode', () => {
+    const practice = prompt(FIRST_ID)
+
+    expect(choosePromptForRecord([practice], 'interview', [], [], () => 0)).toBeNull()
+    expect(choosePromptForRecord([practice], undefined, ['interview'], [], () => 0)).toEqual(
+      practice,
+    )
+  })
+
+  it('derives browse prompts, collections, and recommendation from one prompt snapshot', () => {
+    const prompts = [
+      prompt(FIRST_ID),
+      { ...prompt(SECOND_ID), difficulty: 'advanced' as const },
+      { ...prompt(THIRD_ID), mode: 'interview' as const, collectionId: 'behavioral' },
+    ]
+
+    expect(
+      buildPromptBrowseData(
+        prompts,
+        { mode: 'practice', difficulty: 'advanced' },
+        [FIRST_ID],
+        () => 0,
+      ),
+    ).toEqual({
+      prompts: [{ ...prompt(SECOND_ID), difficulty: 'advanced' }],
+      collections: [{ id: 'storytelling', mode: 'practice', promptCount: 1 }],
+      recommended: { ...prompt(SECOND_ID), difficulty: 'advanced' },
+    })
+  })
+
+  it('treats a completed partial v2 snapshot as recent even when overall score is null', () => {
+    const partial = partialV2Snapshot()
+    expect(isCompletedPromptAttempt({ score: null, section_scores: partial })).toBe(true)
+    expect(
+      recentCompletedLibraryPromptIds([
+        {
+          prompt_id: FIRST_ID,
+          prompt_source: 'library',
+          score: null,
+          section_scores: partial,
+        },
+        {
+          prompt_id: SECOND_ID,
+          prompt_source: null,
+          score: 72,
+          section_scores: null,
+        },
+      ]),
+    ).toEqual([FIRST_ID, SECOND_ID])
   })
 
   it('returns empty collections and no selection for empty candidates', () => {

@@ -1,19 +1,21 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
+import { PromptFilters } from '@/components/practice/prompt-filters'
+import { RetryButton } from '@/components/system/retry-button'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
-import { PROMPT_DIFFICULTIES } from '@/lib/practice/contracts'
+import { ErrorState } from '@/components/ui/error-state'
 import {
-  collectionLabel,
   formatExpectedDuration,
   parsePracticeBrowseParams,
   parsePracticeMode,
-  practiceBrowseHref,
   recordHrefForPrompt,
 } from '@/lib/practice/navigation'
-import { getPromptCollections, getPromptLibrary, pickPracticePrompt } from '@/lib/prompts/server'
+import { recentPromptIdsOrEmpty } from '@/lib/prompts/data'
+import { getPromptBrowseData, getRecentCompletedLibraryPromptIds } from '@/lib/prompts/server'
+import { createClient } from '@/lib/supabase/server'
 
 export const metadata: Metadata = {
   title: 'Practice',
@@ -23,6 +25,18 @@ function modeTitle(mode: string): string {
   return mode === 'practice'
     ? 'General Practice'
     : `${mode.slice(0, 1).toUpperCase()}${mode.slice(1)}s`
+}
+
+function ModeHeader({ mode }: { mode: string }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Link href="/practice" className="text-accent text-sm hover:underline">
+        Practice
+      </Link>
+      <h1 className="prompt-display text-foreground text-2xl">{modeTitle(mode)}</h1>
+      <p className="text-muted text-base">Choose a prompt, or start with one selected for you.</p>
+    </div>
+  )
 }
 
 export default async function PracticeModePage({
@@ -35,96 +49,93 @@ export default async function PracticeModePage({
   const mode = parsePracticeMode((await params).mode)
   if (!mode) notFound()
 
-  const filters = parsePracticeBrowseParams(await searchParams)
-  const promptFilters = { mode, ...filters }
-  const [prompts, collections, recommended] = await Promise.all([
-    getPromptLibrary(promptFilters),
-    getPromptCollections({ mode, difficulty: filters.difficulty }),
-    pickPracticePrompt(promptFilters),
-  ])
+  const parsedFilters = parsePracticeBrowseParams(await searchParams)
+  if (parsedFilters.status === 'invalid') {
+    return (
+      <div className="flex flex-col gap-8 pt-4 pb-12">
+        <ModeHeader mode={mode} />
+        <ErrorState
+          title="Those filters are not available"
+          description="Clear the filters and choose from the current practice library."
+        >
+          <ButtonLink href={`/practice/${mode}`} variant="secondary">
+            Clear filters
+          </ButtonLink>
+        </ErrorState>
+      </div>
+    )
+  }
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const recentPromptIdsOutcome = await getRecentCompletedLibraryPromptIds(user.id)
+  const browseOutcome = await getPromptBrowseData(
+    { mode, ...parsedFilters.filters },
+    recentPromptIdsOrEmpty(recentPromptIdsOutcome),
+  )
+
+  if (browseOutcome.status === 'failure') {
+    return (
+      <div className="flex flex-col gap-8 pt-4 pb-12">
+        <ModeHeader mode={mode} />
+        <ErrorState
+          title="The prompt library did not load"
+          description="The connection to the practice library failed. Try loading it again."
+        >
+          <RetryButton />
+        </ErrorState>
+      </div>
+    )
+  }
+
+  const browse =
+    browseOutcome.status === 'ready'
+      ? browseOutcome.data
+      : { prompts: [], collections: [], recommended: null }
+  const { difficulty, collectionId } = parsedFilters.filters
 
   return (
     <div className="flex flex-col gap-8 pt-4 pb-12">
-      <div className="flex flex-col gap-2">
-        <Link href="/practice" className="text-accent text-sm hover:underline">
-          Practice
-        </Link>
-        <h1 className="prompt-display text-foreground text-2xl">{modeTitle(mode)}</h1>
-        <p className="text-muted text-base">Choose a prompt, or start with one selected for you.</p>
-      </div>
+      <ModeHeader mode={mode} />
 
-      {recommended ? (
+      {browse.recommended ? (
         <Card className="flex flex-col gap-4">
           <div className="flex flex-col gap-1">
             <p className="section-label text-muted">Recommended</p>
-            <p className="text-foreground text-lg">{recommended.text}</p>
+            <p className="text-foreground text-lg">{browse.recommended.text}</p>
             <p className="text-muted text-sm">
-              {formatExpectedDuration(recommended.targetDurationSeconds)}
+              {formatExpectedDuration(browse.recommended.targetDurationSeconds)}
             </p>
           </div>
-          <ButtonLink href={recordHrefForPrompt(recommended.id)} fullWidth>
+          <ButtonLink href={recordHrefForPrompt(browse.recommended.id)} fullWidth>
             Start this prompt
           </ButtonLink>
         </Card>
       ) : null}
 
-      <section aria-labelledby="difficulty-heading" className="flex flex-col gap-3">
-        <h2 id="difficulty-heading" className="section-label text-muted">
-          Difficulty
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href={practiceBrowseHref(mode, { collectionId: filters.collectionId })}
-            className="bg-surface-sunken text-foreground hover:bg-accent-soft flex min-h-11 items-center rounded-full px-6 text-sm font-medium"
-          >
-            All levels
-          </Link>
-          {PROMPT_DIFFICULTIES.map((difficulty) => (
-            <Link
-              key={difficulty}
-              href={practiceBrowseHref(mode, { difficulty, collectionId: filters.collectionId })}
-              className="bg-surface-sunken text-foreground hover:bg-accent-soft flex min-h-11 items-center rounded-full px-6 text-sm font-medium"
-            >
-              {difficulty.slice(0, 1).toUpperCase() + difficulty.slice(1)}
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      {collections.length > 0 ? (
-        <section aria-labelledby="collections-heading" className="flex flex-col gap-3">
-          <h2 id="collections-heading" className="section-label text-muted">
-            Collections
-          </h2>
-          <div className="flex flex-wrap gap-2">
-            {collections.map((collection) => (
-              <Link
-                key={collection.id}
-                href={practiceBrowseHref(mode, {
-                  difficulty: filters.difficulty,
-                  collectionId: collection.id,
-                })}
-                className="bg-surface-sunken text-foreground hover:bg-accent-soft flex min-h-11 items-center rounded-full px-6 text-sm font-medium"
-              >
-                {collectionLabel(collection.id)}
-              </Link>
-            ))}
-          </div>
-        </section>
-      ) : null}
+      <PromptFilters
+        mode={mode}
+        difficulty={difficulty}
+        collectionId={collectionId}
+        collections={browse.collections}
+      />
 
       <section aria-labelledby="prompts-heading" className="flex flex-col gap-4">
         <h2 id="prompts-heading" className="section-label text-muted">
           Prompts
         </h2>
-        {prompts.length === 0 ? (
+        {browse.prompts.length === 0 ? (
           <EmptyState
             title="No prompts match these choices"
             description="Choose another difficulty or collection."
           />
         ) : (
           <div className="flex flex-col gap-4">
-            {prompts.map((prompt) => (
+            {browse.prompts.map((prompt) => (
               <Card key={prompt.id} className="flex flex-col gap-3">
                 <p className="text-foreground text-base">{prompt.text}</p>
                 <div className="text-muted flex flex-wrap items-center gap-2 text-sm">
