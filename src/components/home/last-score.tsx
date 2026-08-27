@@ -8,16 +8,27 @@ interface LastScoreProps {
   score: number | null
   summary: string | null
   focusPhrase: string
+  unavailable?: boolean
 }
 
-export function LastScore({ attemptId, score, summary, focusPhrase }: LastScoreProps) {
+export function LastScore({
+  attemptId,
+  score,
+  summary,
+  focusPhrase,
+  unavailable = false,
+}: LastScoreProps) {
   if (!attemptId) {
     return (
       <Card className="flex flex-col gap-6 p-8">
         <h2 className="section-label text-muted">Last response</h2>
         <EmptyState
-          title="No score yet"
-          description={`Answer one prompt and you will see how you sound ${focusPhrase}.`}
+          title={unavailable ? 'Last response unavailable' : 'No score yet'}
+          description={
+            unavailable
+              ? 'This saved result cannot be shown here. Open History to view your other responses.'
+              : `Answer one prompt and you will see how you sound ${focusPhrase}.`
+          }
         />
       </Card>
     )

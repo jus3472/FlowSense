@@ -7,12 +7,9 @@ import { RetryButton } from '@/components/system/retry-button'
 import { ButtonLink } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
 import { focusPhrase, practiceModePriority, sanitizeFocusAreas } from '@/lib/focus-areas'
+import { loadHomeResponseData, logHomeDataFailure } from '@/lib/home/server'
 import { formatExpectedDuration, recordHrefForPrompt } from '@/lib/practice/navigation'
-import { recentCompletedLibraryPromptIds } from '@/lib/prompts/selection'
 import { pickPreferredPracticePrompt } from '@/lib/prompts/server'
-import { legacyAttemptForHome } from '@/lib/results/attempt-result'
-import { largestDeduction, summariseAttempt } from '@/lib/results/summary'
-import { CONTENT_POINTS } from '@/lib/scoring/content'
 import { computeStreak } from '@/lib/streak'
 import { createClient } from '@/lib/supabase/server'
 
@@ -27,76 +24,29 @@ export default async function HomePage() {
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [profileResult, attemptsResult, latestResult] = await Promise.all([
+  const [profileResult, responseResult] = await Promise.all([
     supabase.from('profiles').select('focus_areas').eq('id', user.id).maybeSingle(),
-    supabase
-      .from('attempts')
-      .select(
-        'id, prompt_id, prompt_text, prompt_source, transcript, duration_ms, created_at, score, section_scores, metrics, content_result, status',
-      )
-      .eq('user_id', user.id)
-      .eq('status', 'done')
-      .order('created_at', { ascending: false })
-      .limit(30),
-    supabase
-      .from('attempts')
-      .select(
-        'id, prompt_text, transcript, duration_ms, created_at, score, section_scores, metrics, content_result, status',
-      )
-      .eq('user_id', user.id)
-      .eq('status', 'done')
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+    loadHomeResponseData(supabase, user.id),
   ])
 
   const areas = sanitizeFocusAreas(profileResult.data?.focus_areas ?? [])
   const phrase = focusPhrase(areas)
-
-  const historyFailed = Boolean(attemptsResult.error || latestResult.error)
-  if (historyFailed) {
-    console.error('[home] response data load failed', {
-      recentHistoryCode: attemptsResult.error?.code ?? null,
-      recentHistoryMessage: attemptsResult.error?.message ?? null,
-      latestAttemptCode: latestResult.error?.code ?? null,
-      latestAttemptMessage: latestResult.error?.message ?? null,
-    })
+  if (profileResult.error) {
+    logHomeDataFailure('profile_preferences', 'query', profileResult.error)
   }
-  const attempts = attemptsResult.data ?? []
+  const historyFailed = responseResult.status === 'failure'
+  const historyErrorDescription =
+    responseResult.status === 'failure' && responseResult.reason === 'invalid_response'
+      ? 'Your saved response summary could not be read. Try loading it again.'
+      : 'The connection to your account failed. Your recordings are safe.'
+  const responseData = responseResult.status === 'ready' ? responseResult.data : null
   const recommendedOutcome = await pickPreferredPracticePrompt(
     practiceModePriority(areas),
-    historyFailed ? [] : recentCompletedLibraryPromptIds(attempts),
+    responseData?.recentPromptIds ?? [],
   )
   const recommendedPrompt = recommendedOutcome.status === 'ready' ? recommendedOutcome.data : null
-  const streak = computeStreak(attempts.map((attempt) => attempt.created_at))
-  const scores = attempts
-    .map((attempt) => attempt.score)
-    .filter((score): score is number => score !== null)
-    .reverse()
-
-  const latest = latestResult.data
-  let summary: string | null = null
-  if (latest && latest.score !== null) {
-    const legacy = legacyAttemptForHome({
-      id: latest.id,
-      promptText: latest.prompt_text,
-      transcript: latest.transcript,
-      durationMs: latest.duration_ms,
-      createdAt: latest.created_at,
-      audioUrl: null,
-      score: latest.score,
-      sectionScores: latest.section_scores,
-      metrics: latest.metrics,
-      contentResult: latest.content_result,
-    })
-    if (legacy) {
-      summary = summariseAttempt(
-        latest.score,
-        largestDeduction(legacy.metrics, legacy.sections.content.checks, CONTENT_POINTS),
-      )
-    }
-  }
+  const streak = computeStreak(responseData?.timestamps ?? [])
+  const latest = responseData?.latest ?? null
 
   return (
     <div className="flex flex-col gap-12 pt-4 pb-12">
@@ -132,21 +82,19 @@ export default async function HomePage() {
       </ButtonLink>
 
       {historyFailed ? (
-        <ErrorState
-          title="Your responses did not load"
-          description="The connection to your account failed. Your recordings are safe."
-        >
+        <ErrorState title="Your responses did not load" description={historyErrorDescription}>
           <RetryButton />
         </ErrorState>
       ) : (
         <>
           <LastScore
-            attemptId={latest?.id ?? null}
+            attemptId={latest?.attemptId ?? null}
             score={latest?.score ?? null}
-            summary={summary}
+            summary={latest?.summary ?? null}
             focusPhrase={phrase}
+            unavailable={responseData?.latestUnavailable ?? false}
           />
-          <TrendStrip scores={scores} />
+          <TrendStrip scores={responseData?.scores ?? []} />
         </>
       )}
     </div>
