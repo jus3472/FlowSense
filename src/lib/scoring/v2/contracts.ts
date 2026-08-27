@@ -71,6 +71,7 @@ export interface ScoreResult {
 }
 
 export interface RubricCheckDefinition {
+  /** A check identifier is executable only when its registered evaluator consumes it. */
   id: string
   category: SkillCategory
   availability: Availability
@@ -81,6 +82,7 @@ export interface RubricCheckDefinition {
 export interface CategoryRubricConfig {
   availability: Availability
   weight: number
+  /** Executable registered checks only; descriptive or planned checks do not belong here. */
   check_ids: readonly string[]
 }
 

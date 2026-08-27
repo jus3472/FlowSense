@@ -8,12 +8,16 @@ import type { ClarityResult } from '@/lib/scoring/v2/clarity'
 import type { V2CategoryResult, V2ContentEvaluation } from '@/lib/scoring/v2/content/contracts'
 import type { DeliveryEvaluation } from '@/lib/scoring/v2/delivery'
 import type { FluencyEvaluation } from '@/lib/scoring/v2/fluency'
-import { RUBRIC_VERSION, type ScoreEvidence, type ScoreStatus } from '@/lib/scoring/v2/contracts'
+import type { ScoreEvidence, ScoreStatus } from '@/lib/scoring/v2/contracts'
 import { TRANSCRIPT_CHARACTER_COORDINATE } from '@/lib/scoring/v2/evidence'
-import { rubricFor } from '@/lib/scoring/v2/rubrics'
+import {
+  CURRENT_SCORING_DEFINITION,
+  scoringDefinitionFor,
+  type ScoringDefinition,
+} from '@/lib/scoring/v2/registry'
 
 /** Stable JSONB discriminator. Do not use attempt metadata to identify a stored result. */
-export const V2_SCORE_PAYLOAD_VERSION = 'v2.score.1' as const
+export const V2_SCORE_PAYLOAD_VERSION = CURRENT_SCORING_DEFINITION.scorePayloadVersion
 
 type LocalEvaluation = FluencyEvaluation | DeliveryEvaluation | ClarityResult
 
@@ -31,13 +35,18 @@ export interface V2PersistedCategoryScore {
 }
 
 export interface V2ScorePayload {
-  version: typeof V2_SCORE_PAYLOAD_VERSION
-  rubric_version: typeof RUBRIC_VERSION
+  version: string
+  rubric_version: string
   mode: PracticeMode
   total_earned_points: number | null
   total_max_points: 100
   categories: Readonly<Record<SkillCategory, V2PersistedCategoryScore>>
   warnings: readonly string[]
+}
+
+export type CurrentV2ScorePayload = V2ScorePayload & {
+  version: typeof V2_SCORE_PAYLOAD_VERSION
+  rubric_version: typeof CURRENT_SCORING_DEFINITION.rubricVersion
 }
 
 export interface V2AssemblyInput {
@@ -165,8 +174,8 @@ function fromContent(
  * incomplete category deliberately makes the overall score unavailable instead
  * of treating absent provider or capture evidence as a perfect result.
  */
-export function assembleV2Score(input: V2AssemblyInput): V2ScorePayload {
-  const rubric = rubricFor(input.mode)
+export function assembleV2Score(input: V2AssemblyInput): CurrentV2ScorePayload {
+  const rubric = CURRENT_SCORING_DEFINITION.modeRubrics[input.mode]
   const categories = {
     fluency: fromLocal(input.fluency, rubric.categories.fluency.weight),
     clarity: fromLocal(input.clarity, rubric.categories.clarity.weight),
@@ -196,7 +205,7 @@ export function assembleV2Score(input: V2AssemblyInput): V2ScorePayload {
 
   return {
     version: V2_SCORE_PAYLOAD_VERSION,
-    rubric_version: RUBRIC_VERSION,
+    rubric_version: CURRENT_SCORING_DEFINITION.rubricVersion,
     mode: input.mode,
     total_earned_points: total,
     total_max_points: 100,
@@ -298,9 +307,14 @@ function validStoredDeduction(value: unknown): boolean {
   return typeof value.detail === 'string' || typeof value.observation === 'string'
 }
 
-function validStoredCategory(value: unknown, category: SkillCategory, mode: PracticeMode): boolean {
+function validStoredCategory(
+  value: unknown,
+  category: SkillCategory,
+  mode: PracticeMode,
+  definition: ScoringDefinition,
+): boolean {
   if (!isRecord(value)) return false
-  const maxPoints = rubricFor(mode).categories[category].weight
+  const maxPoints = definition.modeRubrics[mode].categories[category].weight
   const component = value.component
   const earnedPoints = value.earned_points
   const pointsAreValid =
@@ -343,18 +357,17 @@ function validStoredCategory(value: unknown, category: SkillCategory, mode: Prac
   )
 }
 
-/**
- * Only a structurally complete v2 snapshot is idempotent. This deliberately
- * rejects metadata-shaped or malformed JSONB so a corrupt partial write does
- * not become authoritative.
- */
-export function isV2ScorePayload(value: unknown): value is V2ScorePayload {
+/** Validates one payload against the exact definition selected by its stored pair. */
+export function isScorePayloadForDefinition(
+  value: unknown,
+  definition: ScoringDefinition,
+): value is V2ScorePayload {
   if (!isRecord(value)) return false
   const mode = value.mode
   const categoryValues = value.categories
   if (
-    value.version !== V2_SCORE_PAYLOAD_VERSION ||
-    value.rubric_version !== RUBRIC_VERSION ||
+    value.version !== definition.scorePayloadVersion ||
+    value.rubric_version !== definition.rubricVersion ||
     !isPracticeMode(mode) ||
     value.total_max_points !== 100 ||
     !isRecord(categoryValues) ||
@@ -366,7 +379,7 @@ export function isV2ScorePayload(value: unknown): value is V2ScorePayload {
   if (
     categoryNames.length !== SKILL_CATEGORIES.length ||
     !SKILL_CATEGORIES.every((category) =>
-      validStoredCategory(categoryValues[category], category, mode),
+      validStoredCategory(categoryValues[category], category, mode, definition),
     )
   ) {
     return false
@@ -388,6 +401,22 @@ export function isV2ScorePayload(value: unknown): value is V2ScorePayload {
         0,
       )
   )
+}
+
+/**
+ * Only a structurally complete payload with a registered exact version pair is
+ * idempotent. Unknown pairs never inherit the current scoring definition.
+ */
+export function isV2ScorePayload(value: unknown): value is V2ScorePayload {
+  if (
+    !isRecord(value) ||
+    typeof value.version !== 'string' ||
+    typeof value.rubric_version !== 'string'
+  ) {
+    return false
+  }
+  const definition = scoringDefinitionFor(value.version, value.rubric_version)
+  return definition !== null && isScorePayloadForDefinition(value, definition)
 }
 
 /** A saved legacy section payload is authoritative even if its attempt metadata says v2. */
