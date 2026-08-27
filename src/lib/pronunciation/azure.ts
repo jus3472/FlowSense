@@ -7,6 +7,7 @@ import { mapAzurePronunciationResponse } from '@/lib/pronunciation/azure-mapper'
 import type { PronunciationProvider } from '@/lib/pronunciation/provider'
 
 export const AZURE_MAX_AUDIO_DURATION_MS = 30_000
+export const AZURE_SUPPORTED_LOCALES = ['en-US'] as const
 export const AZURE_SUPPORTED_AUDIO_TYPES = [
   'audio/wav; codecs=audio/pcm; samplerate=16000',
   'audio/ogg; codecs=opus',
@@ -20,6 +21,10 @@ export interface AzureSpeechConfig {
 
 export interface AzureTransport {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>
+}
+
+export function isAzureLocaleSupported(locale: string): boolean {
+  return AZURE_SUPPORTED_LOCALES.includes(locale as (typeof AZURE_SUPPORTED_LOCALES)[number])
 }
 
 export function isAzureAudioSupported(contentType: string, durationMs: number): boolean {
@@ -36,8 +41,21 @@ export function isAzureAudioSupported(contentType: string, durationMs: number): 
 export function validateAzureEndpoint(value: string): string | null {
   try {
     const url = new URL(value)
-    if (url.protocol !== 'https:' || url.pathname !== '/' || url.search || url.hash) return null
-    if (!/^https:\/\/[a-z0-9-]+\.cognitiveservices\.azure\.com$/i.test(url.origin)) return null
+    if (
+      url.protocol !== 'https:' ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash ||
+      url.username ||
+      url.password ||
+      url.port
+    ) {
+      return null
+    }
+    const suffix = '.cognitiveservices.azure.com'
+    if (!url.hostname.toLocaleLowerCase('en-US').endsWith(suffix)) return null
+    const resourceName = url.hostname.slice(0, -suffix.length)
+    if (!/^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/i.test(resourceName)) return null
     return url.origin
   } catch {
     return null
@@ -70,7 +88,7 @@ export function buildAzureRequest(
       ReferenceText: request.referenceText ?? '',
       GradingSystem: 'HundredMark',
       Granularity: 'Phoneme',
-      Dimension: 'Comprehensive',
+      Dimension: 'Basic',
       EnableMiscue: true,
     }),
   ).toString('base64')
@@ -105,6 +123,54 @@ function failed(
   }
 }
 
+function notChecked(message: string, locale: string): PronunciationEvaluation {
+  return {
+    contractVersion: 'v1',
+    provider: { id: 'azure-speech', model: 'short-audio', version: 'rest-v1', locale },
+    status: 'not_checked',
+    words: [],
+    unsupportedWords: [],
+    warnings: [message],
+    error: null,
+    eligibleForDeductions: false,
+  }
+}
+
+function requestIsValid(
+  config: AzureSpeechConfig,
+  request: PronunciationAssessmentRequest,
+  audio: ArrayBuffer,
+): boolean {
+  let previousWordEnd = 0
+  const wordsAreValid =
+    request.recognizedWords.length > 0 &&
+    request.recognizedWords.every((word) => {
+      const valid =
+        word.word.trim().length > 0 &&
+        Number.isFinite(word.startMs) &&
+        Number.isFinite(word.endMs) &&
+        word.startMs >= previousWordEnd &&
+        word.endMs > word.startMs &&
+        word.endMs <= request.audio.durationMs
+      previousWordEnd = word.endMs
+      return valid
+    })
+  return Boolean(
+    validateAzureSpeechConfig(config) &&
+    isAzureLocaleSupported(config.locale) &&
+    request.contractVersion === 'v1' &&
+    request.provider.id === 'azure-speech' &&
+    request.provider.model === 'short-audio' &&
+    request.provider.version === 'rest-v1' &&
+    request.scenario === 'scripted' &&
+    request.locale === config.locale &&
+    typeof request.referenceText === 'string' &&
+    request.referenceText.trim().length > 0 &&
+    wordsAreValid &&
+    audio.byteLength > 0,
+  )
+}
+
 export async function assessAzurePronunciation(
   config: AzureSpeechConfig,
   request: PronunciationAssessmentRequest,
@@ -112,16 +178,15 @@ export async function assessAzurePronunciation(
   transport: AzureTransport = globalThis,
   timeoutMs = 10_000,
 ): Promise<PronunciationEvaluation> {
+  if (!requestIsValid(config, request, audio)) {
+    const locale = config.locale.trim() || request.locale.trim() || 'und'
+    return notChecked('Pronunciation assessment configuration or request was unsupported.', locale)
+  }
   if (!isAzureAudioSupported(request.audio.contentType, request.audio.durationMs)) {
-    return {
-      ...failed(
-        'Audio format or duration is not supported by Azure short-audio assessment.',
-        'malformed_response',
-        config.locale,
-      ),
-      status: 'not_checked',
-      error: null,
-    }
+    return notChecked(
+      'Audio format or duration is not supported by Azure short-audio assessment.',
+      config.locale,
+    )
   }
   const { url, init } = buildAzureRequest(config, request, audio)
   const controller = new AbortController()
@@ -140,14 +205,10 @@ export async function assessAzurePronunciation(
     return parsed.ok
       ? parsed.value
       : failed(parsed.error.message, 'malformed_response', config.locale)
-  } catch (cause) {
+  } catch {
     if (controller.signal.aborted)
       return failed('Azure pronunciation assessment timed out.', 'timeout', config.locale)
-    return failed(
-      cause instanceof Error ? cause.message : 'Azure could not be reached.',
-      'outage',
-      config.locale,
-    )
+    return failed('Azure could not be reached.', 'outage', config.locale)
   } finally {
     clearTimeout(timer)
   }

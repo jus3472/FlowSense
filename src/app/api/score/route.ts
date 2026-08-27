@@ -8,11 +8,8 @@ import {
   buildRewriteRetryPrompt,
 } from '@/lib/deepseek/prompt'
 import { azureSpeechConfig, deepseekApiKey } from '@/lib/env/server'
-import { createAzurePronunciationProvider, isAzureAudioSupported } from '@/lib/pronunciation/azure'
-import type {
-  PronunciationEvaluation,
-  PronunciationAssessmentRequest,
-} from '@/lib/pronunciation/contracts'
+import { createAzurePronunciationProvider } from '@/lib/pronunciation/azure'
+import { collectPronunciationEvidence } from '@/lib/pronunciation/orchestrate'
 import { SCORE_VERSION, assembleScore } from '@/lib/scoring/assemble'
 import { notCheckedContent, type Dispute } from '@/lib/scoring/content'
 import { runContentCheck } from '@/lib/scoring/run-content'
@@ -76,69 +73,6 @@ function unavailableProvider(error: unknown): V2ContentDetectorProvider {
   return { name: 'deepseek', complete: async () => Promise.reject(new Error(message)) }
 }
 
-async function pronunciationEvidence(
-  supabase: {
-    storage: {
-      from: (bucket: string) => {
-        download: (
-          path: string,
-        ) => Promise<{ data: Blob | null; error: { message: string } | null }>
-      }
-    }
-  },
-  attempt: {
-    audio_path: string | null
-  },
-  metrics: AttemptMetrics,
-  transcript: string,
-  transcriptWords: readonly TranscriptWord[],
-): Promise<PronunciationEvaluation | null> {
-  const config = azureSpeechConfig()
-  const capture = metrics.capture
-  if (!config || !capture || !attempt.audio_path) return null
-
-  const request: PronunciationAssessmentRequest = {
-    contractVersion: 'v1',
-    provider: { id: 'azure-speech', model: 'short-audio', version: 'rest-v1' },
-    locale: config.locale,
-    scenario: 'scripted',
-    audio: { contentType: capture.mime_type, durationMs: capture.duration_ms },
-    referenceText: transcript,
-    recognizedWords: transcriptWords.map((word) => ({
-      word: word.word,
-      startMs: word.start * 1000,
-      endMs: word.end * 1000,
-    })),
-  }
-
-  if (!isAzureAudioSupported(request.audio.contentType, request.audio.durationMs)) {
-    return {
-      contractVersion: 'v1',
-      provider: {
-        id: 'azure-speech',
-        model: 'short-audio',
-        version: 'rest-v1',
-        locale: config.locale,
-      },
-      status: 'not_checked',
-      words: [],
-      unsupportedWords: [],
-      warnings: [
-        'Azure short-audio assessment does not support this recording format or duration.',
-      ],
-      error: null,
-      eligibleForDeductions: false,
-    }
-  }
-
-  const { data: audio, error } = await supabase.storage
-    .from(RECORDINGS_BUCKET)
-    .download(attempt.audio_path)
-  if (error || !audio) return null
-
-  return createAzurePronunciationProvider(config).assess(request, await audio.arrayBuffer())
-}
-
 export async function POST(request: Request) {
   const supabase = await createClient()
   const {
@@ -190,20 +124,23 @@ export async function POST(request: Request) {
   }
 
   if (attempt.rubric_version === 'v2' && isPracticeMode(attempt.practice_mode)) {
-    const pronunciation = await pronunciationEvidence(
-      supabase,
-      { audio_path: attempt.audio_path },
-      metrics,
+    const azureConfig = azureSpeechConfig()
+    const pronunciationPromise = collectPronunciationEvidence({
+      config: azureConfig,
+      provider: azureConfig ? createAzurePronunciationProvider(azureConfig) : null,
+      audioPath: attempt.audio_path,
+      capture,
       transcript,
       transcriptWords,
-    )
+      download: (path) => supabase.storage.from(RECORDINGS_BUCKET).download(path),
+    })
     let provider: V2ContentDetectorProvider
     try {
       provider = contentDetectorFromModel(createDeepSeekModel(deepseekApiKey()))
     } catch (error) {
       provider = unavailableProvider(error)
     }
-    const content = await runV2ContentEvaluation({
+    const contentPromise = runV2ContentEvaluation({
       provider,
       mode: attempt.practice_mode,
       prompt: attempt.prompt_text,
@@ -212,6 +149,7 @@ export async function POST(request: Request) {
       unreliableTranscriptSpans: unreliableSpans(transcript, transcriptWords),
       timeoutMs: MODEL_TIMEOUT_MS,
     })
+    const [pronunciation, content] = await Promise.all([pronunciationPromise, contentPromise])
     const assembled = assembleV2Score({
       mode: attempt.practice_mode,
       fluency: evaluateFluency({ capture, words: transcriptWords, transcript }),
@@ -237,6 +175,7 @@ export async function POST(request: Request) {
         content_result: JSON.parse(JSON.stringify(content)),
       })
       .eq('id', attemptId)
+      .eq('user_id', user.id)
     if (saveError) return apiError(`The score could not be saved: ${saveError.message}`, 500)
 
     return NextResponse.json({

@@ -2,7 +2,7 @@ import type { TranscriptWord } from '@/lib/deepgram/parse'
 import { clamp01, median } from '@/lib/scoring/scale'
 import type { ScoreEvidence } from '@/lib/scoring/v2/contracts'
 import type { CaptureMetrics } from '@/lib/types/metrics'
-import type { PronunciationEvaluation } from '@/lib/pronunciation/contracts'
+import { parsePronunciationEvaluation } from '@/lib/pronunciation/contracts'
 
 export const LOW_WORD_CONFIDENCE = 0.75
 export const MIN_CLARITY_WORDS = 8
@@ -27,6 +27,10 @@ export interface ClarityMeasurements {
   speech_level: number | null
   noise_level: number | null
   speech_to_noise_ratio: number | null
+  pronunciation_status: 'missing' | 'completed' | 'not_checked' | 'failed' | 'malformed'
+  pronunciation_assessed_word_count: number
+  pronunciation_matched_word_count: number
+  pronunciation_phoneme_evidence_count: number
 }
 
 export interface ClarityDeduction {
@@ -72,6 +76,10 @@ function baseMeasurements(
     speech_level: null,
     noise_level: null,
     speech_to_noise_ratio: null,
+    pronunciation_status: 'missing',
+    pronunciation_assessed_word_count: 0,
+    pronunciation_matched_word_count: 0,
+    pronunciation_phoneme_evidence_count: 0,
   }
 }
 
@@ -248,10 +256,9 @@ function wordEvidence(words: readonly TranscriptWord[]): ScoreEvidence[] {
 }
 
 /** Evaluates response intelligibility from recognition and recording evidence only. */
-export function analyseClarity(
+function analyseClarityV1(
   words: readonly TranscriptWord[],
   capture?: CaptureMetrics | null,
-  pronunciation?: PronunciationEvaluation | null,
 ): ClarityResult {
   let measurements = baseMeasurements(words, capture)
   if (!capture) return unavailable(measurements, 'Audio capture evidence was unavailable.')
@@ -330,33 +337,13 @@ export function analyseClarity(
         : `${lowConfidenceWords.length} recognized words had lower transcription confidence.`,
   }
 
-  const pronunciationEvidence =
-    pronunciation?.status === 'completed'
-      ? pronunciation.words
-          .filter(
-            (word) =>
-              word.pronunciationAvailability === 'available' &&
-              word.startMs !== null &&
-              word.endMs !== null &&
-              word.recognizedWord !== null,
-          )
-          .slice(0, MAX_WORD_EVIDENCE)
-          .map((word) => ({
-            source: 'azure_pronunciation',
-            start: (word.startMs as number) / 1000,
-            end: (word.endMs as number) / 1000,
-            quote: word.recognizedWord,
-            detail: 'Provider word-level sound evidence is recorded for review only.',
-          }))
-      : []
-
   return {
     category: 'clarity',
     availability: 'available',
     status: 'scored',
     component,
     measurements,
-    evidence: [summaryEvidence, ...uncertainEvidence, audioEvidence, ...pronunciationEvidence],
+    evidence: [summaryEvidence, ...uncertainEvidence, audioEvidence],
     deductions:
       lowConfidenceWords.length > 0
         ? [
@@ -367,9 +354,104 @@ export function analyseClarity(
             },
           ]
         : [],
+    warnings,
+  }
+}
+
+function pronunciationOverlay(value: unknown): {
+  measurements: Pick<
+    ClarityMeasurements,
+    | 'pronunciation_status'
+    | 'pronunciation_assessed_word_count'
+    | 'pronunciation_matched_word_count'
+    | 'pronunciation_phoneme_evidence_count'
+  >
+  evidence: readonly ScoreEvidence[]
+  warnings: readonly string[]
+} {
+  if (value === undefined || value === null) {
+    return {
+      measurements: {
+        pronunciation_status: 'missing',
+        pronunciation_assessed_word_count: 0,
+        pronunciation_matched_word_count: 0,
+        pronunciation_phoneme_evidence_count: 0,
+      },
+      evidence: [],
+      warnings: [],
+    }
+  }
+  const parsed = parsePronunciationEvaluation(value)
+  if (!parsed.ok) {
+    return {
+      measurements: {
+        pronunciation_status: 'malformed',
+        pronunciation_assessed_word_count: 0,
+        pronunciation_matched_word_count: 0,
+        pronunciation_phoneme_evidence_count: 0,
+      },
+      evidence: [],
+      warnings: [],
+    }
+  }
+  const assessedWords = parsed.value.words.filter(
+    (word) => word.pronunciationAvailability === 'available',
+  )
+  const matchedWords = assessedWords.filter((word) => word.lexicalOutcome === 'match')
+  const phonemeCount = matchedWords.reduce((sum, word) => sum + word.phonemes.length, 0)
+  const evidence = matchedWords.flatMap((word) => {
+    if (word.startMs === null || word.endMs === null || word.recognizedWord === null) return []
+    const start = word.startMs / 1000
+    const end = word.endMs / 1000
+    const wordEvidence: ScoreEvidence = {
+      source: 'azure_pronunciation',
+      start,
+      end,
+      quote: word.recognizedWord,
+      detail: `Word-level sound evidence was available for "${word.recognizedWord}".`,
+    }
+    const soundEvidence = word.phonemes.flatMap((phoneme) =>
+      phoneme.expected
+        ? [
+            {
+              source: 'azure_pronunciation',
+              start,
+              end,
+              quote: word.recognizedWord,
+              detail: `Sound evidence for "${phoneme.expected}" in "${word.recognizedWord}" was available.`,
+            } satisfies ScoreEvidence,
+          ]
+        : [],
+    )
+    return [wordEvidence, ...soundEvidence]
+  })
+  return {
+    measurements: {
+      pronunciation_status: parsed.value.status,
+      pronunciation_assessed_word_count: assessedWords.length,
+      pronunciation_matched_word_count: matchedWords.length,
+      pronunciation_phoneme_evidence_count: phonemeCount,
+    },
+    evidence: evidence.slice(0, MAX_WORD_EVIDENCE),
     warnings:
-      pronunciationEvidence.length > 0
-        ? [...warnings, 'Provider sound evidence is informational and does not change this score.']
-        : warnings,
+      evidence.length > 0
+        ? ['Provider sound evidence is informational and does not change this score.']
+        : [],
+  }
+}
+
+/** Adds optional provider evidence without changing the Clarity v1 decision. */
+export function analyseClarity(
+  words: readonly TranscriptWord[],
+  capture?: CaptureMetrics | null,
+  pronunciation?: unknown,
+): ClarityResult {
+  const base = analyseClarityV1(words, capture)
+  const overlay = pronunciationOverlay(pronunciation)
+  return {
+    ...base,
+    measurements: { ...base.measurements, ...overlay.measurements },
+    evidence: [...base.evidence, ...overlay.evidence],
+    warnings: [...base.warnings, ...overlay.warnings],
   }
 }

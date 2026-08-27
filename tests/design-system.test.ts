@@ -103,7 +103,13 @@ describe('design system', () => {
 })
 
 describe('server only keys', () => {
-  const SECRETS = ['SUPABASE_SECRET_KEY', 'DEEPGRAM_API_KEY', 'DEEPSEEK_API_KEY']
+  const SECRETS = [
+    'SUPABASE_SECRET_KEY',
+    'DEEPGRAM_API_KEY',
+    'DEEPSEEK_API_KEY',
+    'AZURE_SPEECH_KEY',
+  ]
+  const SERVER_ONLY_CONFIGURATION = [...SECRETS, 'AZURE_SPEECH_ENDPOINT']
 
   it('reads the secrets in exactly one module', () => {
     const readers = files
@@ -119,7 +125,7 @@ describe('server only keys', () => {
         (file) =>
           file.contents.includes('@/lib/env/server') ||
           file.contents.includes('@/lib/supabase/admin') ||
-          SECRETS.some((name) => file.contents.includes(name)),
+          SERVER_ONLY_CONFIGURATION.some((name) => file.contents.includes(name)),
       )
       .map((file) => file.path)
     expect(leaks).toEqual([])
