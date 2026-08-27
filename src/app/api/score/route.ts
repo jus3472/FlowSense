@@ -1,5 +1,19 @@
 import { NextResponse } from 'next/server'
 import { apiError } from '@/lib/api/responses'
+import { validateOwnedAttemptAudioPath } from '@/lib/attempts/audio-path'
+import { isLegacyRecheckSnapshot } from '@/lib/attempts/legacy-recheck'
+import {
+  ATTEMPT_FAILURE_CODES,
+  canRunScoring,
+  classifyAttemptRubric,
+  shouldUseV2Assembler,
+} from '@/lib/attempts/lifecycle'
+import {
+  authenticatedAttemptContext,
+  logAttemptDiagnostic,
+  markOwnedAttemptFailure,
+  transitionOwnedAttempt,
+} from '@/lib/attempts/server'
 import { createDeepSeekModel } from '@/lib/deepseek/provider'
 import {
   CONTENT_SYSTEM_PROMPT,
@@ -28,10 +42,10 @@ import type { V2ContentDetectorProvider } from '@/lib/scoring/v2/content/contrac
 import { runV2ContentEvaluation } from '@/lib/scoring/v2/content/evaluate'
 import { evaluateDelivery } from '@/lib/scoring/v2/delivery'
 import { evaluateFluency } from '@/lib/scoring/v2/fluency'
-import { createClient } from '@/lib/supabase/server'
 import type { TranscriptWord } from '@/lib/deepgram/parse'
 import type { AttemptMetrics } from '@/lib/types/metrics'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
+import { isUuid } from '@/lib/practice/session'
 
 /** The model call is the slow half. Mechanical metrics take milliseconds. */
 export const maxDuration = 60
@@ -69,16 +83,17 @@ function unreliableSpans(transcript: string, words: readonly TranscriptWord[]) {
 }
 
 function unavailableProvider(error: unknown): V2ContentDetectorProvider {
-  const message = error instanceof Error ? error.message : 'Content provider failed.'
-  return { name: 'deepseek', complete: async () => Promise.reject(new Error(message)) }
+  void error
+  return {
+    name: 'deepseek',
+    complete: async () => Promise.reject(new Error('Content provider unavailable.')),
+  }
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return apiError('Your session ended. Log in and try again.', 401)
+  const context = await authenticatedAttemptContext()
+  if (!context) return apiError('Your session ended. Log in and try again.', 401)
+  const { userId, admin } = context
 
   let body: unknown
   try {
@@ -88,19 +103,56 @@ export async function POST(request: Request) {
   }
 
   const attemptId = isRecord(body) && typeof body.attemptId === 'string' ? body.attemptId : ''
-  if (!attemptId) return apiError('The attempt id was missing.', 400)
+  if (!isUuid(attemptId)) return apiError('The attempt id was invalid.', 400)
 
-  const { data: attempt, error: readError } = await supabase
+  const { data: attempt, error: readError } = await admin
     .from('attempts')
     .select(
-      'id, prompt_text, audio_path, transcript, duration_ms, metrics, score, section_scores, content_result, practice_mode, rubric_version',
+      'id, prompt_text, audio_path, transcript, duration_ms, metrics, score, section_scores, content_result, practice_mode, rubric_version, status, created_at',
     )
     .eq('id', attemptId)
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .maybeSingle()
 
-  if (readError) return apiError(readError.message, 500)
+  if (readError) {
+    logAttemptDiagnostic('load_score_attempt', 'attempt_read_failed', attemptId, readError)
+    return apiError('The score could not be computed.', 500)
+  }
   if (!attempt) return apiError('That attempt does not exist.', 404)
+
+  const rubricKind = classifyAttemptRubric(attempt.rubric_version)
+  const v2Mode = isPracticeMode(attempt.practice_mode) ? attempt.practice_mode : null
+  const legacyRecheck = isLegacyRecheckSnapshot({
+    status: attempt.status,
+    rubricVersion: attempt.rubric_version,
+    id: attempt.id,
+    promptText: attempt.prompt_text,
+    transcript: attempt.transcript,
+    durationMs: attempt.duration_ms,
+    createdAt: attempt.created_at,
+    audioUrl: null,
+    score: attempt.score,
+    sectionScores: attempt.section_scores,
+    metrics: attempt.metrics,
+    contentResult: attempt.content_result,
+  })
+  const runV2Assembler = shouldUseV2Assembler(rubricKind, Boolean(v2Mode), legacyRecheck)
+  if (rubricKind === 'unsupported' || (rubricKind === 'v2' && !v2Mode && !legacyRecheck)) {
+    const isActive = ['uploading', 'transcribing', 'scoring'].includes(attempt.status)
+    if (isActive) {
+      await markOwnedAttemptFailure(
+        admin,
+        userId,
+        attemptId,
+        [attempt.status],
+        'failed',
+        rubricKind === 'unsupported'
+          ? ATTEMPT_FAILURE_CODES.unsupportedRubricVersion
+          : ATTEMPT_FAILURE_CODES.scoringInputInvalid,
+      )
+    }
+    return apiError('This attempt uses an unsupported scoring version.', 409)
+  }
 
   // A structurally valid v2 snapshot is immutable. Legacy snapshots remain on
   // the existing path so an explicit "Run the checks" retry can call its
@@ -113,178 +165,307 @@ export async function POST(request: Request) {
     })
   }
 
+  if (attempt.status === 'done' && !legacyRecheck) {
+    return NextResponse.json({
+      score: attempt.score,
+      section_scores: attempt.section_scores,
+      content_status: storedContentStatus(attempt.content_result),
+    })
+  }
+  if (!legacyRecheck && !canRunScoring(attempt.status)) {
+    return apiError('That attempt is not ready to be scored.', 409)
+  }
+  if (attempt.status === 'failed' || attempt.status === 'timed_out') {
+    const resumed = await transitionOwnedAttempt(
+      admin,
+      userId,
+      attemptId,
+      [attempt.status],
+      'scoring',
+    )
+    if (!resumed) return apiError('That attempt could not resume scoring.', 409)
+  }
+
   const metrics = (attempt.metrics as AttemptMetrics | null) ?? {}
   const capture = metrics.capture
   const transcriptWords = metrics.transcript?.words ?? []
   const transcript = attempt.transcript ?? ''
 
-  if (!capture) return apiError('This attempt has no capture data to score.', 400)
+  if (!capture) {
+    if (!legacyRecheck) {
+      await markOwnedAttemptFailure(
+        admin,
+        userId,
+        attemptId,
+        ['scoring'],
+        'failed',
+        ATTEMPT_FAILURE_CODES.scoringInputInvalid,
+      )
+    }
+    return apiError('This attempt has no capture data to score.', 400)
+  }
   if (transcript.trim().length === 0) {
+    if (!legacyRecheck) {
+      await markOwnedAttemptFailure(
+        admin,
+        userId,
+        attemptId,
+        ['scoring'],
+        'failed',
+        ATTEMPT_FAILURE_CODES.scoringInputInvalid,
+      )
+    }
     return apiError('This attempt has no transcript to score.', 400)
   }
 
-  if (attempt.rubric_version === 'v2' && isPracticeMode(attempt.practice_mode)) {
-    const azureConfig = azureSpeechConfig()
-    const pronunciationPromise = collectPronunciationEvidence({
-      config: azureConfig,
-      provider: azureConfig ? createAzurePronunciationProvider(azureConfig) : null,
-      audioPath: attempt.audio_path,
-      capture,
-      transcript,
-      transcriptWords,
-      download: (path) => supabase.storage.from(RECORDINGS_BUCKET).download(path),
-    })
-    let provider: V2ContentDetectorProvider
-    try {
-      provider = contentDetectorFromModel(createDeepSeekModel(deepseekApiKey()))
-    } catch (error) {
-      provider = unavailableProvider(error)
-    }
-    const contentPromise = runV2ContentEvaluation({
-      provider,
-      mode: attempt.practice_mode,
-      prompt: attempt.prompt_text,
-      transcript,
-      mechanicallyCounted: mechanicalSpans(transcript, transcriptWords),
-      unreliableTranscriptSpans: unreliableSpans(transcript, transcriptWords),
-      timeoutMs: MODEL_TIMEOUT_MS,
-    })
-    const [pronunciation, content] = await Promise.all([pronunciationPromise, contentPromise])
-    const assembled = assembleV2Score({
-      mode: attempt.practice_mode,
-      fluency: evaluateFluency({ capture, words: transcriptWords, transcript }),
-      delivery: evaluateDelivery(capture),
-      clarity: analyseClarity(transcriptWords, capture, pronunciation, transcript),
-      content,
-    })
-    const nextMetrics = {
-      ...metrics,
-      v2: {
-        score: assembled,
+  try {
+    if (runV2Assembler && v2Mode) {
+      const ownedAudio = validateOwnedAttemptAudioPath({
+        userId,
+        attemptId,
+        audioPath: attempt.audio_path,
+        metrics,
+      })
+      if (attempt.audio_path && !ownedAudio) {
+        logAttemptDiagnostic(
+          'validate_pronunciation_recording_path',
+          ATTEMPT_FAILURE_CODES.recordingPathInvalid,
+          attemptId,
+        )
+      }
+      const azureConfig = azureSpeechConfig()
+      const pronunciationPromise = collectPronunciationEvidence({
+        config: azureConfig,
+        provider: azureConfig ? createAzurePronunciationProvider(azureConfig) : null,
+        audioPath: ownedAudio?.storagePath ?? null,
+        capture,
+        transcript,
+        transcriptWords,
+        download: (path) => admin.storage.from(RECORDINGS_BUCKET).download(path),
+      })
+      let provider: V2ContentDetectorProvider
+      try {
+        provider = contentDetectorFromModel(createDeepSeekModel(deepseekApiKey()))
+      } catch (error) {
+        provider = unavailableProvider(error)
+      }
+      const contentPromise = runV2ContentEvaluation({
+        provider,
+        mode: v2Mode,
+        prompt: attempt.prompt_text,
+        transcript,
+        mechanicallyCounted: mechanicalSpans(transcript, transcriptWords),
+        unreliableTranscriptSpans: unreliableSpans(transcript, transcriptWords),
+        timeoutMs: MODEL_TIMEOUT_MS,
+      })
+      const [pronunciation, content] = await Promise.all([pronunciationPromise, contentPromise])
+      const assembled = assembleV2Score({
+        mode: v2Mode,
+        fluency: evaluateFluency({ capture, words: transcriptWords, transcript }),
+        delivery: evaluateDelivery(capture),
+        clarity: analyseClarity(transcriptWords, capture, pronunciation, transcript),
         content,
-        scored_at: new Date().toISOString(),
-      },
-      ...(pronunciation ? { pronunciation } : {}),
-    }
-    const { error: saveError } = await supabase
-      .from('attempts')
-      .update({
+      })
+      const nextMetrics = {
+        ...metrics,
+        v2: {
+          score: assembled,
+          content,
+          scored_at: new Date().toISOString(),
+        },
+        ...(pronunciation ? { pronunciation } : {}),
+      }
+      const saved = await transitionOwnedAttempt(admin, userId, attemptId, ['scoring'], 'done', {
         score: assembled.total_earned_points,
         section_scores: JSON.parse(JSON.stringify(assembled)),
         metrics: JSON.parse(JSON.stringify(nextMetrics)),
         content_result: JSON.parse(JSON.stringify(content)),
       })
-      .eq('id', attemptId)
-      .eq('user_id', user.id)
-    if (saveError) return apiError(`The score could not be saved: ${saveError.message}`, 500)
+      if (!saved) {
+        const { data: concurrent } = await admin
+          .from('attempts')
+          .select('score, section_scores, content_result')
+          .eq('id', attemptId)
+          .eq('user_id', userId)
+          .maybeSingle()
+        if (concurrent && shouldReuseStoredV2Score(concurrent.section_scores)) {
+          return NextResponse.json({
+            score: concurrent.score,
+            section_scores: concurrent.section_scores,
+            content_status: storedContentStatus(concurrent.content_result),
+          })
+        }
+        await markOwnedAttemptFailure(
+          admin,
+          userId,
+          attemptId,
+          ['scoring'],
+          'failed',
+          ATTEMPT_FAILURE_CODES.scoringPersistenceFailed,
+        )
+        return apiError('The score could not be saved.', 500)
+      }
 
-    return NextResponse.json({
-      score: assembled.total_earned_points,
-      section_scores: assembled,
-      content_status: content.status,
+      return NextResponse.json({
+        score: assembled.total_earned_points,
+        section_scores: assembled,
+        content_status: content.status,
+      })
+    }
+
+    // Fast, local, and always available.
+    const mechanical = computeMechanical(capture, transcriptWords, transcript)
+    for (const warning of mechanical.warnings) console.warn('[score]', attemptId, warning)
+
+    const { data: disputeRows } = await admin
+      .from('note_feedback')
+      .select('note_type, quote')
+      .eq('attempt_id', attemptId)
+      .eq('user_id', userId)
+    const disputes: Dispute[] = (disputeRows ?? []).map((row) => ({
+      note_type: row.note_type,
+      quote: row.quote,
+    }))
+
+    const countedTokens = mechanical.statistics.counted_items.reduce(
+      (sum, item) => sum + item.token_indices.length,
+      0,
+    )
+
+    const userPrompt = buildContentUserPrompt({
+      promptText: attempt.prompt_text,
+      transcript,
+      wordCount: mechanical.statistics.word_count,
+      durationSeconds: capture.duration_ms / 1000,
+      repeatedPhrases: mechanical.statistics.repeated_phrases,
+      targetTightenedWords: Math.max(1, mechanical.statistics.word_count - countedTokens),
+      surfacesToDelete: surfacesToDelete(mechanical.statistics.counted_items),
     })
-  }
 
-  // Fast, local, and always available.
-  const mechanical = computeMechanical(capture, transcriptWords, transcript)
-  for (const warning of mechanical.warnings) console.warn('[score]', attemptId, warning)
-
-  const { data: disputeRows } = await supabase
-    .from('note_feedback')
-    .select('note_type, quote')
-    .eq('attempt_id', attemptId)
-  const disputes: Dispute[] = (disputeRows ?? []).map((row) => ({
-    note_type: row.note_type,
-    quote: row.quote,
-  }))
-
-  const countedTokens = mechanical.statistics.counted_items.reduce(
-    (sum, item) => sum + item.token_indices.length,
-    0,
-  )
-
-  const userPrompt = buildContentUserPrompt({
-    promptText: attempt.prompt_text,
-    transcript,
-    wordCount: mechanical.statistics.word_count,
-    durationSeconds: capture.duration_ms / 1000,
-    repeatedPhrases: mechanical.statistics.repeated_phrases,
-    targetTightenedWords: Math.max(1, mechanical.statistics.word_count - countedTokens),
-    surfacesToDelete: surfacesToDelete(mechanical.statistics.counted_items),
-  })
-
-  const {
-    model,
-    parsed,
-    error: contentError,
-    tighten,
-  } = await runContentCheckSafely({
-    createModel: () => createDeepSeekModel(deepseekApiKey()),
-    request: { system: CONTENT_SYSTEM_PROMPT, user: userPrompt, timeoutMs: MODEL_TIMEOUT_MS },
-    transcript,
-    countedText: mechanical.statistics.counted_items.map((item) => item.text),
-    countedTokens,
-    rewriteRequest: ({ previous, mustNotAppear, targetWords }) => ({
-      system: REWRITE_SYSTEM_PROMPT,
-      user: buildRewriteRetryPrompt({ transcript, previous, mustNotAppear, targetWords }),
-      timeoutMs: MODEL_TIMEOUT_MS,
-    }),
-  })
-  if (contentError) console.warn('[score]', attemptId, 'content check failed:', contentError)
-
-  // The rate of under removal, one line per attempt that needed help.
-  if (tighten && (tighten.outcome === 'retried' || tighten.outcome === 'stripped')) {
-    console.warn('[score]', attemptId, `tightened rewrite ${tighten.outcome}`, {
-      leftIn: tighten.violations,
-      removedByHand: tighten.removed,
-      stillThere: tighten.remaining,
+    const {
+      model,
+      parsed,
+      error: contentError,
+      tighten,
+    } = await runContentCheckSafely({
+      createModel: () => createDeepSeekModel(deepseekApiKey()),
+      request: { system: CONTENT_SYSTEM_PROMPT, user: userPrompt, timeoutMs: MODEL_TIMEOUT_MS },
+      transcript,
+      countedText: mechanical.statistics.counted_items.map((item) => item.text),
+      countedTokens,
+      rewriteRequest: ({ previous, mustNotAppear, targetWords }) => ({
+        system: REWRITE_SYSTEM_PROMPT,
+        user: buildRewriteRetryPrompt({ transcript, previous, mustNotAppear, targetWords }),
+        timeoutMs: MODEL_TIMEOUT_MS,
+      }),
     })
-  }
+    if (contentError) {
+      logAttemptDiagnostic('legacy_content_check', 'content_check_not_checked', attemptId)
+    }
 
-  const checked = parsed !== null
-  const assembled = assembleScore(mechanical, parsed ?? notCheckedContent(), {
-    status: checked ? 'checked' : 'not_checked',
-    model: checked ? (model?.name ?? null) : null,
-    error: checked ? null : contentError,
-    disputes,
-  })
+    // The rate of under removal, one line per attempt that needed help.
+    if (tighten && (tighten.outcome === 'retried' || tighten.outcome === 'stripped')) {
+      console.warn('[score] tightened rewrite adjusted', {
+        attemptId,
+        outcome: tighten.outcome,
+        violations: tighten.violations.length,
+        removed: tighten.removed.length,
+        remaining: tighten.remaining.length,
+      })
+    }
 
-  const nextMetrics: AttemptMetrics = {
-    ...metrics,
-    delivery: {
-      metrics: mechanical.metrics,
-      statistics: mechanical.statistics,
-      pauses: mechanical.pauses,
-      warnings: mechanical.warnings,
-      scored_at: new Date().toISOString(),
-      version: SCORE_VERSION,
-    },
-  }
+    const checked = parsed !== null
+    const assembled = assembleScore(mechanical, parsed ?? notCheckedContent(), {
+      status: checked ? 'checked' : 'not_checked',
+      model: checked ? (model?.name ?? null) : null,
+      error: checked ? null : contentError,
+      disputes,
+    })
 
-  const { error: saveError } = await supabase
-    .from('attempts')
-    .update({
+    const nextMetrics: AttemptMetrics = {
+      ...metrics,
+      delivery: {
+        metrics: mechanical.metrics,
+        statistics: mechanical.statistics,
+        pauses: mechanical.pauses,
+        warnings: mechanical.warnings,
+        scored_at: new Date().toISOString(),
+        version: SCORE_VERSION,
+      },
+    }
+
+    const scoreValues = {
       score: assembled.score,
       section_scores: JSON.parse(JSON.stringify(assembled.section_scores)),
       metrics: JSON.parse(JSON.stringify(nextMetrics)),
       content_result: JSON.parse(JSON.stringify(assembled.content_result)),
+    }
+    let saved = false
+    if (legacyRecheck) {
+      const { data, error } = await admin
+        .from('attempts')
+        .update(scoreValues)
+        .eq('id', attemptId)
+        .eq('user_id', userId)
+        .eq('status', 'done')
+        .eq('content_result->>status', 'not_checked')
+        .select('id')
+        .maybeSingle()
+      saved = Boolean(data) && !error
+      if (error) {
+        logAttemptDiagnostic('save_legacy_recheck', 'scoring_persistence_failed', attemptId, error)
+      }
+    } else {
+      saved = await transitionOwnedAttempt(
+        admin,
+        userId,
+        attemptId,
+        ['scoring'],
+        'done',
+        scoreValues,
+      )
+    }
+
+    if (!saved) {
+      if (!legacyRecheck) {
+        await markOwnedAttemptFailure(
+          admin,
+          userId,
+          attemptId,
+          ['scoring'],
+          'failed',
+          ATTEMPT_FAILURE_CODES.scoringPersistenceFailed,
+        )
+      }
+      return apiError('The score could not be saved.', 500)
+    }
+
+    console.info('[score]', {
+      attemptId,
+      score: assembled.score,
+      delivery: assembled.section_scores.delivery.earned,
+      content: assembled.section_scores.content.earned,
+      contentStatus: assembled.content_result.status,
+      tightened: assembled.content_result.tightened_outcome,
     })
-    .eq('id', attemptId)
 
-  if (saveError) return apiError(`The score could not be saved: ${saveError.message}`, 500)
-
-  console.info('[score]', {
-    attemptId,
-    score: assembled.score,
-    delivery: assembled.section_scores.delivery.earned,
-    content: assembled.section_scores.content.earned,
-    contentStatus: assembled.content_result.status,
-    tightened: assembled.content_result.tightened_outcome,
-  })
-
-  return NextResponse.json({
-    score: assembled.score,
-    section_scores: assembled.section_scores,
-    content_status: assembled.content_result.status,
-  })
+    return NextResponse.json({
+      score: assembled.score,
+      section_scores: assembled.section_scores,
+      content_status: assembled.content_result.status,
+    })
+  } catch (error) {
+    logAttemptDiagnostic('score_attempt', ATTEMPT_FAILURE_CODES.scoringUnexpected, attemptId, error)
+    if (!legacyRecheck) {
+      await markOwnedAttemptFailure(
+        admin,
+        userId,
+        attemptId,
+        ['scoring'],
+        'failed',
+        ATTEMPT_FAILURE_CODES.scoringUnexpected,
+      )
+    }
+    return apiError('The score could not be computed.', 500)
+  }
 }

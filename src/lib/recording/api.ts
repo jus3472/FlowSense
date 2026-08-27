@@ -4,7 +4,6 @@ import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { createClient } from '@/lib/supabase/client'
 import type { CaptureMetrics } from '@/lib/types/metrics'
 import type { PracticeSessionDescriptor } from '@/lib/practice/session'
-import { RUBRIC_VERSION, type RubricVersion } from '@/lib/scoring/v2/contracts'
 
 /**
  * Browser side calls for the recording pipeline. Each one is a single network
@@ -41,14 +40,24 @@ async function accessToken(): Promise<string> {
 }
 
 export interface CreateAttemptInput extends PracticeSessionDescriptor {
+  clientRequestId: string
   durationMs: number
   mimeType: string
-  rubricVersion: RubricVersion
 }
 
 export interface CreatedAttempt {
   attemptId: string
   storagePath: string
+}
+
+const requestIdsBySession = new WeakMap<PracticeSessionDescriptor, string>()
+
+function requestIdForSession(session: PracticeSessionDescriptor): string {
+  const existing = requestIdsBySession.get(session)
+  if (existing) return existing
+  const created = crypto.randomUUID()
+  requestIdsBySession.set(session, created)
+  return created
 }
 
 export async function createAttempt(input: CreateAttemptInput): Promise<CreatedAttempt> {
@@ -78,8 +87,9 @@ export async function createAttempt(input: CreateAttemptInput): Promise<CreatedA
 export function createAttemptForSession(
   session: PracticeSessionDescriptor,
   input: Pick<CreateAttemptInput, 'durationMs' | 'mimeType'>,
+  clientRequestId = requestIdForSession(session),
 ): CreateAttemptInput {
-  return { ...session, ...input, rubricVersion: RUBRIC_VERSION }
+  return { ...session, ...input, clientRequestId }
 }
 
 /** Straight from the browser to the private bucket, under the user's own prefix. */

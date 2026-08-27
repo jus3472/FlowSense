@@ -50,8 +50,6 @@ documented 16 kHz PCM WAV and OGG Opus short-audio inputs up to 30 seconds; othe
 remain not checked and no pronunciation deductions are applied.
 
 `SUPABASE_DB_URL` is local-only and required only for database migrations and inspection scripts.
-`DEEPGRAM_DEBUG=true` logs raw transcription responses for debugging and should remain disabled by
-default.
 
 ## Commands
 

@@ -6,8 +6,9 @@ import type { Database } from '@/lib/types/database'
 
 /**
  * Service role client. It bypasses row level security, so it is only for work
- * that genuinely cannot run as the signed in user, such as signing storage URLs
- * for a background job. Never import this from a client component.
+ * that genuinely cannot run as the signed in user. Route handlers must first
+ * authenticate with the request client, then prove row ownership and keep the
+ * user id in every mutation filter. Never import this from a client component.
  */
 export function createAdminClient() {
   return createSupabaseClient<Database>(publicEnv.supabaseUrl, supabaseSecretKey(), {

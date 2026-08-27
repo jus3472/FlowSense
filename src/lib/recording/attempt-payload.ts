@@ -2,9 +2,9 @@ import { isRecordingMimeType } from '@/lib/recording/mime'
 import { MAX_RECORDING_MS } from '@/lib/recording/recorder'
 import {
   parsePracticeSessionDescriptor,
+  isUuid,
   type PracticeSessionDescriptor,
 } from '@/lib/practice/session'
-import { RUBRIC_VERSION, type RubricVersion } from '@/lib/scoring/v2/contracts'
 
 /**
  * Prompts are short, single questions. This leaves ample room for future
@@ -13,9 +13,9 @@ import { RUBRIC_VERSION, type RubricVersion } from '@/lib/scoring/v2/contracts'
 export const MAX_ATTEMPT_PROMPT_TEXT_LENGTH = 1_000
 
 export interface CreateAttemptPayload extends PracticeSessionDescriptor {
+  clientRequestId: string
   mimeType: string
   durationMs: number
-  rubricVersion: RubricVersion
 }
 
 export type CreateAttemptPayloadResult =
@@ -31,6 +31,7 @@ export function parseCreateAttemptPayload(value: unknown): CreateAttemptPayloadR
 
   const promptText = typeof value.promptText === 'string' ? value.promptText.trim() : ''
   const session = parsePracticeSessionDescriptor(value)
+  const clientRequestId = isUuid(value.clientRequestId) ? value.clientRequestId : null
   const mimeType = typeof value.mimeType === 'string' ? value.mimeType : ''
   const durationMs =
     typeof value.durationMs === 'number' && Number.isFinite(value.durationMs)
@@ -39,6 +40,7 @@ export function parseCreateAttemptPayload(value: unknown): CreateAttemptPayloadR
 
   if (promptText.length === 0) return { ok: false, error: 'The prompt text was missing.' }
   if (!session) return { ok: false, error: 'The practice session was invalid.' }
+  if (!clientRequestId) return { ok: false, error: 'The recording request id was invalid.' }
   if (session.promptText.length > MAX_ATTEMPT_PROMPT_TEXT_LENGTH) {
     return { ok: false, error: 'Your prompt is too long.' }
   }
@@ -52,9 +54,5 @@ export function parseCreateAttemptPayload(value: unknown): CreateAttemptPayloadR
   if (durationMs > MAX_RECORDING_MS * 2) {
     return { ok: false, error: 'That recording is longer than FlowSense accepts.' }
   }
-  if (value.rubricVersion !== RUBRIC_VERSION) {
-    return { ok: false, error: 'The scoring version was not supported.' }
-  }
-
-  return { ok: true, value: { ...session, mimeType, durationMs, rubricVersion: RUBRIC_VERSION } }
+  return { ok: true, value: { ...session, clientRequestId, mimeType, durationMs } }
 }

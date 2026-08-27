@@ -5,6 +5,7 @@ import {
 } from '@/lib/recording/attempt-payload'
 
 const VALID = {
+  clientRequestId: '8c567083-a9f7-4e4f-8e8d-094698d9fa8d',
   promptId: '0df9c03d-13cf-4bf5-96d9-0e3524e1524a',
   promptText: 'Describe your ideal weekend.',
   mimeType: 'audio/webm;codecs=opus',
@@ -14,7 +15,6 @@ const VALID = {
   source: 'library',
   targetDurationSeconds: 30,
   retryOfAttemptId: null,
-  rubricVersion: 'v2',
 }
 
 describe('parseCreateAttemptPayload', () => {
@@ -52,9 +52,9 @@ describe('parseCreateAttemptPayload', () => {
       'The recording format was not supported.',
     ],
     [
-      'a wrong rubric version',
-      { ...VALID, rubricVersion: 'v1' },
-      'The scoring version was not supported.',
+      'an invalid recording request id',
+      { ...VALID, clientRequestId: 'request-1' },
+      'The recording request id was invalid.',
     ],
   ])('rejects %s', (_label, payload, error) => {
     expect(parseCreateAttemptPayload(payload)).toEqual({ ok: false, error })
@@ -67,5 +67,11 @@ describe('parseCreateAttemptPayload', () => {
         promptText: 'a'.repeat(MAX_ATTEMPT_PROMPT_TEXT_LENGTH),
       }),
     ).toMatchObject({ ok: true })
+  })
+
+  it('does not accept a browser-selected rubric field into the parsed payload', () => {
+    const result = parseCreateAttemptPayload({ ...VALID, rubricVersion: 'v1' })
+    expect(result).toMatchObject({ ok: true })
+    if (result.ok) expect(result.value).not.toHaveProperty('rubricVersion')
   })
 })
