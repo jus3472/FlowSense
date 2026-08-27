@@ -83,6 +83,11 @@ describe('server-owned attempt boundary', () => {
     expect(guard).toBeGreaterThan(-1)
     expect(guard).toBeLessThan(scoreRoute.indexOf('if (shouldReuseStoredV2Score'))
     expect(scoreRoute).toContain('ATTEMPT_FAILURE_CODES.unsupportedRubricVersion')
-    expect(scoreRoute).toContain("if (rubricKind === 'v2' && v2Mode)")
+    expect(scoreRoute).toContain('const legacyRecheck = isLegacyRecheckSnapshot({')
+    expect(scoreRoute).toContain(
+      'const runV2Assembler = shouldUseV2Assembler(rubricKind, Boolean(v2Mode), legacyRecheck)',
+    )
+    expect(scoreRoute).toContain('if (runV2Assembler && v2Mode)')
+    expect(scoreRoute).toContain("if (attempt.status === 'done' && !legacyRecheck)")
   })
 })

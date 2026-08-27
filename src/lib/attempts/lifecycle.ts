@@ -59,11 +59,20 @@ export function canRunScoring(status: AttemptStatus): boolean {
 
 export type AttemptRubricKind = 'v2' | 'legacy' | 'unsupported'
 
-/** Only explicit v1/null metadata may use the historical scoring implementation. */
+/** Only explicit legacy metadata may use the historical scoring implementation. */
 export function classifyAttemptRubric(value: unknown): AttemptRubricKind {
   if (value === 'v2') return 'v2'
-  if (value === null || value === 'v1') return 'legacy'
+  if (value === null || value === 'v1' || value === 'legacy') return 'legacy'
   return 'unsupported'
+}
+
+/** A genuine legacy retry overrides contradictory v2 row metadata. */
+export function shouldUseV2Assembler(
+  rubricKind: AttemptRubricKind,
+  hasV2Mode: boolean,
+  legacyRecheck: boolean,
+): boolean {
+  return rubricKind === 'v2' && hasV2Mode && !legacyRecheck
 }
 
 export function terminalStatusForTimeout(timedOut: boolean): 'failed' | 'timed_out' {

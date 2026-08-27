@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
 import { apiError } from '@/lib/api/responses'
 import { validateOwnedAttemptAudioPath } from '@/lib/attempts/audio-path'
+import { isLegacyRecheckSnapshot } from '@/lib/attempts/legacy-recheck'
 import {
   ATTEMPT_FAILURE_CODES,
   canRunScoring,
   classifyAttemptRubric,
+  shouldUseV2Assembler,
 } from '@/lib/attempts/lifecycle'
 import {
   authenticatedAttemptContext,
@@ -106,7 +108,7 @@ export async function POST(request: Request) {
   const { data: attempt, error: readError } = await admin
     .from('attempts')
     .select(
-      'id, prompt_text, audio_path, transcript, duration_ms, metrics, score, section_scores, content_result, practice_mode, rubric_version, status',
+      'id, prompt_text, audio_path, transcript, duration_ms, metrics, score, section_scores, content_result, practice_mode, rubric_version, status, created_at',
     )
     .eq('id', attemptId)
     .eq('user_id', userId)
@@ -120,7 +122,22 @@ export async function POST(request: Request) {
 
   const rubricKind = classifyAttemptRubric(attempt.rubric_version)
   const v2Mode = isPracticeMode(attempt.practice_mode) ? attempt.practice_mode : null
-  if (rubricKind === 'unsupported' || (rubricKind === 'v2' && !v2Mode)) {
+  const legacyRecheck = isLegacyRecheckSnapshot({
+    status: attempt.status,
+    rubricVersion: attempt.rubric_version,
+    id: attempt.id,
+    promptText: attempt.prompt_text,
+    transcript: attempt.transcript,
+    durationMs: attempt.duration_ms,
+    createdAt: attempt.created_at,
+    audioUrl: null,
+    score: attempt.score,
+    sectionScores: attempt.section_scores,
+    metrics: attempt.metrics,
+    contentResult: attempt.content_result,
+  })
+  const runV2Assembler = shouldUseV2Assembler(rubricKind, Boolean(v2Mode), legacyRecheck)
+  if (rubricKind === 'unsupported' || (rubricKind === 'v2' && !v2Mode && !legacyRecheck)) {
     const isActive = ['uploading', 'transcribing', 'scoring'].includes(attempt.status)
     if (isActive) {
       await markOwnedAttemptFailure(
@@ -148,8 +165,6 @@ export async function POST(request: Request) {
     })
   }
 
-  const legacyRecheck =
-    attempt.status === 'done' && storedContentStatus(attempt.content_result) === 'not_checked'
   if (attempt.status === 'done' && !legacyRecheck) {
     return NextResponse.json({
       score: attempt.score,
@@ -204,7 +219,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (rubricKind === 'v2' && v2Mode) {
+    if (runV2Assembler && v2Mode) {
       const ownedAudio = validateOwnedAttemptAudioPath({
         userId,
         attemptId,

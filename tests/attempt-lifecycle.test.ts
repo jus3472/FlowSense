@@ -15,6 +15,7 @@ import {
   canTransitionAttempt,
   classifyAttemptRubric,
   isAttemptStatus,
+  shouldUseV2Assembler,
 } from '@/lib/attempts/lifecycle'
 import type { CreateAttemptPayload } from '@/lib/recording/attempt-payload'
 import type { LibraryPrompt } from '@/lib/prompts/selection'
@@ -71,9 +72,17 @@ describe('attempt lifecycle contract', () => {
   it('allows only v2 or explicit legacy metadata into a scoring implementation', () => {
     expect(classifyAttemptRubric('v2')).toBe('v2')
     expect(classifyAttemptRubric('v1')).toBe('legacy')
+    expect(classifyAttemptRubric('legacy')).toBe('legacy')
     expect(classifyAttemptRubric(null)).toBe('legacy')
     expect(classifyAttemptRubric('v3')).toBe('unsupported')
     expect(classifyAttemptRubric(undefined)).toBe('unsupported')
+  })
+
+  it('keeps a legacy recheck out of v2 dispatch despite v2 row metadata', () => {
+    expect(shouldUseV2Assembler('v2', true, true)).toBe(false)
+    expect(shouldUseV2Assembler('v2', true, false)).toBe(true)
+    expect(shouldUseV2Assembler('legacy', true, false)).toBe(false)
+    expect(shouldUseV2Assembler('unsupported', true, false)).toBe(false)
   })
 })
 
