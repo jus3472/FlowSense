@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
@@ -11,6 +11,10 @@ import type { Database, Json, PracticeMode, PromptSource } from '@/lib/types/dat
 import { legacySectionSnapshot, v2Snapshot } from './helpers/result-snapshots'
 
 vi.mock('server-only', () => ({}))
+const mocks = vi.hoisted(() => ({ reconcileCurrentUserStaleAttempts: vi.fn() }))
+vi.mock('@/lib/attempts/reconciliation', () => ({
+  reconcileCurrentUserStaleAttempts: mocks.reconcileCurrentUserStaleAttempts,
+}))
 
 interface FakeAttempt {
   id: string
@@ -47,6 +51,11 @@ function attempt(index: number, over: Partial<FakeAttempt> = {}): FakeAttempt {
     ...over,
   }
 }
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mocks.reconcileCurrentUserStaleAttempts.mockResolvedValue({ status: 'ready', reconciled: [] })
+})
 
 class FakeQuery implements PromiseLike<{ data: FakeAttempt[] | null; error: unknown }> {
   readonly operations: Operation[] = []
@@ -201,6 +210,7 @@ describe('history server loading', () => {
         hasPrevious: false,
       },
     })
+    expect(mocks.reconcileCurrentUserStaleAttempts).toHaveBeenCalledWith('user-1')
 
     const failed = fakeSupabase(
       [attempt(1)],

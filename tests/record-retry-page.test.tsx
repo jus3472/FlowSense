@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getPromptById: vi.fn(),
   getRecentCompletedLibraryPromptIds: vi.fn(),
   pickRecordPrompt: vi.fn(),
+  reconcileCurrentUserStaleAttempts: vi.fn(),
   recordFlow: vi.fn(),
   redirect: vi.fn(),
   refresh: vi.fn(),
@@ -45,6 +46,9 @@ vi.mock('@/lib/prompts/server', () => ({
   getPromptById: mocks.getPromptById,
   getRecentCompletedLibraryPromptIds: mocks.getRecentCompletedLibraryPromptIds,
   pickRecordPrompt: mocks.pickRecordPrompt,
+}))
+vi.mock('@/lib/attempts/reconciliation', () => ({
+  reconcileCurrentUserStaleAttempts: mocks.reconcileCurrentUserStaleAttempts,
 }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: mocks.createClient }))
 
@@ -148,6 +152,7 @@ async function renderPage(params: {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.reconcileCurrentUserStaleAttempts.mockResolvedValue({ status: 'ready', reconciled: [] })
   mocks.getPromptById.mockResolvedValue({ status: 'empty' })
   mocks.getRecentCompletedLibraryPromptIds.mockResolvedValue({ status: 'empty' })
   mocks.pickRecordPrompt.mockResolvedValue({
@@ -177,6 +182,7 @@ describe('record retry route boundary', () => {
     expect(screen.getByTestId('record-flow')).toBeInTheDocument()
     expect(mocks.pickRecordPrompt).toHaveBeenCalledOnce()
     expect(setup.retryRead).not.toHaveBeenCalled()
+    expect(mocks.reconcileCurrentUserStaleAttempts).not.toHaveBeenCalled()
     expect(mocks.recordFlow).toHaveBeenCalledWith(
       expect.objectContaining({
         promptText: 'Describe something nearby.',
@@ -203,6 +209,9 @@ describe('record retry route boundary', () => {
     })
     expect(setup.retryOperations).toContainEqual({ method: 'eq', args: ['id', ATTEMPT_ID] })
     expect(setup.retryOperations).toContainEqual({ method: 'eq', args: ['user_id', USER_ID] })
+    expect(mocks.reconcileCurrentUserStaleAttempts).toHaveBeenCalledWith(USER_ID, {
+      attemptId: ATTEMPT_ID,
+    })
   })
 
   it.each([

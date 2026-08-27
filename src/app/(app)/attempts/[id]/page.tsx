@@ -15,6 +15,7 @@ import {
   isRetryableAttemptStatus,
   type AttemptStatus,
 } from '@/lib/attempts/lifecycle'
+import { reconcileCurrentUserStaleAttempts } from '@/lib/attempts/reconciliation'
 import { logAttemptDiagnostic } from '@/lib/attempts/server'
 import { isUuid } from '@/lib/practice/session'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
@@ -123,6 +124,8 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+
+  await reconcileCurrentUserStaleAttempts(user.id, { attemptId: id })
 
   let attemptResponse
   try {

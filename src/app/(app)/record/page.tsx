@@ -5,6 +5,7 @@ import { RecordFlow } from '@/components/record/record-flow'
 import { RetryButton } from '@/components/system/retry-button'
 import { ButtonLink } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
+import { reconcileCurrentUserStaleAttempts } from '@/lib/attempts/reconciliation'
 import { dataEmpty, dataFailure, dataReady } from '@/lib/data/outcome'
 import { practiceModePriority, sanitizeFocusAreas } from '@/lib/focus-areas'
 import { isCustomPracticeMarker } from '@/lib/practice/custom'
@@ -79,6 +80,7 @@ export default async function RecordPage({
   const params = await searchParams
   let session: PracticeSessionDescriptor | null = null
   const retryResolution = await resolveExplicitRetryIntent(params, async (attemptId) => {
+    await reconcileCurrentUserStaleAttempts(user.id, { attemptId })
     try {
       const { data, error } = await supabase
         .from('attempts')
