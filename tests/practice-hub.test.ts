@@ -46,7 +46,7 @@ describe('practice hub routes', () => {
     expect(record).toContain('requestedMode,')
     expect(record).not.toContain("recentPromptIdsResult.status === 'failure'")
     expect(modePage).toContain('const browseOutcome = await getPromptBrowseData(')
-    expect(home).toContain('historyFailed ? [] : recentCompletedLibraryPromptIds(attempts)')
+    expect(home).toContain('responseData?.recentPromptIds ?? []')
     expect(home).not.toContain('const recommendedOutcome = historyFailed')
   })
 

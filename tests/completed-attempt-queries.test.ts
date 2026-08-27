@@ -16,11 +16,11 @@ describe('completed attempt query boundaries', () => {
 
   it('requires done status for prompt recency, Home history, and latest response', () => {
     const prompts = source('src/lib/prompts/server.ts')
-    const home = source('src/app/(app)/home/page.tsx')
+    const home = source('src/lib/home/server.ts')
 
     expect(prompts).toContain("select('prompt_id, prompt_source, status')")
     expect(prompts.match(/\.eq\('status', 'done'\)/g)).toHaveLength(1)
-    expect(home.match(/\.eq\('status', 'done'\)/g)).toHaveLength(2)
+    expect(home.match(/\.eq\('status', 'done'\)/g)).toHaveLength(1)
     expect(home).not.toContain('score.not.is.null')
     expect(home).not.toContain('section_scores.not.is.null')
   })
