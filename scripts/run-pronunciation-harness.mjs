@@ -16,6 +16,8 @@ for (const fixture of fixtures) {
     typeof response.provider.version === 'string' &&
     typeof response.provider.locale === 'string' &&
     Array.isArray(response.words) &&
+    Array.isArray(response.unsupportedWords) &&
+    Array.isArray(response.warnings) &&
     response.eligibleForDeductions === false
   const firstWord = response?.words?.[0]
   const checks = [
@@ -23,8 +25,25 @@ for (const fixture of fixtures) {
     ['lexical', !expected.lexicalOutcome || firstWord?.lexicalOutcome === expected.lexicalOutcome],
     ['status', !expected.status || response?.status === expected.status],
     [
-      'intelligibility',
-      !expected.intelligibility || firstWord?.intelligibility === expected.intelligibility,
+      'ground truth',
+      !expected.groundTruthIntelligibility || !Object.hasOwn(firstWord ?? {}, 'intelligibility'),
+    ],
+    [
+      'phoneme support',
+      !expected.phonemeAvailability ||
+        firstWord?.phonemeAvailability === expected.phonemeAvailability,
+    ],
+    [
+      'error',
+      !expected.error ||
+        response?.error?.code === expected.error ||
+        (!valid && expected.error === 'malformed_response'),
+    ],
+    [
+      'unsupported',
+      !firstWord ||
+        firstWord.lexicalOutcome !== 'unsupported' ||
+        response.unsupportedWords.includes(firstWord.referenceWord),
     ],
     ['non-deductible', expected.deductible !== false || response?.eligibleForDeductions === false],
   ]

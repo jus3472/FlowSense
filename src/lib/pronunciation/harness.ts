@@ -38,22 +38,22 @@ export function runPronunciationHarness(
       const first = parsed.value.words[0]
       const expectedLexical = expectedText(fixture.expected.lexicalOutcome)
       const expectedStatus = expectedText(fixture.expected.status)
-      const expectedIntelligibility = expectedText(fixture.expected.intelligibility)
+      const expectedGroundTruth = expectedText(fixture.expected.groundTruthIntelligibility)
       const expectedSupport = expectedText(fixture.expected.phonemeAvailability)
       const expectedError = expectedText(fixture.expected.error)
       if (expectedLexical)
         checks.push(first?.lexicalOutcome === expectedLexical ? 'lexical' : 'lexical mismatch')
       if (expectedStatus)
         checks.push(parsed.value.status === expectedStatus ? 'status' : 'status mismatch')
-      if (expectedIntelligibility)
+      if (expectedGroundTruth)
         checks.push(
-          first?.intelligibility === expectedIntelligibility
-            ? 'intelligibility'
-            : 'intelligibility mismatch',
+          first && !('intelligibility' in first)
+            ? 'ground truth is fixture-only'
+            : 'ground truth mismatch',
         )
       if (expectedSupport)
         checks.push(
-          first?.stressProsody.availability === expectedSupport
+          first?.phonemeAvailability === expectedSupport
             ? 'phoneme support'
             : 'phoneme support mismatch',
         )

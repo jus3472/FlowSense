@@ -23,7 +23,6 @@ describe('pronunciation provider-neutral contract', () => {
     expect(unusual.value.words[0]).toMatchObject({
       lexicalOutcome: 'match',
       pronunciationAccuracy: 0.52,
-      intelligibility: 'intelligible',
     })
     expect(substitution.value.words[0]).toMatchObject({
       lexicalOutcome: 'substitution',
@@ -31,6 +30,7 @@ describe('pronunciation provider-neutral contract', () => {
     })
     expect(unusual.value.eligibleForDeductions).toBe(false)
     expect(substitution.value.eligibleForDeductions).toBe(false)
+    expect(fixtures[0]?.expected.groundTruthIntelligibility).toBe('intelligible')
   })
 
   it('keeps unsupported words, missing phoneme support, and outages explicit', () => {
@@ -47,7 +47,7 @@ describe('pronunciation provider-neutral contract', () => {
       error: { code: 'outage', retryable: true },
     })
     expect(missingPhonemes.value.words[0]?.phonemes).toEqual([])
-    expect(missingPhonemes.value.words[0]?.stressProsody.availability).toBe('unsupported')
+    expect(missingPhonemes.value.words[0]?.phonemeAvailability).toBe('unsupported')
   })
 
   it('fails closed for malformed provider output', () => {
@@ -64,6 +64,42 @@ describe('pronunciation provider-neutral contract', () => {
     const parsed = parsePronunciationEvaluation({ ...source, eligibleForDeductions: true })
 
     expect(parsed.ok).toBe(false)
+  })
+
+  it('rejects contradictory lexical, availability, timing, and status evidence', () => {
+    const source = fixtures[0]?.response as Record<string, unknown>
+    const word = (source.words as Record<string, unknown>[])[0]
+    const contradictory = (changes: Record<string, unknown>) =>
+      parsePronunciationEvaluation({ ...source, words: [{ ...word, ...changes }] })
+
+    expect(contradictory({ recognizedWord: 'watered' }).ok).toBe(false)
+    expect(contradictory({ pronunciationAccuracy: null }).ok).toBe(false)
+    expect(contradictory({ startMs: 1, endMs: null }).ok).toBe(false)
+    expect(parsePronunciationEvaluation({ ...source, status: 'failed', error: null }).ok).toBe(
+      false,
+    )
+  })
+
+  it('fails the library harness when phoneme support regresses', () => {
+    const missingSupport = fixtures[5]
+    if (!missingSupport) throw new Error('Fixture was missing.')
+    const sourceWords = missingSupport.response.words
+    if (!sourceWords) throw new Error('Fixture words were missing.')
+    const mutated = {
+      ...missingSupport,
+      response: {
+        ...missingSupport.response,
+        words: sourceWords.map((word) => ({
+          ...word,
+          phonemeAvailability: 'available',
+          phonemes: [{ expected: 'b', recognized: 'b', accuracy: 1, startMs: 0, endMs: 80 }],
+        })),
+      },
+    }
+
+    const result = runPronunciationHarness([mutated])
+    expect(result.passed).toBe(false)
+    expect(result.cases[0]?.checks).toContain('phoneme support mismatch')
   })
 
   it('pins the independent contract version', () => {

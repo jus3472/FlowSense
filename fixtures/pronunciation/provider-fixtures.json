@@ -1,7 +1,12 @@
 [
   {
     "id": "lexical-match-unusual-pronunciation",
-    "expected": { "parse": "ok", "lexicalOutcome": "match", "deductible": false },
+    "expected": {
+      "parse": "ok",
+      "lexicalOutcome": "match",
+      "groundTruthIntelligibility": "intelligible",
+      "deductible": false
+    },
     "response": {
       "contractVersion": "v1",
       "provider": {
@@ -20,6 +25,7 @@
           "lexicalOutcome": "match",
           "pronunciationAccuracy": 0.52,
           "pronunciationAvailability": "available",
+          "phonemeAvailability": "available",
           "phonemes": [
             { "expected": "t", "recognized": "d", "accuracy": 0.3, "startMs": 130, "endMs": 190 }
           ],
@@ -29,7 +35,6 @@
             "prosodyAccuracy": null,
             "detail": null
           },
-          "intelligibility": "intelligible",
           "warning": "Word matched. Accuracy is evidence only."
         }
       ],
@@ -60,6 +65,7 @@
           "lexicalOutcome": "substitution",
           "pronunciationAccuracy": null,
           "pronunciationAvailability": "not_checked",
+          "phonemeAvailability": "not_checked",
           "phonemes": [],
           "stressProsody": {
             "availability": "not_checked",
@@ -67,7 +73,6 @@
             "prosodyAccuracy": null,
             "detail": "Lexical substitution is separate from pronunciation."
           },
-          "intelligibility": "not_assessed",
           "warning": "Do not relabel a substituted word as a pronunciation error."
         }
       ],
@@ -93,6 +98,7 @@
           "lexicalOutcome": "unsupported",
           "pronunciationAccuracy": null,
           "pronunciationAvailability": "unsupported",
+          "phonemeAvailability": "unsupported",
           "phonemes": [],
           "stressProsody": {
             "availability": "unsupported",
@@ -100,7 +106,6 @@
             "prosodyAccuracy": null,
             "detail": null
           },
-          "intelligibility": "not_assessed",
           "warning": "Provider lexicon did not support this word."
         }
       ],
@@ -159,6 +164,7 @@
           "lexicalOutcome": "match",
           "pronunciationAccuracy": 0.82,
           "pronunciationAvailability": "available",
+          "phonemeAvailability": "unsupported",
           "phonemes": [],
           "stressProsody": {
             "availability": "unsupported",
@@ -166,7 +172,6 @@
             "prosodyAccuracy": null,
             "detail": "Provider did not return named phonemes for this locale."
           },
-          "intelligibility": "intelligible",
           "warning": null
         }
       ],
@@ -181,7 +186,7 @@
     "expected": {
       "parse": "ok",
       "lexicalOutcome": "match",
-      "intelligibility": "intelligible",
+      "groundTruthIntelligibility": "intelligible",
       "deductible": false
     },
     "response": {
@@ -202,6 +207,7 @@
           "lexicalOutcome": "match",
           "pronunciationAccuracy": 0.48,
           "pronunciationAvailability": "available",
+          "phonemeAvailability": "available",
           "phonemes": [
             { "expected": "sk", "recognized": "sk", "accuracy": 0.9, "startMs": 0, "endMs": 80 }
           ],
@@ -211,7 +217,6 @@
             "prosodyAccuracy": null,
             "detail": "No prosody conclusion."
           },
-          "intelligibility": "intelligible",
           "warning": "An accent difference is not a lexical error or deduction."
         }
       ],

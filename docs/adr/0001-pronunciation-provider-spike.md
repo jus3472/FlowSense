@@ -8,6 +8,8 @@ Accepted for a non-production evaluation harness only. Azure Speech Pronunciatio
 
 Use a provider-neutral contract before any vendor adapter. The candidate adapter targets Azure Speech Pronunciation Assessment behind a server-only boundary, with no production route, credential, SDK, or scoring integration in this task.
 
+Intelligibility is not a provider field in the contract. Fixture expectations may state paired-audio ground truth, such as an intelligible accent case, but an adapter cannot declare a word intelligible or use that assertion as evidence.
+
 Azure is the selected target because its official documentation describes both scripted assessment with reference text and unscripted assessment without one, plus word and phoneme evidence where supported. Its Speech SDK is the expected initial integration fit; any HTTP fallback must be verified against the current official REST documentation before implementation. Azure pricing follows Speech to Text baseline pricing for accuracy, fluency, completeness, and miscue, while prosody is an add-on. Audio and reference text are sensitive response data and require a retention, region, processor, and user-consent review before live use.
 
 The normalized contract keeps word and phoneme timings nullable. A future adapter must verify Azure offset and duration semantics against paired audio. Speechace documents word extents for mapping sounds to letters, not a substitute for confirmed audio timings.

@@ -48,10 +48,9 @@ export interface PronunciationWordEvidence {
   /** Separate from Deepgram's probability that a transcript word is correct. */
   pronunciationAccuracy: number | null
   pronunciationAvailability: EvidenceAvailability
+  phonemeAvailability: EvidenceAvailability
   phonemes: readonly PhonemeEvidence[]
   stressProsody: StressProsodyEvidence
-  /** No provider result can infer this by accent or native similarity. */
-  intelligibility: 'not_assessed' | 'intelligible' | 'uncertain'
   warning: string | null
 }
 
@@ -99,6 +98,22 @@ function nullableTime(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0)
 }
 
+function pairedTimes(start: unknown, end: unknown): boolean {
+  return (
+    (start === null && end === null) ||
+    (typeof start === 'number' &&
+      Number.isFinite(start) &&
+      start >= 0 &&
+      typeof end === 'number' &&
+      Number.isFinite(end) &&
+      end >= start)
+  )
+}
+
+function normalizedWord(value: string): string {
+  return value.trim().toLocaleLowerCase('en-US')
+}
+
 function parseError(value: unknown): PronunciationProviderError | null {
   if (
     !isRecord(value) ||
@@ -126,11 +141,11 @@ function parsePhoneme(value: unknown): PhonemeEvidence | null {
     !nullableText(value.recognized) ||
     !nullableUnit(value.accuracy) ||
     !nullableTime(value.startMs) ||
-    !nullableTime(value.endMs)
+    !nullableTime(value.endMs) ||
+    !pairedTimes(value.startMs, value.endMs)
   ) {
     return null
   }
-  if (value.startMs !== null && value.endMs !== null && value.endMs < value.startMs) return null
   return {
     expected: value.expected,
     recognized: value.recognized,
@@ -150,6 +165,14 @@ function parseStressProsody(value: unknown): StressProsodyEvidence | null {
   ) {
     return null
   }
+  if (
+    (value.availability !== 'available' &&
+      (value.stressAccuracy !== null || value.prosodyAccuracy !== null)) ||
+    (value.availability === 'available' &&
+      value.stressAccuracy === null &&
+      value.prosodyAccuracy === null)
+  )
+    return null
   return {
     availability: value.availability as EvidenceAvailability,
     stressAccuracy: value.stressAccuracy,
@@ -165,6 +188,7 @@ function parseWord(value: unknown): PronunciationWordEvidence | null {
     !nullableText(value.recognizedWord) ||
     !nullableTime(value.startMs) ||
     !nullableTime(value.endMs) ||
+    !pairedTimes(value.startMs, value.endMs) ||
     !['match', 'substitution', 'insertion', 'omission', 'unsupported'].includes(
       String(value.lexicalOutcome),
     ) ||
@@ -172,17 +196,44 @@ function parseWord(value: unknown): PronunciationWordEvidence | null {
     !['available', 'not_checked', 'unsupported'].includes(
       String(value.pronunciationAvailability),
     ) ||
-    !['not_assessed', 'intelligible', 'uncertain'].includes(String(value.intelligibility)) ||
+    !['available', 'not_checked', 'unsupported'].includes(String(value.phonemeAvailability)) ||
     !nullableText(value.warning)
   ) {
     return null
   }
-  if (value.startMs !== null && value.endMs !== null && value.endMs < value.startMs) return null
   const phonemes = value.phonemes.map(parsePhoneme)
   const stressProsody = parseStressProsody(value.stressProsody)
   if (phonemes.some((phoneme) => phoneme === null) || !stressProsody) return null
-  if (value.pronunciationAvailability !== 'available' && value.pronunciationAccuracy !== null)
+  if (
+    (value.pronunciationAvailability === 'available' &&
+      typeof value.pronunciationAccuracy !== 'number') ||
+    (value.pronunciationAvailability !== 'available' && value.pronunciationAccuracy !== null) ||
+    (value.phonemeAvailability === 'available' && phonemes.length === 0) ||
+    (value.phonemeAvailability !== 'available' && phonemes.length > 0)
+  )
     return null
+  const lexicalValid =
+    (value.lexicalOutcome === 'match' &&
+      text(value.referenceWord) &&
+      text(value.recognizedWord) &&
+      normalizedWord(value.referenceWord) === normalizedWord(value.recognizedWord)) ||
+    (value.lexicalOutcome === 'substitution' &&
+      text(value.referenceWord) &&
+      text(value.recognizedWord) &&
+      normalizedWord(value.referenceWord) !== normalizedWord(value.recognizedWord)) ||
+    (value.lexicalOutcome === 'insertion' &&
+      value.referenceWord === null &&
+      text(value.recognizedWord)) ||
+    (value.lexicalOutcome === 'omission' &&
+      text(value.referenceWord) &&
+      value.recognizedWord === null) ||
+    (value.lexicalOutcome === 'unsupported' &&
+      text(value.referenceWord) &&
+      text(value.recognizedWord) &&
+      normalizedWord(value.referenceWord) === normalizedWord(value.recognizedWord) &&
+      value.pronunciationAvailability === 'unsupported' &&
+      value.phonemeAvailability === 'unsupported')
+  if (!lexicalValid) return null
   return {
     referenceWord: value.referenceWord,
     recognizedWord: value.recognizedWord,
@@ -191,9 +242,9 @@ function parseWord(value: unknown): PronunciationWordEvidence | null {
     lexicalOutcome: value.lexicalOutcome as LexicalOutcome,
     pronunciationAccuracy: value.pronunciationAccuracy,
     pronunciationAvailability: value.pronunciationAvailability as EvidenceAvailability,
+    phonemeAvailability: value.phonemeAvailability as EvidenceAvailability,
     phonemes: phonemes as PhonemeEvidence[],
     stressProsody,
-    intelligibility: value.intelligibility as PronunciationWordEvidence['intelligibility'],
     warning: value.warning,
   }
 }
@@ -211,6 +262,7 @@ export function parsePronunciationEvaluation(value: unknown): PronunciationParse
     }
   }
   const provider = value.provider
+  const unsupportedWords = value.unsupportedWords
   if (
     value.contractVersion !== PRONUNCIATION_CONTRACT_VERSION ||
     !text(provider.id) ||
@@ -218,8 +270,8 @@ export function parsePronunciationEvaluation(value: unknown): PronunciationParse
     !text(provider.version) ||
     !text(provider.locale) ||
     !['completed', 'not_checked', 'failed'].includes(String(value.status)) ||
-    !Array.isArray(value.unsupportedWords) ||
-    !value.unsupportedWords.every(text) ||
+    !Array.isArray(unsupportedWords) ||
+    !unsupportedWords.every(text) ||
     !Array.isArray(value.warnings) ||
     !value.warnings.every(text) ||
     value.eligibleForDeductions !== false
@@ -245,12 +297,38 @@ export function parsePronunciationEvaluation(value: unknown): PronunciationParse
       },
     }
   }
-  if (value.status === 'failed' && !error) {
+  if (
+    (value.status === 'failed' && (!error || words.length > 0)) ||
+    (value.status === 'completed' && error !== null) ||
+    (value.status === 'not_checked' && error?.code === 'outage')
+  ) {
     return {
       ok: false,
       error: {
         code: 'malformed_response',
         message: 'Failed response lacked an error.',
+        retryable: true,
+      },
+    }
+  }
+  const unsupported = (words as PronunciationWordEvidence[])
+    .filter((word) => word.lexicalOutcome === 'unsupported')
+    .flatMap((word) => [word.referenceWord, word.recognizedWord])
+    .filter((word): word is string => word !== null)
+  if (
+    unsupported.some((word) => !unsupportedWords.includes(word)) ||
+    unsupportedWords.some(
+      (word) =>
+        !unsupported.some(
+          (unsupportedWord) => normalizedWord(unsupportedWord) === normalizedWord(word),
+        ),
+    )
+  ) {
+    return {
+      ok: false,
+      error: {
+        code: 'malformed_response',
+        message: 'Unsupported words were inconsistent.',
         retryable: true,
       },
     }
@@ -267,7 +345,7 @@ export function parsePronunciationEvaluation(value: unknown): PronunciationParse
       },
       status: value.status as PronunciationEvaluation['status'],
       words: words as PronunciationWordEvidence[],
-      unsupportedWords: value.unsupportedWords,
+      unsupportedWords: unsupportedWords as string[],
       warnings: value.warnings,
       error,
       eligibleForDeductions: false,
