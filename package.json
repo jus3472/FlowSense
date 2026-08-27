@@ -18,7 +18,7 @@
     "inspect:scores": "node scripts/inspect-scores.mjs",
     "inspect:rewrites": "node --experimental-transform-types scripts/inspect-rewrites.mjs",
     "check:pronunciation-harness": "node scripts/run-pronunciation-harness.mjs",
-    "check:scoring-calibration": "vitest run tests/scoring-calibration.test.ts"
+    "check:scoring-calibration": "node scripts/run-scoring-calibration.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",
