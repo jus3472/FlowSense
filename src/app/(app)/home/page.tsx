@@ -27,7 +27,7 @@ export default async function HomePage() {
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [profileResult, attemptsResult] = await Promise.all([
+  const [profileResult, attemptsResult, latestResult] = await Promise.all([
     supabase.from('profiles').select('focus_areas').eq('id', user.id).maybeSingle(),
     supabase
       .from('attempts')
@@ -37,14 +37,30 @@ export default async function HomePage() {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(30),
+    supabase
+      .from('attempts')
+      .select(
+        'id, prompt_text, transcript, duration_ms, created_at, score, section_scores, metrics, content_result',
+      )
+      .eq('user_id', user.id)
+      .or('score.not.is.null,section_scores.not.is.null')
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ])
 
   const areas = sanitizeFocusAreas(profileResult.data?.focus_areas ?? [])
   const phrase = focusPhrase(areas)
 
-  const historyFailed = Boolean(attemptsResult.error)
+  const historyFailed = Boolean(attemptsResult.error || latestResult.error)
   if (historyFailed) {
-    console.error('[home] data load failed', { operation: 'recent_prompt_history' })
+    console.error('[home] response data load failed', {
+      recentHistoryCode: attemptsResult.error?.code ?? null,
+      recentHistoryMessage: attemptsResult.error?.message ?? null,
+      latestAttemptCode: latestResult.error?.code ?? null,
+      latestAttemptMessage: latestResult.error?.message ?? null,
+    })
   }
   const attempts = attemptsResult.data ?? []
   const recommendedOutcome = await pickPreferredPracticePrompt(
@@ -58,9 +74,9 @@ export default async function HomePage() {
     .filter((score): score is number => score !== null)
     .reverse()
 
-  const latest = attempts.find((attempt) => attempt.score !== null) ?? null
+  const latest = latestResult.data
   let summary: string | null = null
-  if (latest?.score !== null && latest) {
+  if (latest && latest.score !== null) {
     const legacy = legacyAttemptForHome({
       id: latest.id,
       promptText: latest.prompt_text,

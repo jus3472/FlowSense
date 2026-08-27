@@ -1,3 +1,4 @@
+import type { Route } from 'next'
 import { dayKey } from '@/lib/streak'
 import type { PracticeMode, PromptSource } from '@/lib/practice/contracts'
 
@@ -5,7 +6,7 @@ export interface HistoryEntry {
   id: string
   createdAt: string
   promptText: string
-  score: number
+  score: number | null
   practiceMode?: PracticeMode | null
   promptSource?: PromptSource | null
   retryOfAttemptId?: string | null
@@ -83,6 +84,68 @@ export const METADATA_FILTER_LABEL: Record<HistoryMetadataFilter, string> = {
   retry: 'Retries',
 }
 
+export interface HistoryQuery {
+  metadata: HistoryMetadataFilter
+  score: HistoryFilter
+  page: number
+}
+
+export const DEFAULT_HISTORY_QUERY: HistoryQuery = {
+  metadata: 'all',
+  score: 'all',
+  page: 1,
+}
+
+export type HistorySearchParams = Record<string, string | string[] | undefined>
+
+const HISTORY_FILTERS: readonly HistoryFilter[] = ['all', 'high', 'low']
+const HISTORY_METADATA_FILTERS: readonly HistoryMetadataFilter[] = [
+  'all',
+  'general',
+  'interview',
+  'presentation',
+  'conversation',
+  'custom',
+  'retry',
+]
+
+function singular(value: string | string[] | undefined): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+export function parseHistoryQuery(
+  params: HistorySearchParams,
+): { status: 'valid'; query: HistoryQuery } | { status: 'invalid' } {
+  if (Array.isArray(params.show) || Array.isArray(params.score) || Array.isArray(params.page))
+    return { status: 'invalid' }
+  const metadata = singular(params.show) ?? DEFAULT_HISTORY_QUERY.metadata
+  const score = singular(params.score) ?? DEFAULT_HISTORY_QUERY.score
+  const rawPage = singular(params.page)
+  if (
+    !HISTORY_METADATA_FILTERS.includes(metadata as HistoryMetadataFilter) ||
+    !HISTORY_FILTERS.includes(score as HistoryFilter) ||
+    (rawPage !== undefined && !/^[1-9]\d{0,4}$/.test(rawPage))
+  )
+    return { status: 'invalid' }
+  return {
+    status: 'valid',
+    query: {
+      metadata: metadata as HistoryMetadataFilter,
+      score: score as HistoryFilter,
+      page: rawPage ? Number(rawPage) : DEFAULT_HISTORY_QUERY.page,
+    },
+  }
+}
+
+export function historyHref(query: HistoryQuery): Route {
+  const params = new URLSearchParams()
+  if (query.metadata !== DEFAULT_HISTORY_QUERY.metadata) params.set('show', query.metadata)
+  if (query.score !== DEFAULT_HISTORY_QUERY.score) params.set('score', query.score)
+  if (query.page !== DEFAULT_HISTORY_QUERY.page) params.set('page', String(query.page))
+  const suffix = params.toString()
+  return (suffix ? `/history?${suffix}` : '/history') as Route
+}
+
 const MODE_LABEL: Record<PracticeMode, string> = {
   practice: 'General Practice',
   interview: 'Interview',
@@ -116,8 +179,11 @@ export function matchesMetadataFilter(entry: HistoryEntry, filter: HistoryMetada
 }
 
 export function averageScore(entries: readonly HistoryEntry[]): number {
-  if (entries.length === 0) return 0
-  return entries.reduce((sum, entry) => sum + entry.score, 0) / entries.length
+  const scores = entries
+    .map((entry) => entry.score)
+    .filter((score): score is number => score !== null)
+  if (scores.length === 0) return 0
+  return scores.reduce((sum, score) => sum + score, 0) / scores.length
 }
 
 /** Split against the speaker's own average rather than a fixed cutoff. */
@@ -128,7 +194,11 @@ export function applyFilter(
   if (filter === 'all') return [...entries]
   const average = averageScore(entries)
   return entries.filter((entry) =>
-    filter === 'high' ? entry.score >= average : entry.score < average,
+    entry.score === null
+      ? false
+      : filter === 'high'
+        ? entry.score >= average
+        : entry.score < average,
   )
 }
 

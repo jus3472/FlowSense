@@ -47,6 +47,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
       'id, prompt_text, transcript, duration_ms, audio_path, created_at, score, section_scores, metrics, content_result, retry_of_attempt_id',
     )
     .eq('id', id)
+    .eq('user_id', user.id)
     .maybeSingle()
 
   if (!attempt) notFound()

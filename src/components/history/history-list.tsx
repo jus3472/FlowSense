@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { TrendChart } from '@/components/history/trend-chart'
 import { Card } from '@/components/ui/card'
@@ -9,15 +10,18 @@ import { deleteAttempt } from '@/lib/results/api'
 import {
   FILTER_LABEL,
   METADATA_FILTER_LABEL,
-  applyHistoryFilters,
   averageScore,
+  DEFAULT_HISTORY_QUERY,
   groupByDay,
   historyContext,
+  historyHref,
   timeLabel,
   type HistoryEntry,
   type HistoryFilter,
   type HistoryMetadataFilter,
+  type HistoryQuery,
 } from '@/lib/results/history'
+import { attemptHref } from '@/lib/routes'
 import { cn } from '@/lib/utils'
 
 const FILTERS: HistoryFilter[] = ['all', 'high', 'low']
@@ -65,13 +69,20 @@ const ICON_BUTTON =
 export function HistoryList({
   entries: initial,
   focusPhrase,
+  query = DEFAULT_HISTORY_QUERY,
+  hasAnyEntries = initial.length > 0,
+  hasPrevious = false,
+  hasNext = false,
 }: {
   entries: HistoryEntry[]
   focusPhrase: string
+  query?: HistoryQuery
+  hasAnyEntries?: boolean
+  hasPrevious?: boolean
+  hasNext?: boolean
 }) {
-  const [entries, setEntries] = useState(initial)
-  const [filter, setFilter] = useState<HistoryFilter>('all')
-  const [metadataFilter, setMetadataFilter] = useState<HistoryMetadataFilter>('all')
+  const router = useRouter()
+  const [removedIds, setRemovedIds] = useState<ReadonlySet<string>>(() => new Set())
   const [confirming, setConfirming] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -79,9 +90,12 @@ export function HistoryList({
   const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null)
   const focusAfterDismissRef = useRef<string | null>(null)
 
-  const visible = applyHistoryFilters(entries, metadataFilter, filter)
-  const groups = groupByDay(visible)
-  const scores = [...entries].reverse().map((entry) => entry.score)
+  const entries = initial.filter((entry) => !removedIds.has(entry.id))
+  const groups = groupByDay(entries)
+  const scores = [...entries]
+    .reverse()
+    .map((entry) => entry.score)
+    .filter((score): score is number => score !== null)
 
   const dismissConfirmation = useCallback((id: string, returnFocus: boolean) => {
     if (returnFocus) focusAfterDismissRef.current = id
@@ -118,7 +132,7 @@ export function HistoryList({
     setError(null)
     try {
       await deleteAttempt(id)
-      setEntries((current) => current.filter((entry) => entry.id !== id))
+      setRemovedIds((current) => new Set(current).add(id))
       setConfirming(null)
     } catch (thrown) {
       setError(thrown instanceof Error ? thrown.message : 'It could not be deleted.')
@@ -128,7 +142,7 @@ export function HistoryList({
     }
   }
 
-  if (entries.length === 0) {
+  if (!hasAnyEntries) {
     return (
       <Card>
         <EmptyState
@@ -148,8 +162,16 @@ export function HistoryList({
           Show responses
           <select
             id="history-metadata-filter"
-            value={metadataFilter}
-            onChange={(event) => setMetadataFilter(event.target.value as HistoryMetadataFilter)}
+            value={query.metadata}
+            onChange={(event) =>
+              router.push(
+                historyHref({
+                  metadata: event.target.value as HistoryMetadataFilter,
+                  score: query.score,
+                  page: 1,
+                }),
+              )
+            }
             className="bg-surface text-foreground rounded-input min-h-11 px-3 text-sm"
           >
             {METADATA_FILTERS.map((value) => (
@@ -161,20 +183,19 @@ export function HistoryList({
         </label>
         <div role="group" aria-label="Filter responses" className="flex flex-wrap gap-2">
           {FILTERS.map((value) => (
-            <button
+            <Link
               key={value}
-              type="button"
-              aria-pressed={filter === value}
-              onClick={() => setFilter(value)}
+              href={historyHref({ metadata: query.metadata, score: value, page: 1 })}
+              aria-current={query.score === value ? 'page' : undefined}
               className={cn(
-                'min-h-11 rounded-full px-4 text-sm font-medium whitespace-nowrap transition duration-150 ease-out',
-                filter === value
+                'inline-flex min-h-11 items-center rounded-full px-4 text-sm font-medium whitespace-nowrap transition duration-150 ease-out',
+                query.score === value
                   ? 'bg-accent-soft text-foreground ring-accent ring-2 ring-inset'
                   : 'bg-surface-sunken text-foreground hover:bg-accent-soft',
               )}
             >
               {FILTER_LABEL[value]}
-            </button>
+            </Link>
           ))}
         </div>
       </div>
@@ -185,7 +206,7 @@ export function HistoryList({
         </p>
       ) : null}
 
-      {visible.length === 0 ? (
+      {entries.length === 0 ? (
         <Card>
           <EmptyState
             title="Nothing in this filter"
@@ -204,7 +225,7 @@ export function HistoryList({
             {group.entries.map((entry) => (
               <li key={entry.id} className="relative">
                 <Link
-                  href={`/attempts/${entry.id}`}
+                  href={attemptHref(entry.id)}
                   className="bg-surface rounded-card hover:bg-surface-sunken focus:ring-accent-soft flex min-h-20 cursor-pointer items-start justify-between gap-4 p-6 pr-16 transition duration-150 ease-out focus:ring-2"
                 >
                   <div className="min-w-0 flex-1">
@@ -219,8 +240,13 @@ export function HistoryList({
                       {timeLabel(entry.createdAt)}
                     </time>
                   </div>
-                  <span className="numeric text-foreground w-12 shrink-0 text-right text-lg">
-                    {entry.score}
+                  <span
+                    className={cn(
+                      'numeric text-foreground shrink-0 text-right',
+                      entry.score === null ? 'w-20 text-xs' : 'w-12 text-lg',
+                    )}
+                  >
+                    {entry.score === null ? 'Incomplete' : entry.score}
                   </span>
                 </Link>
 
@@ -274,6 +300,29 @@ export function HistoryList({
           </ul>
         </section>
       ))}
+
+      {hasPrevious || hasNext ? (
+        <nav aria-label="History pages" className="flex items-center justify-between gap-3">
+          {hasPrevious ? (
+            <Link
+              href={historyHref({ ...query, page: query.page - 1 })}
+              className="bg-surface-sunken text-foreground rounded-full px-4 py-3 text-sm font-medium"
+            >
+              Newer responses
+            </Link>
+          ) : (
+            <span />
+          )}
+          {hasNext ? (
+            <Link
+              href={historyHref({ ...query, page: query.page + 1 })}
+              className="bg-surface-sunken text-foreground rounded-full px-4 py-3 text-sm font-medium"
+            >
+              Older responses
+            </Link>
+          ) : null}
+        </nav>
+      ) : null}
     </div>
   )
 }
