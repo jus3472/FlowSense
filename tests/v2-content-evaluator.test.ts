@@ -10,6 +10,10 @@ import {
   V2ContentParseError,
 } from '@/lib/scoring/v2/content/evaluate'
 import { buildV2ContentUserPrompt, V2_CONTENT_SYSTEM_PROMPT } from '@/lib/scoring/v2/content/prompt'
+import {
+  STRUCTURE_PRECEDENCE_VERSION,
+  applyStructurePrecedenceVNext,
+} from '@/lib/scoring/v2/content/structure-next'
 
 const TRANSCRIPT = 'I think the park is good because it has a lake. The park is good for families.'
 const PARK = { start: 12, end: 16, text: 'park', category: 'filler' as const }
@@ -318,6 +322,53 @@ describe('v2 content evidence exclusions', () => {
     expect(parsed.categories.vocabulary.findings).toEqual([])
   })
 
+  it('uses exact provider coordinates for the intended repeated quote without guessing', () => {
+    const repeated = 'Clear first. Then clear again.'
+    const secondStart = repeated.lastIndexOf('clear')
+    const parsed = parseV2ContentResponse(
+      response({
+        grammar: {
+          findings: [
+            {
+              kind: 'grammatical_error',
+              severity: 'minor',
+              quote: 'clear',
+              start: secondStart,
+              end: secondStart + 5,
+              observation: 'This exact occurrence is the evidence.',
+              suggestion: null,
+            },
+          ],
+        },
+      }),
+      { transcript: repeated },
+    )
+    expect(parsed.categories.grammar.findings[0]?.evidence).toEqual([
+      { start: secondStart, end: secondStart + 5 },
+    ])
+
+    const invalid = parseV2ContentResponse(
+      response({
+        grammar: {
+          findings: [
+            {
+              kind: 'grammatical_error',
+              severity: 'minor',
+              quote: 'clear',
+              start: 1,
+              end: 6,
+              observation: 'The coordinates do not match the quote.',
+              suggestion: null,
+            },
+          ],
+        },
+      }),
+      { transcript: repeated },
+    )
+    expect(invalid.categories.grammar.findings).toEqual([])
+    expect(invalid.categories.grammar.warnings.join(' ')).toMatch(/coordinates did not match/)
+  })
+
   it('ignores invalid confidence and offset evidence rather than charging from it', () => {
     const parsed = parseV2ContentResponse(
       response({
@@ -441,6 +492,91 @@ describe('v2 content evidence exclusions', () => {
     )
     expect(parsed.categories.vocabulary.findings).toHaveLength(1)
     expect(parsed.categories.vocabulary.warnings.join(' ')).toMatch(/truncated to 8/)
+  })
+})
+
+describe('next-version Structure semantic precedence', () => {
+  it('counts one null-span missing-answer problem once with deterministic precedence', () => {
+    const failed = (observation: string) => ({
+      passed: false,
+      severity: 'clear',
+      quote: null,
+      observation,
+      suggestion: null,
+    })
+    const parsed = parseV2ContentResponse(
+      response({
+        structure: structure({
+          answered_prompt: failed('The response does not answer the prompt.'),
+          main_point: failed('No main point is present.'),
+          relevant_support: failed('No support is present.'),
+          completion: failed('The response is incomplete.'),
+        }),
+      }),
+      { transcript: TRANSCRIPT },
+    )
+
+    // The historical parser remains unchanged until a registry selects the policy.
+    expect(parsed.categories.structure.findings).toHaveLength(4)
+    const next = applyStructurePrecedenceVNext(parsed.categories.structure)
+    expect(next.version).toBe(STRUCTURE_PRECEDENCE_VERSION)
+    expect(next.result.findings.map((finding) => finding.kind)).toEqual(['answered_prompt'])
+    expect(next.result.component).toBe(0.75)
+    expect(next.exclusions).toEqual([
+      {
+        kept: 'answered_prompt',
+        excluded: 'main_point',
+        reason: 'same_whole_response_problem',
+      },
+      {
+        kept: 'answered_prompt',
+        excluded: 'relevant_support',
+        reason: 'same_whole_response_problem',
+      },
+      {
+        kept: 'answered_prompt',
+        excluded: 'completion',
+        reason: 'same_whole_response_problem',
+      },
+    ])
+  })
+
+  it('preserves quote-anchored and independent Structure findings', () => {
+    const parsed = parseV2ContentResponse(
+      response({
+        structure: structure({
+          answered_prompt: {
+            passed: false,
+            severity: 'minor',
+            quote: null,
+            observation: 'The answer is incomplete.',
+            suggestion: null,
+          },
+          main_point: {
+            passed: false,
+            severity: 'minor',
+            quote: 'The park is good',
+            observation: 'The main point is delayed here.',
+            suggestion: null,
+          },
+          topic_drift: {
+            passed: false,
+            severity: 'minor',
+            quote: null,
+            observation: 'The response changes topic.',
+            suggestion: null,
+          },
+        }),
+      }),
+      { transcript: TRANSCRIPT },
+    )
+    const next = applyStructurePrecedenceVNext(parsed.categories.structure)
+    expect(next.result.findings.map((finding) => finding.kind)).toEqual([
+      'answered_prompt',
+      'main_point',
+      'topic_drift',
+    ])
+    expect(next.exclusions).toEqual([])
   })
 })
 

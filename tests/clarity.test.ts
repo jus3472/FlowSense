@@ -4,7 +4,7 @@ import type { TranscriptWord } from '@/lib/deepgram/parse'
 import { analyseClarity } from '@/lib/scoring/v2/clarity'
 import type { CaptureMetrics } from '@/lib/types/metrics'
 import type { PronunciationEvaluation } from '@/lib/pronunciation/contracts'
-import { amplitudeTimeline } from './helpers/transcript'
+import { amplitudeTimeline, wordsFrom } from './helpers/transcript'
 
 const DURATION_MS = 8_000
 const SAMPLE_INTERVAL_MS = 50
@@ -136,11 +136,37 @@ describe('v2 clarity intelligibility evaluator', () => {
           source: 'deepgram_word_confidence',
           start: recognizedWords[0]?.start,
           end: recognizedWords[0]?.end,
+          coordinate: { space: 'audio_timeline', unit: 'second' },
           quote: 'word0',
           detail: 'Recognition confidence for this word was 0.42.',
         },
       ]),
     )
+  })
+
+  it('maps repeated low-confidence word evidence to its exact transcript occurrence', () => {
+    const transcript = 'Clear, one two three four clear six seven.'
+    const recognizedWords = wordsFrom(transcript, 2).map((word, index) => ({
+      ...word,
+      confidence: index === 5 ? 0.4 : 0.95,
+    }))
+    const result = analyseClarity(
+      recognizedWords,
+      captureFor(recognizedWords),
+      undefined,
+      transcript,
+    )
+    const evidence = result.evidence.find(
+      (item) => item.detail === 'Recognition confidence for this word was 0.40.',
+    )
+    expect(evidence).toMatchObject({
+      source: 'deepgram_word_confidence',
+      start: 26,
+      end: 31,
+      coordinate: { space: 'transcript', unit: 'utf16_code_unit' },
+      quote: 'clear',
+    })
+    expect(transcript.slice(evidence?.start ?? 0, evidence?.end ?? 0)).toBe('clear')
   })
 
   it('does not assign a component when recognition is globally uncertain', () => {

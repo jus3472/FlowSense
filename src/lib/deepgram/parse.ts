@@ -16,12 +16,25 @@ export interface ParsedTranscript {
   words: TranscriptWord[]
   confidence: number | null
   durationSeconds: number | null
+  quality: DeepgramTranscriptQuality
+}
+
+export type DeepgramTranscriptQuality =
+  | { status: 'usable'; diagnostics: readonly [] }
+  | { status: 'degraded'; diagnostics: readonly string[] }
+
+export interface DeepgramUnavailableQuality {
+  status: 'unavailable'
+  diagnostics: readonly string[]
 }
 
 export class DeepgramParseError extends Error {
+  readonly quality: DeepgramUnavailableQuality
+
   constructor(message: string) {
     super(message)
     this.name = 'DeepgramParseError'
+    this.quality = { status: 'unavailable', diagnostics: [message] }
   }
 }
 
@@ -31,6 +44,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function numberOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function normalizedWords(value: string): string[] {
+  return (value.match(/[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu) ?? []).map((word) =>
+    word.toLocaleLowerCase().replaceAll('’', "'"),
+  )
+}
+
+function malformed(message: string): never {
+  throw new DeepgramParseError(message)
 }
 
 /**
@@ -59,31 +82,98 @@ export function parseDeepgramResponse(payload: unknown): ParsedTranscript {
     throw new DeepgramParseError('Deepgram response contained no transcript alternative.')
   }
 
-  const transcript = typeof alternative.transcript === 'string' ? alternative.transcript : ''
+  if (typeof alternative.transcript !== 'string') {
+    malformed('Deepgram transcript text was missing or malformed.')
+  }
+  const transcript = alternative.transcript
 
-  const rawWords = Array.isArray(alternative.words) ? alternative.words : []
+  if (!Array.isArray(alternative.words)) {
+    malformed('Deepgram word evidence was missing or malformed.')
+  }
+  const rawWords = alternative.words
   const words: TranscriptWord[] = []
-  for (const entry of rawWords) {
-    if (!isRecord(entry)) continue
-    const word = typeof entry.word === 'string' ? entry.word : null
+  const diagnostics: string[] = []
+  let missingWordConfidence = 0
+  let previousStart = -1
+  let previousEnd = -1
+  for (const [index, entry] of rawWords.entries()) {
+    if (!isRecord(entry)) malformed(`Deepgram word ${index} was not an object.`)
+    const word = typeof entry.word === 'string' && entry.word.trim().length > 0 ? entry.word : null
     const start = numberOrNull(entry.start)
     const end = numberOrNull(entry.end)
-    if (word === null || start === null || end === null) continue
-    const confidence = numberOrNull(entry.confidence)
+    if (word === null || start === null || end === null) {
+      malformed(`Deepgram word ${index} was missing text or finite timings.`)
+    }
+    if (start < 0 || end <= start || start < previousStart || end < previousEnd) {
+      malformed(`Deepgram word ${index} had invalid or nonmonotonic timings.`)
+    }
+    previousStart = start
+    previousEnd = end
+
+    let confidence: number | null = null
+    if (entry.confidence === undefined) {
+      missingWordConfidence += 1
+    } else {
+      confidence = numberOrNull(entry.confidence)
+      if (confidence === null || confidence < 0 || confidence > 1) {
+        malformed(`Deepgram word ${index} had an invalid confidence value.`)
+      }
+    }
     words.push({
       word,
       start,
       end,
-      ...(confidence !== null && confidence >= 0 && confidence <= 1 ? { confidence } : {}),
+      ...(confidence !== null ? { confidence } : {}),
     })
+  }
+  if (missingWordConfidence > 0) {
+    diagnostics.push(
+      `Deepgram omitted confidence for ${missingWordConfidence} recognized ${missingWordConfidence === 1 ? 'word' : 'words'}.`,
+    )
   }
 
   const metadata = isRecord(payload.metadata) ? payload.metadata : null
+  let durationSeconds: number | null = null
+  if (metadata?.duration === undefined) {
+    diagnostics.push('Deepgram response had no audio duration.')
+  } else {
+    const reportedDuration = numberOrNull(metadata.duration)
+    if (reportedDuration === null || reportedDuration < 0) {
+      malformed('Deepgram response had an invalid audio duration.')
+    }
+    durationSeconds = reportedDuration
+    if (words.some((word) => word.end > reportedDuration + 0.25)) {
+      malformed('Deepgram word timings extended beyond the reported audio duration.')
+    }
+  }
+
+  const transcriptWords = normalizedWords(transcript)
+  const recognizedWords = words.flatMap((word) => normalizedWords(word.word))
+  if (
+    transcriptWords.length !== recognizedWords.length ||
+    transcriptWords.some((word, index) => word !== recognizedWords[index])
+  ) {
+    malformed('Deepgram transcript text and word evidence did not cover the same words in order.')
+  }
+
+  let confidence: number | null = null
+  if (alternative.confidence === undefined) {
+    diagnostics.push('Deepgram response had no overall confidence value.')
+  } else {
+    confidence = numberOrNull(alternative.confidence)
+    if (confidence === null || confidence < 0 || confidence > 1) {
+      malformed('Deepgram response had an invalid overall confidence value.')
+    }
+  }
 
   return {
     transcript,
     words,
-    confidence: numberOrNull(alternative.confidence),
-    durationSeconds: metadata ? numberOrNull(metadata.duration) : null,
+    confidence,
+    durationSeconds,
+    quality:
+      diagnostics.length === 0
+        ? { status: 'usable', diagnostics: [] }
+        : { status: 'degraded', diagnostics },
   }
 }

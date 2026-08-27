@@ -6,12 +6,21 @@ export type RubricVersion = typeof RUBRIC_VERSION
 export type Availability = 'available' | 'unavailable'
 export type ScoreStatus = 'scored' | 'not_checked' | 'unavailable'
 
+export type EvidenceCoordinate =
+  | { space: 'transcript'; unit: 'utf16_code_unit' }
+  | { space: 'audio_timeline'; unit: 'millisecond' | 'second' }
+
 export interface ScoreEvidence {
   /** A stable source identifier, such as transcript or audio_timeline. */
   source: string
   /** A bounded location in the source when one is available. */
   start: number | null
   end: number | null
+  /**
+   * Explicit coordinates for new evidence. It remains optional so historical
+   * v2 snapshots can still be read without assigning a guessed unit.
+   */
+  coordinate?: EvidenceCoordinate | null
   quote: string | null
   detail: string
 }

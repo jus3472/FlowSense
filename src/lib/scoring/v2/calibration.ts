@@ -403,7 +403,12 @@ export function runCalibrationFixture(fixture: CalibrationFixture): CalibrationF
     mode: 'practice',
     fluency: evaluateFluency({ capture, words: transcriptWords, transcript: fixture.transcript }),
     delivery: evaluateDelivery(capture),
-    clarity: analyseClarity(transcriptWords, capture, pronunciation ?? undefined),
+    clarity: analyseClarity(
+      transcriptWords,
+      capture,
+      pronunciation ?? undefined,
+      fixture.transcript,
+    ),
     content: { ...parsedContent, provider: 'fixture', calls: 0 },
   })
   return {

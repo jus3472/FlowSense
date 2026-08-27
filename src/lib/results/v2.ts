@@ -1,11 +1,14 @@
 import type { Segment } from '@/lib/results/highlights'
 import type { PracticeMode, SkillCategory } from '@/lib/practice/contracts'
 import type { V2PersistedCategoryScore, V2ScorePayload } from '@/lib/scoring/v2/assemble'
+import { exactTranscriptRange, validTranscriptCharacterRange } from '@/lib/scoring/v2/evidence'
 
 interface TranscriptCandidate {
   quote: string
   label: string
   detail: string
+  from: number
+  to: number
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -99,7 +102,11 @@ function hasDeduction(result: V2PersistedCategoryScore, id: string, field = 'id'
   return result.deductions.some((deduction) => isRecord(deduction) && deduction[field] === id)
 }
 
-function contentCandidates(label: string, result: V2PersistedCategoryScore): TranscriptCandidate[] {
+function contentCandidates(
+  transcript: string,
+  label: string,
+  result: V2PersistedCategoryScore,
+): TranscriptCandidate[] {
   return result.deductions.flatMap((deduction) => {
     if (
       !isRecord(deduction) ||
@@ -110,40 +117,58 @@ function contentCandidates(label: string, result: V2PersistedCategoryScore): Tra
     }
     const quote = nonEmptyString(deduction.quote)
     const detail = nonEmptyString(deduction.observation)
-    const hasValidatedEvidence =
-      Array.isArray(deduction.evidence) &&
-      deduction.evidence.some(
-        (evidence) =>
-          isRecord(evidence) &&
-          typeof evidence.start === 'number' &&
-          typeof evidence.end === 'number' &&
-          evidence.end > evidence.start,
-      )
-    return quote && detail && hasValidatedEvidence ? [{ quote, detail, label }] : []
+    const range =
+      quote && detail
+        ? (result.evidence.flatMap((evidence) => {
+            if (evidence.detail !== detail || nonEmptyString(evidence.quote) !== quote) return []
+            const validated = exactTranscriptRange(transcript, evidence)
+            return validated ? [validated] : []
+          })[0] ??
+          (Array.isArray(deduction.evidence)
+            ? deduction.evidence.flatMap((evidence) => {
+                if (!isRecord(evidence)) return []
+                const validated = validTranscriptCharacterRange(
+                  transcript,
+                  evidence.start,
+                  evidence.end,
+                  quote,
+                )
+                return validated ? [validated] : []
+              })[0]
+            : null))
+        : null
+    return quote && detail && range ? [{ quote, detail, label, ...range }] : []
   })
 }
 
-function deductionEvidence(payload: V2ScorePayload): TranscriptCandidate[] {
+function exactEvidenceCandidate(
+  transcript: string,
+  label: string,
+  evidence: V2PersistedCategoryScore['evidence'][number],
+): TranscriptCandidate[] {
+  const quote = nonEmptyString(evidence.quote)
+  const range = exactTranscriptRange(transcript, evidence)
+  return quote && range ? [{ quote, detail: evidence.detail, label, ...range }] : []
+}
+
+function deductionEvidence(transcript: string, payload: V2ScorePayload): TranscriptCandidate[] {
   return v2CategoryViews(payload).flatMap(({ category, label, result }) => {
     if (result.status !== 'scored') return []
     if (category === 'grammar' || category === 'vocabulary' || category === 'structure') {
-      return contentCandidates(label, result)
+      return contentCandidates(transcript, label, result)
     }
     if (category === 'fluency' && hasDeduction(result, 'filler_rate')) {
       return result.evidence.flatMap((evidence) => {
-        const quote = nonEmptyString(evidence.quote)
         return evidence.source === 'transcript' &&
-          quote &&
           evidence.detail === 'Filler detected in the transcript.'
-          ? [{ quote, detail: evidence.detail, label }]
+          ? exactEvidenceCandidate(transcript, label, evidence)
           : []
       })
     }
     if (category === 'clarity' && hasDeduction(result, 'recognition_uncertainty')) {
       return result.evidence.flatMap((evidence) => {
-        const quote = nonEmptyString(evidence.quote)
-        return evidence.source === 'deepgram_word_confidence' && quote
-          ? [{ quote, detail: evidence.detail, label }]
+        return evidence.source === 'deepgram_word_confidence'
+          ? exactEvidenceCandidate(transcript, label, evidence)
           : []
       })
     }
@@ -198,25 +223,21 @@ export function formatV2Feedback(result: V2PersistedCategoryScore): string[] {
 }
 
 /**
- * V2 evidence offsets come from multiple providers and units. Match quoted
- * transcript evidence instead, claiming each occurrence once in stored order.
+ * Only explicitly validated transcript-character evidence is highlighted.
+ * Historical time offsets and quote-only findings are never re-located to a
+ * later repeated phrase, because doing so would invent evidence coordinates.
  */
 export function v2TranscriptSegments(transcript: string, payload: V2ScorePayload): Segment[] {
   const ranges: Array<{ from: number; to: number; label: string }> = []
   const occupied: Array<{ from: number; to: number }> = []
-  for (const evidence of deductionEvidence(payload)) {
-    const lowerTranscript = transcript.toLocaleLowerCase()
-    const lowerQuote = evidence.quote.toLocaleLowerCase()
-    let from = lowerTranscript.indexOf(lowerQuote)
-    while (from !== -1) {
-      const to = from + evidence.quote.length
-      if (!occupied.some((range) => from < range.to && to > range.from)) {
-        occupied.push({ from, to })
-        ranges.push({ from, to, label: `${evidence.label}: ${evidence.detail}` })
-        break
-      }
-      from = lowerTranscript.indexOf(lowerQuote, from + 1)
-    }
+  for (const evidence of deductionEvidence(transcript, payload)) {
+    if (occupied.some((range) => evidence.from < range.to && evidence.to > range.from)) continue
+    occupied.push({ from: evidence.from, to: evidence.to })
+    ranges.push({
+      from: evidence.from,
+      to: evidence.to,
+      label: `${evidence.label}: ${evidence.detail}`,
+    })
   }
 
   ranges.sort((left, right) => left.from - right.from || left.to - right.to)

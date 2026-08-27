@@ -48,6 +48,14 @@ export interface ContentCheckOutcome {
   tighten: TightenReport | null
 }
 
+export interface SafeContentCheckOutcome extends ContentCheckOutcome {
+  model: ContentModel | null
+}
+
+export interface SafeContentCheckInput extends Omit<ContentCheckInput, 'model'> {
+  createModel: () => ContentModel
+}
+
 /** Every span the model flagged, which the rewrite also promised to remove. */
 function flaggedSpans(parsed: ParsedContent): string[] {
   const spans = parsed.extra_spans.map((span) => span.text)
@@ -169,4 +177,28 @@ export async function runContentCheck(input: ContentCheckInput): Promise<Content
     calls: calls + enforced.calls,
     tighten: enforced.report,
   }
+}
+
+/**
+ * Keeps provider construction and configuration inside the same user-favoring
+ * boundary as provider transport failures. Construction errors are deliberately
+ * sanitized because configuration exceptions must not expose secret values.
+ */
+export async function runContentCheckSafely(
+  input: SafeContentCheckInput,
+): Promise<SafeContentCheckOutcome> {
+  const { createModel, ...checkInput } = input
+  let model: ContentModel
+  try {
+    model = createModel()
+  } catch {
+    return {
+      model: null,
+      parsed: null,
+      error: 'The content provider was unavailable.',
+      calls: 0,
+      tighten: null,
+    }
+  }
+  return { model, ...(await runContentCheck({ ...checkInput, model })) }
 }

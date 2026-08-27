@@ -1,6 +1,7 @@
 import { analyseEnergy, MIN_VOICED_FRAMES } from '@/lib/scoring/energy'
 import { median, medianAbsoluteDeviation } from '@/lib/scoring/scale'
 import type { ScoreEvidence, ScoreStatus } from '@/lib/scoring/v2/contracts'
+import { AUDIO_MILLISECOND_COORDINATE } from '@/lib/scoring/v2/evidence'
 import type { AmplitudeSample, CaptureMetrics, PitchSample } from '@/lib/types/metrics'
 
 const MIN_AMPLITUDE_FRAMES = 40
@@ -180,6 +181,7 @@ export function evaluateDelivery(capture: CaptureMetrics): DeliveryEvaluation {
       source: 'audio_timeline',
       start: capture.pitch[0]?.t_ms ?? null,
       end: capture.pitch.at(-1)?.t_ms ?? null,
+      coordinate: AUDIO_MILLISECOND_COORDINATE,
       quote: null,
       detail: `Pitch spread was ${pitch.semitones.toFixed(2)} semitones across ${pitch.voiced_frames} voiced frames.`,
     },
@@ -194,6 +196,7 @@ export function evaluateDelivery(capture: CaptureMetrics): DeliveryEvaluation {
       source: 'audio_timeline',
       start: capture.amplitude[0]?.t_ms ?? null,
       end: capture.amplitude.at(-1)?.t_ms ?? null,
+      coordinate: AUDIO_MILLISECOND_COORDINATE,
       quote: null,
       detail: `Relative volume variation was ${amplitudeRelativeMad.toFixed(3)} across active frames.`,
     })

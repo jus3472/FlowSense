@@ -9,6 +9,7 @@ import type { V2CategoryResult, V2ContentEvaluation } from '@/lib/scoring/v2/con
 import type { DeliveryEvaluation } from '@/lib/scoring/v2/delivery'
 import type { FluencyEvaluation } from '@/lib/scoring/v2/fluency'
 import { RUBRIC_VERSION, type ScoreEvidence, type ScoreStatus } from '@/lib/scoring/v2/contracts'
+import { TRANSCRIPT_CHARACTER_COORDINATE } from '@/lib/scoring/v2/evidence'
 import { rubricFor } from '@/lib/scoring/v2/rubrics'
 
 /** Stable JSONB discriminator. Do not use attempt metadata to identify a stored result. */
@@ -125,6 +126,7 @@ function fromContent(
           source: 'transcript',
           start: evidence.start,
           end: evidence.end,
+          coordinate: TRANSCRIPT_CHARACTER_COORDINATE,
           quote: finding.quote,
           detail: finding.observation,
         })),
@@ -148,6 +150,7 @@ function fromContent(
         source: 'transcript',
         start: evidence.start,
         end: evidence.end,
+        coordinate: TRANSCRIPT_CHARACTER_COORDINATE,
         quote: finding.quote,
         detail: finding.observation,
       })),
