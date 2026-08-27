@@ -60,6 +60,20 @@ function storedContentStatus(value: unknown): string | null {
   return isRecord(value) && typeof value.status === 'string' ? value.status : null
 }
 
+type DatabaseQueryOutcome<T> =
+  { status: 'success'; data: T } | { status: 'failure'; error: unknown }
+
+async function readDatabaseQuery<T>(
+  load: () => PromiseLike<{ data: T; error: unknown }>,
+): Promise<DatabaseQueryOutcome<T>> {
+  try {
+    const { data, error } = await load()
+    return error ? { status: 'failure', error } : { status: 'success', data }
+  } catch (error) {
+    return { status: 'failure', error }
+  }
+}
+
 function mechanicalSpans(transcript: string, words: readonly TranscriptWord[]) {
   const tokens = buildTokens(words, transcript)
   const fillers = analyseFillers(tokens, tokens.length)
@@ -282,12 +296,24 @@ export async function POST(request: Request) {
         content_result: JSON.parse(JSON.stringify(content)),
       })
       if (!saved) {
-        const { data: concurrent } = await admin
-          .from('attempts')
-          .select('score, section_scores, content_result')
-          .eq('id', attemptId)
-          .eq('user_id', userId)
-          .maybeSingle()
+        const concurrentRead = await readDatabaseQuery(() =>
+          admin
+            .from('attempts')
+            .select('score, section_scores, content_result')
+            .eq('id', attemptId)
+            .eq('user_id', userId)
+            .maybeSingle(),
+        )
+        if (concurrentRead.status === 'failure') {
+          logAttemptDiagnostic(
+            'load_concurrent_score',
+            'concurrent_score_read_failed',
+            attemptId,
+            concurrentRead.error,
+          )
+          return apiError('The score could not be saved.', 500)
+        }
+        const concurrent = concurrentRead.data
         if (concurrent && shouldReuseStoredV2Score(concurrent.section_scores)) {
           return NextResponse.json({
             score: concurrent.score,
@@ -317,12 +343,33 @@ export async function POST(request: Request) {
     const mechanical = computeMechanical(capture, transcriptWords, transcript)
     for (const warning of mechanical.warnings) console.warn('[score]', attemptId, warning)
 
-    const { data: disputeRows } = await admin
-      .from('note_feedback')
-      .select('note_type, quote')
-      .eq('attempt_id', attemptId)
-      .eq('user_id', userId)
-    const disputes: Dispute[] = (disputeRows ?? []).map((row) => ({
+    const disputeRead = await readDatabaseQuery(() =>
+      admin
+        .from('note_feedback')
+        .select('note_type, quote')
+        .eq('attempt_id', attemptId)
+        .eq('user_id', userId),
+    )
+    if (disputeRead.status === 'failure') {
+      logAttemptDiagnostic(
+        'load_score_disputes',
+        'score_disputes_read_failed',
+        attemptId,
+        disputeRead.error,
+      )
+      if (!legacyRecheck) {
+        await markOwnedAttemptFailure(
+          admin,
+          userId,
+          attemptId,
+          ['scoring'],
+          'failed',
+          ATTEMPT_FAILURE_CODES.scoringUnexpected,
+        )
+      }
+      return apiError('The score could not be computed.', 500)
+    }
+    const disputes: Dispute[] = (disputeRead.data ?? []).map((row) => ({
       note_type: row.note_type,
       quote: row.quote,
     }))
