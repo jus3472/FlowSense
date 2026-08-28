@@ -26,6 +26,7 @@ function row(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     difficulty: 'beginner',
     target_duration_seconds: 30,
     collection_id: 'storytelling',
+    free_practice_visible: true,
     ...overrides,
   }
 }
@@ -109,6 +110,7 @@ describe('prompt selection', () => {
       row({ id: SECOND_ID, active: false }),
       row({ id: THIRD_ID, target_duration_seconds: 12 }),
       row({ id: 'not-an-id' }),
+      row({ id: '44444444-4444-4444-8444-444444444444', free_practice_visible: false }),
     ]
 
     expect(filterPromptLibrary(rows, { excludeIds: [FIRST_ID] })).toEqual([])

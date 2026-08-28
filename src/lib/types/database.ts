@@ -32,6 +32,40 @@ export type PromptRow = {
   difficulty: PromptDifficulty
   target_duration_seconds: number
   collection_id: string | null
+  free_practice_visible: boolean
+  created_at: string
+}
+
+export type PracticePathRow = {
+  id: string
+  slug: string
+  title: string
+  mode: PracticeMode
+  position: number
+  active: boolean
+  created_at: string
+}
+
+export type PracticeChapterRow = {
+  id: string
+  path_id: string
+  level: PromptDifficulty
+  title: string
+  position: number
+  active: boolean
+  created_at: string
+}
+
+export type PracticeLessonRow = {
+  id: string
+  chapter_id: string
+  slug: string
+  title: string
+  skill_focus: string
+  position: number
+  checkpoint: boolean
+  prompt_id: string
+  active: boolean
   created_at: string
 }
 
@@ -39,6 +73,7 @@ export type AttemptRow = {
   id: string
   user_id: string
   prompt_id: string | null
+  lesson_id: string | null
   prompt_text: string
   audio_path: string | null
   transcript: string | null
@@ -69,6 +104,23 @@ export type NoteFeedbackRow = {
   created_at: string
 }
 
+export type ProfilePathPreferenceRow = {
+  user_id: string
+  path_id: string
+  rank: number
+  created_at: string
+  updated_at: string
+}
+
+export type LessonProgressRow = {
+  user_id: string
+  lesson_id: string
+  best_score: number
+  best_attempt_id: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type Database = {
   public: {
     Tables: {
@@ -82,6 +134,51 @@ export type Database = {
         Row: PromptRow
         Insert: Partial<Omit<PromptRow, 'text'>> & { text: string }
         Update: Partial<Omit<PromptRow, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      practice_paths: {
+        Row: PracticePathRow
+        Insert: Partial<Omit<PracticePathRow, 'id' | 'slug' | 'title' | 'mode' | 'position'>> & {
+          id: string
+          slug: string
+          title: string
+          mode: PracticeMode
+          position: number
+        }
+        Update: Partial<Omit<PracticePathRow, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      practice_chapters: {
+        Row: PracticeChapterRow
+        Insert: Partial<
+          Omit<PracticeChapterRow, 'id' | 'path_id' | 'level' | 'title' | 'position'>
+        > & {
+          id: string
+          path_id: string
+          level: PromptDifficulty
+          title: string
+          position: number
+        }
+        Update: Partial<Omit<PracticeChapterRow, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      practice_lessons: {
+        Row: PracticeLessonRow
+        Insert: Partial<
+          Omit<
+            PracticeLessonRow,
+            'id' | 'chapter_id' | 'slug' | 'title' | 'skill_focus' | 'position' | 'prompt_id'
+          >
+        > & {
+          id: string
+          chapter_id: string
+          slug: string
+          title: string
+          skill_focus: string
+          position: number
+          prompt_id: string
+        }
+        Update: Partial<Omit<PracticeLessonRow, 'id' | 'created_at'>>
         Relationships: []
       }
       attempts: {
@@ -103,9 +200,34 @@ export type Database = {
         Update: Partial<Omit<NoteFeedbackRow, 'id' | 'user_id' | 'created_at'>>
         Relationships: []
       }
+      profile_path_preferences: {
+        Row: ProfilePathPreferenceRow
+        Insert: Partial<Omit<ProfilePathPreferenceRow, 'user_id' | 'path_id' | 'rank'>> & {
+          user_id: string
+          path_id: string
+          rank: number
+        }
+        Update: Partial<Omit<ProfilePathPreferenceRow, 'user_id' | 'path_id' | 'created_at'>>
+        Relationships: []
+      }
+      lesson_progress: {
+        Row: LessonProgressRow
+        Insert: Partial<Omit<LessonProgressRow, 'user_id' | 'lesson_id' | 'best_score'>> & {
+          user_id: string
+          lesson_id: string
+          best_score: number
+        }
+        Update: Partial<Omit<LessonProgressRow, 'user_id' | 'lesson_id' | 'created_at'>>
+        Relationships: []
+      }
     }
     Views: { [_ in never]: never }
-    Functions: { [_ in never]: never }
+    Functions: {
+      replace_profile_path_preferences: {
+        Args: { path_ids: string[] }
+        Returns: undefined
+      }
+    }
     Enums: { [_ in never]: never }
     CompositeTypes: { [_ in never]: never }
   }

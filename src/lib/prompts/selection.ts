@@ -122,7 +122,9 @@ export function filterPromptLibrary(
 
   const excluded = new Set(filters.excludeIds ?? [])
   return rows.flatMap((row) => {
-    if (!isRecord(row) || row.active !== true) return []
+    if (!isRecord(row) || row.active !== true || row.free_practice_visible !== true) {
+      return []
+    }
     const prompt = parseLibraryPrompt(row)
     if (!prompt || excluded.has(prompt.id)) return []
     if (filters.mode && prompt.mode !== filters.mode) return []

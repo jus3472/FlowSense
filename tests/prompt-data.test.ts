@@ -14,6 +14,7 @@ function promptRow(overrides: Record<string, unknown> = {}) {
     difficulty: 'beginner',
     target_duration_seconds: 30,
     collection_id: 'spontaneous_description',
+    free_practice_visible: true,
     ...overrides,
   }
 }
@@ -49,11 +50,21 @@ describe('prompt data outcomes', () => {
     })
   })
 
+  it('rejects curriculum-only prompts at the Free Practice data boundary', () => {
+    expect(promptRowsOutcome([promptRow({ free_practice_visible: false })], false)).toEqual({
+      status: 'failure',
+    })
+    expect(promptRowOutcome(promptRow({ free_practice_visible: false }), false)).toEqual({
+      status: 'failure',
+    })
+  })
+
   it('loads recent exclusions only from completed lifecycle rows', () => {
     const source = readFileSync('src/lib/prompts/server.ts', 'utf8')
     expect(source).toContain("select('prompt_id, prompt_source, status')")
     expect(source).toContain(".eq('status', 'done')")
     expect(source).toContain('recentCompletedLibraryPromptIds(data')
     expect(source).not.toContain(".not('score', 'is', null)")
+    expect(source.match(/\.eq\('free_practice_visible', true\)/g)).toHaveLength(2)
   })
 })

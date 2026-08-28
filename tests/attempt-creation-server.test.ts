@@ -27,6 +27,7 @@ const USER_ID = '10000000-0000-4000-8000-000000000001'
 const ATTEMPT_ID = '20000000-0000-4000-8000-000000000002'
 const OTHER_ATTEMPT_ID = '20000000-0000-4000-8000-000000000099'
 const REQUEST_ID = '30000000-0000-4000-8000-000000000003'
+const PROMPT_ID = '40000000-0000-4000-8000-000000000004'
 const MIME_TYPE = 'audio/webm;codecs=opus'
 
 const PAYLOAD: CreateAttemptPayload = {
@@ -88,7 +89,7 @@ function storedRow(
   }
 }
 
-function readQuery(result: { data: StoredRow | null; error: unknown }) {
+function readQuery(result: { data: unknown; error: unknown }) {
   const query = {
     select: vi.fn(),
     eq: vi.fn(),
@@ -136,6 +137,51 @@ beforeEach(() => {
 })
 
 describe('server attempt creation reconciliation', () => {
+  it('rejects a curriculum-only prompt at the authoritative library boundary', async () => {
+    const payload: CreateAttemptPayload = {
+      ...PAYLOAD,
+      promptId: PROMPT_ID,
+      promptText: 'Forged curriculum prompt copy.',
+      mode: 'practice',
+      difficulty: 'beginner',
+      source: 'library',
+      additionalContext: undefined,
+    }
+    const existing = readQuery({ data: null, error: null })
+    const prompt = readQuery({
+      data: {
+        id: PROMPT_ID,
+        text: 'Curriculum-only prompt.',
+        active: true,
+        mode: 'practice',
+        difficulty: 'beginner',
+        target_duration_seconds: 30,
+        collection_id: null,
+        free_practice_visible: false,
+      },
+      error: null,
+    })
+    const admin = adminFrom(existing, prompt)
+
+    await expect(
+      ensureAttemptCreation({
+        admin: admin as never,
+        userId: USER_ID,
+        payload,
+        intent: 'uploading',
+      }),
+    ).resolves.toEqual({ status: 'unavailable' })
+    expect(prompt.select).toHaveBeenCalledWith(
+      'id, text, active, mode, difficulty, target_duration_seconds, collection_id, free_practice_visible',
+    )
+    expect(prompt.eq.mock.calls).toEqual([
+      ['id', PROMPT_ID],
+      ['active', true],
+      ['free_practice_visible', true],
+    ])
+    expect(admin.from).toHaveBeenCalledTimes(2)
+  })
+
   it('lets abandonment win first with a server id and a recoverable exact pointer', async () => {
     const inserted = storedRow('failed', ATTEMPT_FAILURE_CODES.clientUploadAbandoned)
     const existing = readQuery({ data: null, error: null })
