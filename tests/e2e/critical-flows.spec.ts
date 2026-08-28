@@ -7,6 +7,7 @@ const APP = 'http://127.0.0.1:3100'
 interface E2EAttempt {
   id: string
   user_id: string
+  lesson_id: string | null
   prompt_id: string | null
   prompt_text: string
   duration_ms: number
@@ -30,10 +31,22 @@ interface E2EAttempt {
 
 interface E2EState {
   attempts: E2EAttempt[]
+  lessonProgress: Array<{
+    user_id: string
+    lesson_id: string
+    best_score: number
+    best_attempt_id: string | null
+  }>
   lifecycleEvents: Array<{ attemptId: string; status: string }>
   uploadedObjects: Array<{ name: string; size: number }>
   uploads: number
   attemptInserts: number
+}
+
+interface E2ECurriculumSeed {
+  pathSlug: string
+  passedLessons: number
+  score?: number
 }
 
 async function blockExternalNetwork(page: Page) {
@@ -47,8 +60,10 @@ async function blockExternalNetwork(page: Page) {
   })
 }
 
-async function reset(request: APIRequestContext, onboarded = true) {
-  await request.post(`${MOCK}/__e2e/reset`, { data: { onboarded } })
+async function reset(request: APIRequestContext, onboarded = true, curriculum?: E2ECurriculumSeed) {
+  await request.post(`${MOCK}/__e2e/reset`, {
+    data: { onboarded, ...(curriculum ? { curriculum } : {}) },
+  })
 }
 
 async function currentState(request: APIRequestContext): Promise<E2EState> {
@@ -73,6 +88,10 @@ function lifecycleFor(state: E2EState, attemptId: string): string[] {
     .map((event) => event.status)
 }
 
+function lessonBest(state: E2EState, lessonId: string) {
+  return state.lessonProgress.find((progress) => progress.lesson_id === lessonId)
+}
+
 async function logIn(page: Page) {
   await page.goto('/login')
   await page.getByLabel('Sign up or log in').getByRole('button', { name: 'Log in' }).click()
@@ -82,7 +101,12 @@ async function logIn(page: Page) {
   await expect(page).toHaveURL(/\/home$/)
 }
 
-async function processingMocks(page: Page, failure = false) {
+async function processingMocks(
+  page: Page,
+  options: boolean | { failure?: boolean; scores?: readonly number[] } = false,
+) {
+  const failure = typeof options === 'boolean' ? options : options.failure === true
+  const scores = typeof options === 'boolean' ? [] : [...(options.scores ?? [])]
   await page.route('**/api/transcribe', async (route) => {
     const input = route.request().postDataJSON() as { attemptId: string }
     await new Promise((resolve) => setTimeout(resolve, 600))
@@ -96,8 +120,9 @@ async function processingMocks(page: Page, failure = false) {
   await page.route('**/api/score', async (route) => {
     const input = route.request().postDataJSON() as { attemptId: string }
     await new Promise((resolve) => setTimeout(resolve, 1_000))
+    const score = scores.shift()
     const response = await page.request.post(`${MOCK}/__e2e/score/${input.attemptId}`, {
-      data: { failure },
+      data: { failure, ...(score === undefined ? {} : { score }) },
     })
     const result = await response.json()
     await route.fulfill({
@@ -329,6 +354,109 @@ test('provider failure persists explicit not-checked categories', async ({ page,
       (category) => category.status === 'not_checked',
     ),
   ).toHaveLength(3)
+})
+
+test('structured lessons retry thresholds without reducing durable progress', async ({
+  page,
+  request,
+  context,
+}) => {
+  await context.grantPermissions(['microphone'], { origin: APP })
+  await processingMocks(page, { scores: [64, 74, 84, 72, 68, 73] })
+  await logIn(page)
+
+  const firstLesson = '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1'
+  await page.goto(firstLesson)
+  await page.getByRole('link', { name: 'Start Lesson' }).click()
+  await recordOne(page)
+  await expect(page.getByRole('heading', { name: 'Lesson not passed' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Continue' })).toHaveCount(0)
+
+  const failedState = await currentState(request)
+  const failedAttempt = attemptAt(failedState, 0)
+  expect(failedAttempt).toMatchObject({ score: 64, lesson_id: expect.any(String) })
+  if (!failedAttempt.lesson_id) throw new Error('Structured attempt is missing its lesson id.')
+  expect(lessonBest(failedState, failedAttempt.lesson_id)).toMatchObject({
+    best_score: 64,
+    best_attempt_id: failedAttempt.id,
+  })
+
+  await page.getByRole('link', { name: 'Try Again' }).click()
+  await recordOne(page)
+  await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
+  await expect(page.getByText('Best: 74')).toBeVisible()
+
+  const passedState = await currentState(request)
+  const passedAttempt = attemptAt(passedState, 1)
+  expect(passedAttempt).toMatchObject({
+    score: 74,
+    lesson_id: failedAttempt.lesson_id,
+    retry_of_attempt_id: failedAttempt.id,
+  })
+  expect(lessonBest(passedState, failedAttempt.lesson_id)).toMatchObject({
+    best_score: 74,
+    best_attempt_id: passedAttempt.id,
+  })
+
+  await page.getByRole('link', { name: 'Continue' }).click()
+  await expect(page).toHaveURL(/interviews-beginner-02-skill-2$/)
+  await expect(page.getByRole('heading', { name: 'Beginner lesson 2' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Start Lesson' })).toBeVisible()
+
+  await reset(request)
+  await page.goto(firstLesson)
+  await page.getByRole('link', { name: 'Start Lesson' }).click()
+  await recordOne(page)
+  await expect(page.getByText('Best: 84')).toBeVisible()
+  await page.getByRole('link', { name: 'Retry for 3 stars' }).click()
+  await recordOne(page)
+  await expect(page.getByText('Best: 84')).toBeVisible()
+
+  const lowerRetryState = await currentState(request)
+  const attempt84 = attemptAt(lowerRetryState, 0)
+  const attempt72 = attemptAt(lowerRetryState, 1)
+  if (!attempt84.lesson_id) throw new Error('Structured attempt is missing its lesson id.')
+  expect(attempt72).toMatchObject({
+    score: 72,
+    lesson_id: attempt84.lesson_id,
+    retry_of_attempt_id: attempt84.id,
+  })
+  expect(lessonBest(lowerRetryState, attempt84.lesson_id)).toMatchObject({
+    best_score: 84,
+    best_attempt_id: attempt84.id,
+  })
+
+  await reset(request, true, { pathSlug: 'interviews', passedLessons: 9 })
+  await page.goto('/practice/paths/interviews/lessons/interviews-beginner-10-skill-10')
+  await page.getByRole('link', { name: 'Start Lesson' }).click()
+  await recordOne(page)
+  await expect(page.getByRole('heading', { name: 'Lesson not passed' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Continue' })).toHaveCount(0)
+
+  const failedCheckpointState = await currentState(request)
+  const attempt68 = attemptAt(failedCheckpointState, 0)
+  if (!attempt68.lesson_id) throw new Error('Structured checkpoint is missing its lesson id.')
+  expect(attempt68.score).toBe(68)
+  expect(lessonBest(failedCheckpointState, attempt68.lesson_id)?.best_score).toBe(68)
+
+  await page.getByRole('link', { name: 'Try Again' }).click()
+  await recordOne(page)
+  await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
+  await page.getByRole('link', { name: 'Continue' }).click()
+  await expect(page).toHaveURL(/interviews-intermediate-01-skill-1$/)
+  await expect(page.getByRole('heading', { name: 'Intermediate lesson 1' })).toBeVisible()
+
+  const passedCheckpointState = await currentState(request)
+  const attempt73 = attemptAt(passedCheckpointState, 1)
+  expect(attempt73).toMatchObject({
+    score: 73,
+    lesson_id: attempt68.lesson_id,
+    retry_of_attempt_id: attempt68.id,
+  })
+  expect(lessonBest(passedCheckpointState, attempt68.lesson_id)).toMatchObject({
+    best_score: 73,
+    best_attempt_id: attempt73.id,
+  })
 })
 
 test('@mobile mobile navigation exposes practice, history, and account menu', async ({ page }) => {
