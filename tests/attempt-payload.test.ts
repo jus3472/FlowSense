@@ -74,4 +74,25 @@ describe('parseCreateAttemptPayload', () => {
     expect(result).toMatchObject({ ok: true })
     if (result.ok) expect(result.value).not.toHaveProperty('rubricVersion')
   })
+
+  it('preserves a complete structured lesson descriptor and rejects malformed identity', () => {
+    const curriculum = {
+      lessonId: '10000000-0000-4000-8000-000000000001',
+      pathSlug: 'general-speaking',
+      chapterLevel: 'beginner',
+      lessonSlug: 'general-speaking-beginner-01-start',
+      lessonPosition: 1,
+      checkpoint: false,
+    }
+    expect(parseCreateAttemptPayload({ ...VALID, curriculum })).toMatchObject({
+      ok: true,
+      value: { curriculum },
+    })
+    expect(
+      parseCreateAttemptPayload({
+        ...VALID,
+        curriculum: { ...curriculum, checkpoint: true },
+      }),
+    ).toMatchObject({ ok: false })
+  })
 })

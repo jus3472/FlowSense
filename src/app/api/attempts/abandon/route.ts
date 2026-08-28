@@ -45,6 +45,8 @@ async function abandon(request: Request) {
     return apiError(
       parsed.value.retryOfAttemptId
         ? 'That retry session is no longer available.'
+        : parsed.value.curriculum
+          ? 'That lesson is no longer available.'
         : 'That prompt is no longer available.',
       409,
     )

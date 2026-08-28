@@ -176,6 +176,12 @@ describe('authoritative attempt creation', () => {
       }),
     ).toBeNull()
     expect(retryCreationSession(requested, null)).toBeNull()
+    expect(
+      retryCreationSession(requested, {
+        ...parent,
+        lesson_id: '50000000-0000-4000-8000-000000000005',
+      }),
+    ).toBeNull()
     expect(retryCreationSession({ ...requested, mode: 'interview' }, parent)).toBeNull()
   })
 
@@ -282,6 +288,57 @@ describe('authoritative attempt creation', () => {
       storedAttemptReuse(
         { ...stored, metrics: { ...stored.metrics, creation: undefined } },
         LIBRARY_REQUEST,
+        USER_ID,
+        'v2',
+      ),
+    ).toBeNull()
+  })
+
+  it('reuses a structured creation only with the exact stored curriculum identity', () => {
+    const curriculum = {
+      lessonId: '50000000-0000-4000-8000-000000000005',
+      pathSlug: 'general-speaking' as const,
+      chapterLevel: 'beginner' as const,
+      lessonSlug: 'general-speaking-beginner-01-start',
+      lessonPosition: 1,
+      checkpoint: false,
+    }
+    const request: CreateAttemptPayload = {
+      ...LIBRARY_REQUEST,
+      curriculum,
+    }
+    const session = { ...request }
+    const storagePath = attemptStoragePath(USER_ID, ATTEMPT_ID, request.mimeType)
+    const stored = {
+      id: ATTEMPT_ID,
+      prompt_id: request.promptId,
+      lesson_id: curriculum.lessonId,
+      prompt_text: request.promptText,
+      duration_ms: request.durationMs,
+      practice_mode: request.mode,
+      prompt_source: request.source,
+      prompt_difficulty: request.difficulty,
+      rubric_version: 'v2',
+      retry_of_attempt_id: null,
+      client_request_id: REQUEST_ID,
+      metrics: initialAttemptMetrics(session, request.mimeType, storagePath),
+    }
+
+    expect(storedAttemptReuse(stored, request, USER_ID, 'v2')).toEqual({ storagePath })
+    expect(
+      storedAttemptReuse(
+        {
+          ...stored,
+          metrics: initialAttemptMetrics(
+            {
+              ...session,
+              curriculum: { ...curriculum, pathSlug: 'conversations' },
+            },
+            request.mimeType,
+            storagePath,
+          ),
+        },
+        request,
         USER_ID,
         'v2',
       ),

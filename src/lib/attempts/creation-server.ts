@@ -8,6 +8,7 @@ import {
   libraryCreationSession,
   retryCreationSession,
   storedAttemptReuse,
+  structuredCreationSession,
 } from '@/lib/attempts/creation'
 import { ATTEMPT_FAILURE_CODES, type AttemptStatus } from '@/lib/attempts/lifecycle'
 import {
@@ -19,9 +20,10 @@ import { parseLibraryPrompt } from '@/lib/prompts/selection'
 import type { CreateAttemptPayload } from '@/lib/recording/attempt-payload'
 import { RUBRIC_VERSION } from '@/lib/scoring/v2/contracts'
 import type { PracticeSessionDescriptor } from '@/lib/practice/session'
+import { loadCurriculumLessonAccessForUser } from '@/lib/curriculum/server'
 
 const CREATION_COLUMNS =
-  'id, prompt_id, prompt_text, duration_ms, practice_mode, prompt_source, prompt_difficulty, rubric_version, retry_of_attempt_id, client_request_id, metrics, audio_path, transcript, status, failure_code'
+  'id, prompt_id, lesson_id, prompt_text, duration_ms, practice_mode, prompt_source, prompt_difficulty, rubric_version, retry_of_attempt_id, client_request_id, metrics, audio_path, transcript, status, failure_code'
 
 export type AttemptCreationIntent = 'uploading' | 'abandoned'
 
@@ -45,11 +47,49 @@ async function authoritativeSession(
   userId: string,
   payload: CreateAttemptPayload,
 ): Promise<{ session: PracticeSessionDescriptor | null; failed: boolean }> {
+  if (payload.curriculum) {
+    const access = await loadCurriculumLessonAccessForUser(
+      admin,
+      userId,
+      payload.curriculum.pathSlug,
+      payload.curriculum.lessonSlug,
+    )
+    if (access.status === 'failure') return { session: null, failed: true }
+    if (access.status !== 'allowed') return { session: null, failed: false }
+
+    let parent: unknown = null
+    if (payload.retryOfAttemptId) {
+      const { data, error } = await admin
+        .from('attempts')
+        .select(
+          'id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source, prompt_difficulty, metrics, status',
+        )
+        .eq('id', payload.retryOfAttemptId)
+        .eq('user_id', userId)
+        .maybeSingle()
+      if (error) {
+        logAttemptDiagnostic(
+          'load_structured_retry_parent',
+          'retry_parent_read_failed',
+          payload.retryOfAttemptId,
+          error,
+        )
+        return { session: null, failed: true }
+      }
+      parent = data
+    }
+
+    return {
+      session: structuredCreationSession(payload, access.data.session, parent),
+      failed: false,
+    }
+  }
+
   if (payload.retryOfAttemptId) {
     const { data: parent, error } = await admin
       .from('attempts')
       .select(
-        'id, prompt_id, prompt_text, practice_mode, prompt_source, prompt_difficulty, metrics, status',
+        'id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source, prompt_difficulty, metrics, status',
       )
       .eq('id', payload.retryOfAttemptId)
       .eq('user_id', userId)
@@ -178,6 +218,7 @@ export async function ensureAttemptCreation(input: {
       id: attemptId,
       user_id: userId,
       prompt_id: session.promptId,
+      lesson_id: session.curriculum?.lessonId ?? null,
       prompt_text: session.promptText,
       audio_path: abandoned ? storagePath : null,
       duration_ms: payload.durationMs,

@@ -151,6 +151,9 @@ export function parsePracticeSessionDescriptor(value: unknown): PracticeSessionD
 /** Turns a stored attempt snapshot into a retry session without database or UI code. */
 export function retrySessionFromAttempt(value: unknown): PracticeSessionDescriptor | null {
   if (!isRecord(value) || !isUuid(value.id)) return null
+  // Structured retries must return through their lesson route so access and
+  // lesson identity are revalidated. The generic route cannot erase lesson_id.
+  if (value.lesson_id !== null && value.lesson_id !== undefined) return null
 
   const promptId =
     value.prompt_id === null ? null : isUuid(value.prompt_id) ? value.prompt_id : undefined
