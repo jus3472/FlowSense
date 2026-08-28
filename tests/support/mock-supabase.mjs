@@ -4,7 +4,7 @@ const HOST = '127.0.0.1'
 const PORT = 54321
 const USER_ID = '00000000-0000-4000-8000-000000000001'
 const RUN_STARTED_AT = Date.now()
-const PROMPTS = [
+const FREE_PROMPTS = [
   {
     id: '10000000-0000-4000-8000-000000000001',
     text: 'Tell me about a time you solved a difficult problem.',
@@ -13,6 +13,7 @@ const PROMPTS = [
     difficulty: 'intermediate',
     target_duration_seconds: 30,
     collection_id: 'behavioral',
+    free_practice_visible: true,
     created_at: '2026-01-01T00:00:00.000Z',
   },
   {
@@ -23,9 +24,71 @@ const PROMPTS = [
     difficulty: 'beginner',
     target_duration_seconds: 30,
     collection_id: 'reflection',
+    free_practice_visible: true,
     created_at: '2026-01-01T00:00:00.000Z',
   },
 ]
+const PATH_DEFINITIONS = [
+  { slug: 'general-speaking', title: 'General Speaking', mode: 'practice' },
+  { slug: 'interviews', title: 'Interviews', mode: 'interview' },
+  { slug: 'presentations', title: 'Presentations', mode: 'presentation' },
+  { slug: 'conversations', title: 'Conversations', mode: 'conversation' },
+]
+const CHAPTER_LEVELS = ['beginner', 'intermediate', 'advanced']
+const uuid = (prefix, sequence) =>
+  `${prefix}0000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`
+const PRACTICE_PATHS = PATH_DEFINITIONS.map((path, pathIndex) => ({
+  id: uuid('3', pathIndex + 1),
+  ...path,
+  position: pathIndex + 1,
+  active: true,
+}))
+const PRACTICE_CHAPTERS = PRACTICE_PATHS.flatMap((path, pathIndex) =>
+  CHAPTER_LEVELS.map((level, chapterIndex) => ({
+    id: uuid('4', pathIndex * CHAPTER_LEVELS.length + chapterIndex + 1),
+    path_id: path.id,
+    level,
+    title: `${level.slice(0, 1).toUpperCase()}${level.slice(1)}`,
+    position: chapterIndex + 1,
+    active: true,
+  })),
+)
+const PRACTICE_LESSONS = PRACTICE_CHAPTERS.flatMap((chapter, chapterIndex) => {
+  const path = PRACTICE_PATHS.find((candidate) => candidate.id === chapter.path_id)
+  if (!path) throw new Error('E2E curriculum chapter is missing its path.')
+  return Array.from({ length: 10 }, (_, lessonIndex) => {
+    const position = lessonIndex + 1
+    const sequence = chapterIndex * 10 + position
+    return {
+      id: uuid('5', sequence),
+      chapter_id: chapter.id,
+      slug: `${path.slug}-${chapter.level}-${String(position).padStart(2, '0')}-skill-${position}`,
+      title: `${chapter.title} lesson ${position}`,
+      skill_focus: `Practice one clear ${path.title.toLowerCase()} response.`,
+      position,
+      checkpoint: position === 10,
+      prompt_id: uuid('6', sequence),
+      active: true,
+    }
+  })
+})
+const CURRICULUM_PROMPTS = PRACTICE_LESSONS.map((lesson) => {
+  const chapter = PRACTICE_CHAPTERS.find((candidate) => candidate.id === lesson.chapter_id)
+  const path = PRACTICE_PATHS.find((candidate) => candidate.id === chapter?.path_id)
+  if (!chapter || !path) throw new Error('E2E curriculum lesson is missing its chapter or path.')
+  return {
+    id: lesson.prompt_id,
+    text: `Give a clear response for ${lesson.title.toLowerCase()}.`,
+    active: true,
+    mode: path.mode,
+    difficulty: chapter.level,
+    target_duration_seconds: 60,
+    collection_id: null,
+    free_practice_visible: false,
+    created_at: '2026-08-28T00:00:00.000Z',
+  }
+})
+const PROMPTS = [...FREE_PROMPTS, ...CURRICULUM_PROMPTS]
 const QUERY_CONTROL_KEYS = new Set(['select', 'order', 'limit', 'offset', 'or'])
 const WEIGHTS = {
   practice: [22, 20, 12, 12, 18, 16],
@@ -59,6 +122,8 @@ function reset() {
       created_at: '2026-01-01T00:00:00.000Z',
     },
     attempts: [],
+    lessonProgress: [],
+    pathPreferences: [{ user_id: USER_ID, path_id: PRACTICE_PATHS[1].id, rank: 0 }],
     lifecycleEvents: [],
     uploadedObjects: [],
     uploads: 0,
@@ -446,7 +511,17 @@ const server = createServer(async (req, res) => {
             ? PROMPTS
             : table === 'attempts'
               ? state.attempts
-              : []
+              : table === 'practice_paths'
+                ? PRACTICE_PATHS
+                : table === 'practice_chapters'
+                  ? PRACTICE_CHAPTERS
+                  : table === 'practice_lessons'
+                    ? PRACTICE_LESSONS
+                    : table === 'lesson_progress'
+                      ? state.lessonProgress
+                      : table === 'profile_path_preferences'
+                        ? state.pathPreferences
+                        : []
       const { rows, total } = queryRows(req, source, url)
       const output = rows.map((row) => selected(row, select))
       const { offset } = requestedRange(req, url)

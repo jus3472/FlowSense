@@ -174,7 +174,7 @@ test('microphone denial gives a recoverable state', async ({ page }) => {
 test('selects library and custom prompts through real screens', async ({ page }) => {
   await logIn(page)
   await page.goto('/practice')
-  await page.getByRole('link', { name: /Interviews/ }).click()
+  await page.getByRole('link', { name: 'Interview Free Practice', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Interviews' })).toBeVisible()
   await page.getByRole('link', { name: 'Choose this prompt' }).first().click()
   await expect(page.getByRole('button', { name: "I'm ready" })).toBeVisible()
@@ -338,4 +338,30 @@ test('@mobile mobile navigation exposes practice, history, and account menu', as
   await expect(page.getByRole('link', { name: 'History' })).toBeVisible()
   await page.getByRole('button', { name: 'More options' }).click()
   await expect(page.getByRole('menuitem', { name: 'Settings' })).toBeVisible()
+})
+
+test('@mobile structured Practice stays readable through the lesson boundary', async ({ page }) => {
+  await logIn(page)
+  await page.goto('/practice')
+  await expect(page.getByRole('heading', { name: 'Your paths' })).toBeVisible()
+  await expect(page.getByText('Primary path')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Interview Free Practice' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Enter a custom prompt' })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+
+  await page.getByRole('link', { name: 'Start' }).first().click()
+  await expect(page.getByRole('heading', { name: 'Beginner lesson 1' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Start Lesson' })).toBeDisabled()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+
+  await page.getByRole('link', { name: 'Interviews' }).click()
+  await expect(page.getByRole('heading', { name: 'Interviews' })).toBeVisible()
+  await expect(page.getByText('Checkpoint').first()).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
 })
