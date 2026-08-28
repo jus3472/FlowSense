@@ -305,6 +305,19 @@ describe('record retry route boundary', () => {
     expect(mocks.recordFlow).not.toHaveBeenCalled()
   })
 
+  it('keeps a structured attempt out of the generic retry route', async () => {
+    useClient({
+      data: retryAttempt({ lesson_id: '40000000-0000-4000-8000-000000000004' }),
+      error: null,
+    })
+
+    await renderPage({ retry: ATTEMPT_ID })
+
+    expect(screen.getByRole('heading', { name: 'That retry is not available' })).toBeInTheDocument()
+    expect(mocks.pickRecordPrompt).not.toHaveBeenCalled()
+    expect(mocks.recordFlow).not.toHaveBeenCalled()
+  })
+
   it('preserves custom prompt context and duration from the private attempt snapshot', async () => {
     useClient({
       data: retryAttempt({

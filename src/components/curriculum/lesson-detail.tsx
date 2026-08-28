@@ -1,11 +1,11 @@
 import Link from 'next/link'
 import { CurriculumStars } from '@/components/curriculum/stars'
 import { RetryButton } from '@/components/system/retry-button'
-import { Button } from '@/components/ui/button'
+import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { ErrorState } from '@/components/ui/error-state'
 import type { CurriculumLessonAccessOutcome } from '@/lib/curriculum/server'
-import { curriculumPathHref } from '@/lib/curriculum/routes'
+import { curriculumLessonRecordHref, curriculumPathHref } from '@/lib/curriculum/routes'
 import { formatExpectedDuration } from '@/lib/practice/navigation'
 
 type AllowedLessonData = Extract<CurriculumLessonAccessOutcome, { status: 'allowed' }>['data']
@@ -39,20 +39,14 @@ function actionLabel(state: AllowedLessonData['lesson']['state']): string | null
   return null
 }
 
-function authoritativePathSlug(data: AllowedLessonData) {
-  const link = data.lesson.previousLesson ?? data.lesson.nextLesson
-  if (!link) {
-    throw new Error('Curriculum lesson is missing its path navigation context.')
-  }
-  return link.pathSlug
-}
-
 export function CurriculumLessonDetail({ data }: { data: AllowedLessonData }) {
   const { lesson, session } = data
   const pathName = PATH_NAMES[session.mode]
   const chapterName = titleCase(session.difficulty)
   const label = actionLabel(lesson.state)
-  const pathSlug = authoritativePathSlug(data)
+  const pathSlug = session.pathSlug
+  const retryOfAttemptId =
+    lesson.state === 'retry_required' || lesson.state === 'passed' ? lesson.bestAttemptId : null
 
   return (
     <article className="flex min-w-0 flex-col gap-8 pt-4 pb-12">
@@ -109,14 +103,12 @@ export function CurriculumLessonDetail({ data }: { data: AllowedLessonData }) {
         ) : null}
 
         {label ? (
-          <div className="flex flex-col gap-2">
-            <Button fullWidth disabled aria-describedby="curriculum-recording-status">
-              {label}
-            </Button>
-            <p id="curriculum-recording-status" className="text-muted text-sm">
-              Lesson recording is not available from this page yet.
-            </p>
-          </div>
+          <ButtonLink
+            href={curriculumLessonRecordHref(pathSlug, session.lessonSlug, retryOfAttemptId)}
+            fullWidth
+          >
+            {label}
+          </ButtonLink>
         ) : null}
       </Card>
     </article>

@@ -136,11 +136,10 @@ describe('available curriculum lesson page', () => {
     expect(screen.getByText('Pass: 70')).toBeInTheDocument()
     expect(screen.getByText('Available')).toBeInTheDocument()
 
-    const action = screen.getByRole('button', { name: 'Start Lesson' })
-    expect(action).toBeDisabled()
-    expect(action).toHaveAttribute('aria-describedby', 'curriculum-recording-status')
-    expect(screen.getByText('Lesson recording is not available from this page yet.')).toBeVisible()
-    expect(document.querySelector('a[href^="/record"]')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Start Lesson' })).toHaveAttribute(
+      'href',
+      `/practice/paths/${PATH_SLUG}/lessons/${LESSON_SLUG}/record`,
+    )
   })
 
   it('shows provider-neutral activity without fabricating a score or stars', async () => {
@@ -151,7 +150,10 @@ describe('available curriculum lesson page', () => {
     expect(screen.getByText('You have activity here, but no score.')).toBeInTheDocument()
     expect(screen.queryByText(/Best:/)).not.toBeInTheDocument()
     expect(screen.queryByRole('img', { name: /stars/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Start Lesson' })).toBeDisabled()
+    expect(screen.getByRole('link', { name: 'Start Lesson' })).toHaveAttribute(
+      'href',
+      `/practice/paths/${PATH_SLUG}/lessons/${LESSON_SLUG}/record`,
+    )
   })
 })
 
@@ -173,7 +175,10 @@ describe('scored curriculum lesson page', () => {
     expect(screen.getByRole('img', { name: '0 of 3 stars' })).toBeInTheDocument()
     expect(screen.getByText('Need 70 to continue.')).toBeInTheDocument()
     expect(screen.getByText('Pass: 70')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Try Again' })).toBeDisabled()
+    expect(screen.getByRole('link', { name: 'Try Again' })).toHaveAttribute(
+      'href',
+      `/practice/paths/${PATH_SLUG}/lessons/${LESSON_SLUG}/record?retry=40000000-0000-4000-8000-000000000004`,
+    )
   })
 
   it('shows a passed lesson with its best score and stars', async () => {
@@ -192,7 +197,10 @@ describe('scored curriculum lesson page', () => {
     expect(screen.getByText('Passed')).toBeInTheDocument()
     expect(screen.getByText('86')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: '2 of 3 stars' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Practice Again' })).toBeDisabled()
+    expect(screen.getByRole('link', { name: 'Practice Again' })).toHaveAttribute(
+      'href',
+      `/practice/paths/${PATH_SLUG}/lessons/${LESSON_SLUG}/record?retry=40000000-0000-4000-8000-000000000004`,
+    )
   })
 })
 

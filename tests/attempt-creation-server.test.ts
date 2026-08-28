@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   logAttemptDiagnostic: vi.fn(),
+  lessonAccess: vi.fn(),
 }))
 
 vi.mock('server-only', () => ({}))
@@ -12,6 +13,9 @@ vi.mock('@/lib/attempts/server', () => ({
   logAttemptDiagnostic: mocks.logAttemptDiagnostic,
   safeDiagnosticCode: (error: unknown) =>
     typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'unknown',
+}))
+vi.mock('@/lib/curriculum/server', () => ({
+  loadCurriculumLessonAccessForUser: mocks.lessonAccess,
 }))
 
 import { abandonEnsuredAttempt, ensureAttemptCreation } from '@/lib/attempts/creation-server'
@@ -29,6 +33,7 @@ const OTHER_ATTEMPT_ID = '20000000-0000-4000-8000-000000000099'
 const REQUEST_ID = '30000000-0000-4000-8000-000000000003'
 const PROMPT_ID = '40000000-0000-4000-8000-000000000004'
 const MIME_TYPE = 'audio/webm;codecs=opus'
+const LESSON_ID = '50000000-0000-4000-8000-000000000005'
 
 const PAYLOAD: CreateAttemptPayload = {
   clientRequestId: REQUEST_ID,
@@ -137,6 +142,260 @@ beforeEach(() => {
 })
 
 describe('server attempt creation reconciliation', () => {
+  it('revalidates a structured lesson and persists its server-owned identity', async () => {
+    const payload: CreateAttemptPayload = {
+      ...PAYLOAD,
+      promptId: PROMPT_ID,
+      promptText: 'Describe a choice you made recently.',
+      mode: 'interview',
+      source: 'library',
+      additionalContext: undefined,
+      targetDurationSeconds: 60,
+      curriculum: {
+        lessonId: LESSON_ID,
+        pathSlug: 'interviews',
+        chapterLevel: 'beginner',
+        lessonSlug: 'interviews-beginner-01-answer-directly',
+        lessonPosition: 1,
+        checkpoint: false,
+      },
+    }
+    mocks.lessonAccess.mockResolvedValue({
+      status: 'allowed',
+      data: {
+        session: {
+          ...payload.curriculum,
+          promptId: PROMPT_ID,
+          promptText: payload.promptText,
+          mode: 'interview',
+          difficulty: 'beginner',
+          targetDurationSeconds: 60,
+        },
+        lesson: {},
+      },
+    })
+    const existing = readQuery({ data: null, error: null })
+    const insert = insertQuery({ data: storedRow('uploading'), error: null })
+    const admin = adminFrom(existing, insert)
+
+    const result = await ensureAttemptCreation({
+      admin: admin as never,
+      userId: USER_ID,
+      payload,
+      intent: 'uploading',
+    })
+
+    expect(result).toMatchObject({ status: 'ready', value: { created: true } })
+    expect(mocks.lessonAccess).toHaveBeenCalledWith(
+      admin,
+      USER_ID,
+      'interviews',
+      'interviews-beginner-01-answer-directly',
+    )
+    expect(insert.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lesson_id: LESSON_ID,
+        prompt_id: PROMPT_ID,
+        prompt_text: payload.promptText,
+        retry_of_attempt_id: null,
+        metrics: expect.objectContaining({
+          creation: expect.objectContaining({
+            curriculum: {
+              lesson_id: LESSON_ID,
+              path_slug: 'interviews',
+              chapter_level: 'beginner',
+              lesson_slug: 'interviews-beginner-01-answer-directly',
+              lesson_position: 1,
+              checkpoint: false,
+            },
+          }),
+        }),
+      }),
+    )
+  })
+
+  it.each([
+    ['locked', { status: 'denied', reason: 'locked' }],
+    ['inactive', { status: 'denied', reason: 'inactive' }],
+    ['wrong path', { status: 'denied', reason: 'path_mismatch' }],
+  ] as const)('does not create a structured attempt when the lesson is %s', async (_label, access) => {
+    const payload: CreateAttemptPayload = {
+      ...PAYLOAD,
+      promptId: PROMPT_ID,
+      promptText: 'Describe a choice you made recently.',
+      mode: 'interview',
+      source: 'library',
+      additionalContext: undefined,
+      targetDurationSeconds: 60,
+      curriculum: {
+        lessonId: LESSON_ID,
+        pathSlug: 'interviews',
+        chapterLevel: 'beginner',
+        lessonSlug: 'interviews-beginner-01-answer-directly',
+        lessonPosition: 1,
+        checkpoint: false,
+      },
+    }
+    mocks.lessonAccess.mockResolvedValue(access)
+    const existing = readQuery({ data: null, error: null })
+    const admin = adminFrom(existing)
+
+    await expect(
+      ensureAttemptCreation({ admin: admin as never, userId: USER_ID, payload, intent: 'uploading' }),
+    ).resolves.toEqual({ status: 'unavailable' })
+    expect(admin.from).toHaveBeenCalledOnce()
+  })
+
+  it('fails a structured creation when authoritative curriculum data cannot be read', async () => {
+    const payload: CreateAttemptPayload = {
+      ...PAYLOAD,
+      promptId: PROMPT_ID,
+      source: 'library',
+      additionalContext: undefined,
+      curriculum: {
+        lessonId: LESSON_ID,
+        pathSlug: 'interviews',
+        chapterLevel: 'beginner',
+        lessonSlug: 'interviews-beginner-01-answer-directly',
+        lessonPosition: 1,
+        checkpoint: false,
+      },
+    }
+    mocks.lessonAccess.mockResolvedValue({ status: 'failure', reason: 'query', operation: 'path' })
+    const admin = adminFrom(readQuery({ data: null, error: null }))
+
+    await expect(
+      ensureAttemptCreation({ admin: admin as never, userId: USER_ID, payload, intent: 'uploading' }),
+    ).resolves.toEqual({ status: 'failure' })
+  })
+
+  it('inherits a structured retry only from an owned parent for the same lesson', async () => {
+    const payload: CreateAttemptPayload = {
+      ...PAYLOAD,
+      promptId: PROMPT_ID,
+      promptText: 'Describe a choice you made recently.',
+      mode: 'interview',
+      source: 'library',
+      additionalContext: undefined,
+      targetDurationSeconds: 60,
+      retryOfAttemptId: OTHER_ATTEMPT_ID,
+      curriculum: {
+        lessonId: LESSON_ID,
+        pathSlug: 'interviews',
+        chapterLevel: 'beginner',
+        lessonSlug: 'interviews-beginner-01-answer-directly',
+        lessonPosition: 1,
+        checkpoint: false,
+      },
+    }
+    mocks.lessonAccess.mockResolvedValue({
+      status: 'allowed',
+      data: {
+        session: {
+          ...payload.curriculum,
+          promptId: PROMPT_ID,
+          promptText: payload.promptText,
+          mode: 'interview',
+          difficulty: 'beginner',
+          targetDurationSeconds: 60,
+        },
+        lesson: {},
+      },
+    })
+    const existing = readQuery({ data: null, error: null })
+    const parent = readQuery({
+      data: {
+        id: OTHER_ATTEMPT_ID,
+        prompt_id: PROMPT_ID,
+        lesson_id: LESSON_ID,
+        prompt_text: payload.promptText,
+        practice_mode: 'interview',
+        prompt_source: 'library',
+        prompt_difficulty: 'beginner',
+        metrics: { practice: { target_duration_seconds: 60 } },
+        status: 'done',
+      },
+      error: null,
+    })
+    const insert = insertQuery({ data: storedRow('uploading'), error: null })
+    const admin = adminFrom(existing, parent, insert)
+
+    const result = await ensureAttemptCreation({
+      admin: admin as never,
+      userId: USER_ID,
+      payload,
+      intent: 'uploading',
+    })
+
+    expect(result).toMatchObject({ status: 'ready', value: { created: true } })
+    expect(parent.select).toHaveBeenCalledWith(
+      'id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source, prompt_difficulty, metrics, status',
+    )
+    expect(parent.eq.mock.calls).toEqual([
+      ['id', OTHER_ATTEMPT_ID],
+      ['user_id', USER_ID],
+    ])
+    expect(insert.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ lesson_id: LESSON_ID, retry_of_attempt_id: OTHER_ATTEMPT_ID }),
+    )
+  })
+
+  it('rejects a structured retry parent from a different lesson', async () => {
+    const payload: CreateAttemptPayload = {
+      ...PAYLOAD,
+      promptId: PROMPT_ID,
+      promptText: 'Describe a choice you made recently.',
+      mode: 'interview',
+      source: 'library',
+      additionalContext: undefined,
+      targetDurationSeconds: 60,
+      retryOfAttemptId: OTHER_ATTEMPT_ID,
+      curriculum: {
+        lessonId: LESSON_ID,
+        pathSlug: 'interviews',
+        chapterLevel: 'beginner',
+        lessonSlug: 'interviews-beginner-01-answer-directly',
+        lessonPosition: 1,
+        checkpoint: false,
+      },
+    }
+    mocks.lessonAccess.mockResolvedValue({
+      status: 'allowed',
+      data: {
+        session: {
+          ...payload.curriculum,
+          promptId: PROMPT_ID,
+          promptText: payload.promptText,
+          mode: 'interview',
+          difficulty: 'beginner',
+          targetDurationSeconds: 60,
+        },
+        lesson: {},
+      },
+    })
+    const existing = readQuery({ data: null, error: null })
+    const parent = readQuery({
+      data: {
+        id: OTHER_ATTEMPT_ID,
+        prompt_id: PROMPT_ID,
+        lesson_id: '60000000-0000-4000-8000-000000000006',
+        prompt_text: payload.promptText,
+        practice_mode: 'interview',
+        prompt_source: 'library',
+        prompt_difficulty: 'beginner',
+        metrics: { practice: { target_duration_seconds: 60 } },
+        status: 'done',
+      },
+      error: null,
+    })
+    const admin = adminFrom(existing, parent)
+
+    await expect(
+      ensureAttemptCreation({ admin: admin as never, userId: USER_ID, payload, intent: 'uploading' }),
+    ).resolves.toEqual({ status: 'unavailable' })
+    expect(admin.from).toHaveBeenCalledTimes(2)
+  })
+
   it('rejects a curriculum-only prompt at the authoritative library boundary', async () => {
     const payload: CreateAttemptPayload = {
       ...PAYLOAD,
@@ -209,6 +468,7 @@ describe('server attempt creation reconciliation', () => {
     expect(insert.insert.mock.calls[0]?.[0]).toMatchObject({
       id: ATTEMPT_ID,
       user_id: USER_ID,
+      lesson_id: null,
       client_request_id: REQUEST_ID,
       audio_path: `${USER_ID}/${ATTEMPT_ID}.webm`,
       status: 'failed',

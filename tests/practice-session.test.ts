@@ -93,6 +93,15 @@ describe('practice session descriptor', () => {
     expect(
       retrySessionFromAttempt({
         id: ATTEMPT_ID,
+        lesson_id: '33333333-3333-4333-8333-333333333333',
+        prompt_id: PROMPT_ID,
+        prompt_text: LIBRARY_SESSION.promptText,
+        prompt_source: 'library',
+      }),
+    ).toBeNull()
+    expect(
+      retrySessionFromAttempt({
+        id: ATTEMPT_ID,
         prompt_id: null,
         prompt_text: LIBRARY_SESSION.promptText,
         prompt_source: 'library',

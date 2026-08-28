@@ -85,7 +85,7 @@ export default async function RecordPage({
       const { data, error } = await supabase
         .from('attempts')
         .select(
-          'id, prompt_id, prompt_text, practice_mode, prompt_source, prompt_difficulty, metrics, status',
+          'id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source, prompt_difficulty, metrics, status',
         )
         .eq('id', attemptId)
         .eq('user_id', user.id)

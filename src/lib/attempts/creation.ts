@@ -8,6 +8,12 @@ import {
 import type { LibraryPrompt } from '@/lib/prompts/selection'
 import type { AttemptMetrics } from '@/lib/types/metrics'
 import { isRetryableAttemptStatus } from '@/lib/attempts/lifecycle'
+import type { CurriculumLessonSession } from '@/lib/curriculum/data'
+import {
+  matchesStructuredPracticeSession,
+  matchesStructuredRetryParent,
+  structuredPracticeSession,
+} from '@/lib/curriculum/recording'
 
 interface StoredCreationSnapshot {
   id: string
@@ -21,6 +27,7 @@ interface StoredCreationSnapshot {
   retry_of_attempt_id: string | null
   client_request_id: string | null
   metrics: unknown
+  lesson_id?: string | null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -44,7 +51,8 @@ export function libraryCreationSession(
     requested.mode !== prompt.mode ||
     requested.difficulty !== prompt.difficulty ||
     requested.targetDurationSeconds !== prompt.targetDurationSeconds ||
-    requested.additionalContext !== undefined
+    requested.additionalContext !== undefined ||
+    requested.curriculum !== undefined
   ) {
     return null
   }
@@ -68,7 +76,8 @@ export function customCreationSession(
     requested.source !== 'custom' ||
     requested.promptId !== null ||
     requested.retryOfAttemptId !== null ||
-    requested.difficulty !== 'beginner'
+    requested.difficulty !== 'beginner' ||
+    requested.curriculum !== undefined
   ) {
     return null
   }
@@ -82,6 +91,21 @@ export function customCreationSession(
     retryOfAttemptId: null,
     ...(requested.additionalContext ? { additionalContext: requested.additionalContext } : {}),
   }
+}
+
+/** Curriculum metadata and prompt fields are accepted only after DB revalidation. */
+export function structuredCreationSession(
+  requested: CreateAttemptPayload,
+  lesson: CurriculumLessonSession,
+  parent: unknown = null,
+): PracticeSessionDescriptor | null {
+  if (!requested.curriculum || !matchesStructuredPracticeSession(requested, lesson)) return null
+  if (requested.retryOfAttemptId === null) {
+    if (parent !== null) return null
+  } else if (!matchesStructuredRetryParent(parent, lesson, requested.retryOfAttemptId)) {
+    return null
+  }
+  return structuredPracticeSession(lesson, requested.retryOfAttemptId)
 }
 
 /** Retry metadata comes from a settled owned parent, never from browser claims. */
@@ -108,6 +132,18 @@ export function initialAttemptMetrics(
     creation: {
       prompt_id: session.promptId,
       retry_of_attempt_id: session.retryOfAttemptId,
+      ...(session.curriculum
+        ? {
+            curriculum: {
+              lesson_id: session.curriculum.lessonId,
+              path_slug: session.curriculum.pathSlug,
+              chapter_level: session.curriculum.chapterLevel,
+              lesson_slug: session.curriculum.lessonSlug,
+              lesson_position: session.curriculum.lessonPosition,
+              checkpoint: session.curriculum.checkpoint,
+            },
+          }
+        : {}),
     },
     practice: {
       target_duration_seconds: session.targetDurationSeconds,
@@ -133,6 +169,26 @@ export function storedAttemptReuse(
   if (!isRecord(practice) || !isRecord(creation) || !isRecord(upload)) return null
   if (typeof upload.storage_path !== 'string' || typeof upload.mime_type !== 'string') return null
   const storagePath = attemptStoragePath(userId, stored.id, requested.mimeType)
+  const requestedCurriculum = requested.curriculum
+    ? {
+        lesson_id: requested.curriculum.lessonId,
+        path_slug: requested.curriculum.pathSlug,
+        chapter_level: requested.curriculum.chapterLevel,
+        lesson_slug: requested.curriculum.lessonSlug,
+        lesson_position: requested.curriculum.lessonPosition,
+        checkpoint: requested.curriculum.checkpoint,
+      }
+    : undefined
+  const storedCurriculum = creation.curriculum
+  const curriculumMatches = requestedCurriculum
+    ? isRecord(storedCurriculum) &&
+      storedCurriculum.lesson_id === requestedCurriculum.lesson_id &&
+      storedCurriculum.path_slug === requestedCurriculum.path_slug &&
+      storedCurriculum.chapter_level === requestedCurriculum.chapter_level &&
+      storedCurriculum.lesson_slug === requestedCurriculum.lesson_slug &&
+      storedCurriculum.lesson_position === requestedCurriculum.lesson_position &&
+      storedCurriculum.checkpoint === requestedCurriculum.checkpoint
+    : storedCurriculum === undefined
 
   const matches =
     stored.client_request_id === requested.clientRequestId &&
@@ -144,6 +200,8 @@ export function storedAttemptReuse(
     stored.rubric_version === rubricVersion &&
     creation.prompt_id === requested.promptId &&
     creation.retry_of_attempt_id === requested.retryOfAttemptId &&
+    (stored.lesson_id ?? null) === (requested.curriculum?.lessonId ?? null) &&
+    curriculumMatches &&
     (stored.prompt_id === requested.promptId || stored.prompt_id === null) &&
     (stored.retry_of_attempt_id === requested.retryOfAttemptId ||
       stored.retry_of_attempt_id === null) &&

@@ -4,6 +4,7 @@ import type {
   TranscriptWord,
 } from '@/lib/deepgram/parse'
 import type { PronunciationEvaluation } from '@/lib/pronunciation/contracts'
+import type { ChapterLevel, PathSlug } from '@/lib/curriculum/contracts'
 
 export interface AmplitudeSample {
   t_ms: number
@@ -48,6 +49,14 @@ export interface AttemptUploadMetrics {
 export interface AttemptCreationMetrics {
   prompt_id: string | null
   retry_of_attempt_id: string | null
+  curriculum?: {
+    lesson_id: string
+    path_slug: PathSlug
+    chapter_level: ChapterLevel
+    lesson_slug: string
+    lesson_position: number
+    checkpoint: boolean
+  }
 }
 
 /** Everything the mechanical half computed, stored beside the raw capture. */
