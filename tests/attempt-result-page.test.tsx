@@ -5,6 +5,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
+  loadStructuredLessonResultForUser: vi.fn(),
   logAttemptDiagnostic: vi.fn(),
   notFound: vi.fn(),
   readAttemptResult: vi.fn(),
@@ -25,6 +26,9 @@ vi.mock('@/lib/attempts/reconciliation', () => ({
   reconcileCurrentUserStaleAttempts: mocks.reconcileCurrentUserStaleAttempts,
 }))
 vi.mock('@/lib/results/attempt-result', () => ({ readAttemptResult: mocks.readAttemptResult }))
+vi.mock('@/lib/curriculum/result-server', () => ({
+  loadStructuredLessonResultForUser: mocks.loadStructuredLessonResultForUser,
+}))
 
 vi.mock('@/components/results/results-view', () => ({
   ResultsView: ({
@@ -50,16 +54,19 @@ vi.mock('@/components/results/v2-results-view', () => ({
     payload,
     comparison,
     previousAttemptId,
+    curriculumResult,
   }: {
     audioUrl: string | null
     payload: { fixture: string }
     comparison?: unknown
     previousAttemptId?: string | null
+    curriculumResult?: { lesson: { title: string } } | null
   }) => (
     <div
       data-audio={audioUrl ?? 'none'}
       data-comparison={comparison ? 'shown' : 'none'}
       data-previous={previousAttemptId ?? 'none'}
+      data-curriculum={curriculumResult?.lesson.title ?? 'none'}
       data-testid="v2-result"
     >
       {payload.fixture}
@@ -71,6 +78,7 @@ import AttemptPage from '@/app/(app)/attempts/[id]/page'
 import { v2Snapshot } from './helpers/result-snapshots'
 
 const ATTEMPT_ID = '10000000-0000-4000-8000-000000000001'
+const LESSON_ID = '70000000-0000-4000-8000-000000000007'
 const PARENT_ID = '20000000-0000-4000-8000-000000000002'
 const GRANDPARENT_ID = '60000000-0000-4000-8000-000000000006'
 const MISSING_ID = '30000000-0000-4000-8000-000000000003'
@@ -123,6 +131,8 @@ interface ClientOptions {
 function attempt(overrides: Record<string, unknown> = {}) {
   return {
     id: ATTEMPT_ID,
+    prompt_id: null,
+    lesson_id: null,
     prompt_text: PRIVATE_PROMPT,
     transcript: PRIVATE_TRANSCRIPT,
     duration_ms: 20_000,
@@ -132,6 +142,8 @@ function attempt(overrides: Record<string, unknown> = {}) {
     section_scores: 'v2',
     metrics: null,
     content_result: null,
+    practice_mode: 'practice',
+    rubric_version: 'v2',
     retry_of_attempt_id: null,
     status: 'done',
     failure_code: null,
@@ -209,6 +221,7 @@ async function renderPage(id = ATTEMPT_ID) {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.reconcileCurrentUserStaleAttempts.mockResolvedValue({ status: 'ready', reconciled: [] })
+  mocks.loadStructuredLessonResultForUser.mockResolvedValue({ status: 'not_found' })
   mocks.notFound.mockImplementation(() => {
     throw NOT_FOUND
   })
@@ -382,6 +395,77 @@ describe('owned attempt result loading', () => {
     expect(screen.getByTestId(testId)).toHaveAttribute('data-audio', 'none')
     expect(setup.createSignedUrl).not.toHaveBeenCalled()
     expect(mocks.logAttemptDiagnostic).not.toHaveBeenCalled()
+  })
+
+  it('adds owner-scoped structured context from lesson_id to a v2 result', async () => {
+    const setup = client({
+      primary: {
+        data: attempt({
+          prompt_id: '80000000-0000-4000-8000-000000000008',
+          lesson_id: LESSON_ID,
+          score: 84,
+          section_scores: 'v2',
+        }),
+        error: null,
+      },
+    })
+    mocks.createClient.mockResolvedValue(setup.supabase)
+    mocks.readAttemptResult.mockReturnValue({
+      kind: 'v2',
+      payload: {
+        fixture: 'Complete v2 result',
+        mode: 'practice',
+        rubric_version: 'v2',
+        total_earned_points: 84,
+      },
+    })
+    mocks.loadStructuredLessonResultForUser.mockResolvedValue({
+      status: 'ready',
+      data: { lesson: { title: 'Handling a setback' } },
+    })
+
+    await renderPage()
+
+    expect(mocks.loadStructuredLessonResultForUser).toHaveBeenCalledWith(setup.supabase, USER_ID, {
+      lessonId: LESSON_ID,
+      attemptId: ATTEMPT_ID,
+      promptId: '80000000-0000-4000-8000-000000000008',
+      practiceMode: 'practice',
+      rubricVersion: 'v2',
+      currentScore: 84,
+      snapshotMode: 'practice',
+      snapshotRubricVersion: 'v2',
+      snapshotScore: 84,
+    })
+    expect(screen.getByTestId('v2-result')).toHaveAttribute('data-curriculum', 'Handling a setback')
+  })
+
+  it('preserves the base v2 result when structured context cannot be loaded', async () => {
+    const setup = client({
+      primary: {
+        data: attempt({ lesson_id: LESSON_ID, score: null, section_scores: 'v2-partial' }),
+        error: null,
+      },
+    })
+    mocks.createClient.mockResolvedValue(setup.supabase)
+    mocks.readAttemptResult.mockReturnValue({
+      kind: 'v2',
+      payload: {
+        fixture: 'Partial v2 result',
+        mode: 'practice',
+        rubric_version: 'v2',
+        total_earned_points: null,
+      },
+    })
+    mocks.loadStructuredLessonResultForUser.mockResolvedValue({
+      status: 'failure',
+      operation: 'topology',
+    })
+
+    await renderPage()
+
+    expect(screen.getByTestId('v2-result')).toHaveTextContent('Partial v2 result')
+    expect(screen.getByTestId('v2-result')).toHaveAttribute('data-curriculum', 'none')
   })
 
   it('passes only exact unique stored legacy findings to the result renderer', async () => {

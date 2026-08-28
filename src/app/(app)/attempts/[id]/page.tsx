@@ -17,6 +17,7 @@ import {
 } from '@/lib/attempts/lifecycle'
 import { reconcileCurrentUserStaleAttempts } from '@/lib/attempts/reconciliation'
 import { logAttemptDiagnostic } from '@/lib/attempts/server'
+import { loadStructuredLessonResultForUser } from '@/lib/curriculum/result-server'
 import { isUuid } from '@/lib/practice/session'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { readAttemptResult } from '@/lib/results/attempt-result'
@@ -132,7 +133,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     attemptResponse = await supabase
       .from('attempts')
       .select(
-        'id, prompt_text, transcript, duration_ms, audio_path, created_at, score, section_scores, metrics, content_result, retry_of_attempt_id, status, failure_code',
+        'id, prompt_id, lesson_id, prompt_text, transcript, duration_ms, audio_path, created_at, score, section_scores, metrics, content_result, practice_mode, rubric_version, retry_of_attempt_id, status, failure_code',
       )
       .eq('id', id)
       .eq('user_id', user.id)
@@ -301,6 +302,19 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         ? (attempt.metrics as { practice: { additional_context: string } }).practice
             .additional_context
         : null
+    const curriculumResult = attempt.lesson_id
+      ? await loadStructuredLessonResultForUser(supabase, user.id, {
+          lessonId: attempt.lesson_id,
+          attemptId: attempt.id,
+          promptId: attempt.prompt_id,
+          practiceMode: attempt.practice_mode,
+          rubricVersion: attempt.rubric_version,
+          currentScore: attempt.score,
+          snapshotMode: result.payload.mode,
+          snapshotRubricVersion: result.payload.rubric_version,
+          snapshotScore: result.payload.total_earned_points,
+        })
+      : null
     return resultWithAudioStatus(
       <V2ResultsView
         attemptId={attempt.id}
@@ -312,6 +326,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         payload={result.payload}
         comparison={comparison}
         previousAttemptId={previousAttemptId}
+        curriculumResult={curriculumResult?.status === 'ready' ? curriculumResult.data : null}
       />,
       audioUnavailable,
     )
