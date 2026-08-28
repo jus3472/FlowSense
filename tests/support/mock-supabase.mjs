@@ -135,6 +135,35 @@ function reset() {
 
 reset()
 
+function seedLessonProgress(input) {
+  const path = PRACTICE_PATHS.find((candidate) => candidate.slug === input?.pathSlug)
+  const passedLessons = Number.isInteger(input?.passedLessons) ? input.passedLessons : 0
+  const score =
+    Number.isInteger(input?.score) && input.score >= 70 && input.score <= 100 ? input.score : 70
+  if (!path || passedLessons < 0 || passedLessons > 30) return
+  const chapterIds = PRACTICE_CHAPTERS.filter((chapter) => chapter.path_id === path.id).map(
+    (chapter) => chapter.id,
+  )
+  const lessons = PRACTICE_LESSONS.filter((lesson) => chapterIds.includes(lesson.chapter_id)).sort(
+    (left, right) => {
+      const leftChapter = PRACTICE_CHAPTERS.find((chapter) => chapter.id === left.chapter_id)
+      const rightChapter = PRACTICE_CHAPTERS.find((chapter) => chapter.id === right.chapter_id)
+      return (
+        (leftChapter?.position ?? 0) - (rightChapter?.position ?? 0) ||
+        left.position - right.position
+      )
+    },
+  )
+  state.lessonProgress = lessons.slice(0, passedLessons).map((lesson, index) => ({
+    user_id: USER_ID,
+    lesson_id: lesson.id,
+    best_score: score,
+    best_attempt_id: null,
+    created_at: new Date(RUN_STARTED_AT + index * 1_000).toISOString(),
+    updated_at: new Date(RUN_STARTED_AT + index * 1_000).toISOString(),
+  }))
+}
+
 function json(res, status, value, headers = {}) {
   res.writeHead(status, { 'content-type': 'application/json', ...headers })
   res.end(JSON.stringify(value))
@@ -293,14 +322,33 @@ function timestamp() {
   return new Date(RUN_STARTED_AT + state.clock++ * 1_000).toISOString()
 }
 
-function scorePayload(attempt, failure = false) {
+function allocateScore(weights, score) {
+  const raw = weights.map((weight) => (weight * score) / 100)
+  const earned = raw.map(Math.floor)
+  let remaining = score - earned.reduce((sum, value) => sum + value, 0)
+  const order = raw
+    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+    .sort((left, right) => right.fraction - left.fraction || left.index - right.index)
+  for (const item of order) {
+    if (remaining <= 0) break
+    earned[item.index] += 1
+    remaining -= 1
+  }
+  return earned
+}
+
+function scorePayload(attempt, failure = false, forcedScore = null) {
   const names = ['fluency', 'clarity', 'vocabulary', 'grammar', 'structure', 'delivery']
   const weights = WEIGHTS[attempt.practice_mode] ?? WEIGHTS.practice
+  const forcedEarned = forcedScore === null ? null : allocateScore(weights, forcedScore)
   const categories = Object.fromEntries(
     names.map((name, index) => {
       const unavailable = failure && ['vocabulary', 'grammar', 'structure'].includes(name)
       const max = weights[index]
-      const earned = Math.max(0, max - (state.attempts.length > 1 ? 1 : 3))
+      const earned =
+        forcedEarned === null
+          ? Math.max(0, max - (state.attempts.length > 1 ? 1 : 3))
+          : forcedEarned[index]
       return [
         name,
         {
@@ -329,6 +377,85 @@ function scorePayload(attempt, failure = false) {
     categories,
     warnings: failure ? ['Some provider checks were unavailable.'] : [],
   }
+}
+
+function raiseLessonProgress(attempt) {
+  const snapshot = attempt.section_scores
+  if (
+    typeof attempt.lesson_id !== 'string' ||
+    attempt.status !== 'done' ||
+    typeof attempt.score !== 'number' ||
+    attempt.score < 0 ||
+    attempt.score > 100 ||
+    attempt.rubric_version !== 'v2' ||
+    snapshot?.version !== 'v2.score.1' ||
+    snapshot?.rubric_version !== 'v2' ||
+    snapshot?.mode !== attempt.practice_mode ||
+    snapshot?.total_earned_points !== attempt.score ||
+    snapshot?.total_max_points !== 100
+  ) {
+    return
+  }
+  const lesson = PRACTICE_LESSONS.find((candidate) => candidate.id === attempt.lesson_id)
+  const chapter = PRACTICE_CHAPTERS.find((candidate) => candidate.id === lesson?.chapter_id)
+  const path = PRACTICE_PATHS.find((candidate) => candidate.id === chapter?.path_id)
+  if (
+    !lesson ||
+    !chapter ||
+    !path ||
+    !lesson.active ||
+    !chapter.active ||
+    !path.active ||
+    lesson.prompt_id !== attempt.prompt_id ||
+    path.mode !== attempt.practice_mode
+  ) {
+    return
+  }
+  const categories = Object.entries(snapshot.categories ?? {})
+  const validNames = new Set([
+    'fluency',
+    'clarity',
+    'vocabulary',
+    'grammar',
+    'structure',
+    'delivery',
+  ])
+  if (
+    categories.length !== 6 ||
+    categories.some(
+      ([name, category]) =>
+        !validNames.has(name) ||
+        category?.category !== name ||
+        category?.availability !== 'available' ||
+        category?.status !== 'scored' ||
+        typeof category?.earned_points !== 'number' ||
+        typeof category?.max_points !== 'number',
+    ) ||
+    categories.reduce((sum, [, category]) => sum + category.earned_points, 0) !== attempt.score ||
+    categories.reduce((sum, [, category]) => sum + category.max_points, 0) !== 100
+  ) {
+    return
+  }
+
+  const existing = state.lessonProgress.find(
+    (row) => row.user_id === attempt.user_id && row.lesson_id === attempt.lesson_id,
+  )
+  if (existing && existing.best_score > attempt.score) return
+  if (existing) {
+    existing.best_score = attempt.score
+    existing.best_attempt_id = attempt.id
+    existing.updated_at = timestamp()
+    return
+  }
+  const now = timestamp()
+  state.lessonProgress.push({
+    user_id: attempt.user_id,
+    lesson_id: attempt.lesson_id,
+    best_score: attempt.score,
+    best_attempt_id: attempt.id,
+    created_at: now,
+    updated_at: now,
+  })
 }
 
 function wordsForTranscript(transcript) {
@@ -360,6 +487,7 @@ const server = createServer(async (req, res) => {
     const input = await body(req)
     reset()
     if (input.onboarded === false) state.userMetadata = {}
+    if (input.curriculum) seedLessonProgress(input.curriculum)
     return json(res, 200, state)
   }
   if (url.pathname === '/__e2e/state' && req.method === 'GET') return json(res, 200, state)
@@ -399,7 +527,9 @@ const server = createServer(async (req, res) => {
     }
     const input = await body(req)
     const failure = input.failure === true
-    const snapshot = scorePayload(attempt, failure)
+    const forcedScore =
+      Number.isInteger(input.score) && input.score >= 0 && input.score <= 100 ? input.score : null
+    const snapshot = scorePayload(attempt, failure, forcedScore)
     attempt.score = failure ? null : snapshot.total_earned_points
     attempt.section_scores = snapshot
     attempt.content_result = null
@@ -413,8 +543,10 @@ const server = createServer(async (req, res) => {
     }
     attempt.status = 'done'
     attempt.status_changed_at = timestamp()
+    attempt.finished_at = timestamp()
     attempt.failure_code = null
     state.lifecycleEvents.push({ attemptId: attempt.id, status: 'done' })
+    raiseLessonProgress(attempt)
     return json(res, 200, {
       score: attempt.score,
       wordCount: attempt.metrics.transcript.words.length,
