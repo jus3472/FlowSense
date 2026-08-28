@@ -34,11 +34,17 @@ const VOCABULARY_KINDS = [
 ] as const
 const GRAMMAR_KINDS = ['grammatical_error'] as const
 const MAX_FINDINGS_PER_CATEGORY = 8
+const REQUIRED_CONTENT_CATEGORIES = [
+  'structure',
+  'grammar',
+  'vocabulary',
+] as const satisfies readonly V2ContentCategory[]
 
 export class V2ContentParseError extends Error {
   constructor(
     readonly code: 'malformed_json' | 'schema_invalid',
     message: string,
+    readonly missingSections: readonly V2ContentCategory[] = [],
   ) {
     super(message)
     this.name = 'V2ContentParseError'
@@ -355,13 +361,18 @@ function parseFindings(
   return categoryResult(category, findings, warnings, { findings_reviewed: capped.length })
 }
 
-export function parseV2ContentResponse(
+interface ParsedV2ContentResponse {
+  result: Omit<V2ContentEvaluation, 'provider' | 'calls'>
+  missingSections: readonly V2ContentCategory[]
+}
+
+function parseV2ContentResponseWithDiagnostics(
   raw: string,
   input: Pick<
     V2ContentEvaluationInput,
     'transcript' | 'mechanicallyCounted' | 'unreliableTranscriptSpans'
   >,
-): Omit<V2ContentEvaluation, 'provider' | 'calls'> {
+): ParsedV2ContentResponse {
   const payload = parsePayload(raw)
   const context: ParseContext = {
     transcript: input.transcript,
@@ -378,19 +389,37 @@ export function parseV2ContentResponse(
     grammar: parseFindings(payload.grammar, 'grammar', context),
     vocabulary: parseFindings(payload.vocabulary, 'vocabulary', context),
   }
-  const checked = Object.values(categories).some((category) => category.status === 'checked')
-  if (!checked) {
+  const missingSections = REQUIRED_CONTENT_CATEGORIES.filter(
+    (category) => categories[category].status !== 'checked',
+  )
+  const checked = missingSections.length < REQUIRED_CONTENT_CATEGORIES.length
+  return {
+    result: {
+      version: V2_CONTENT_DETECTOR_VERSION,
+      status: checked ? 'checked' : 'not_checked',
+      categories,
+      warnings: Object.values(categories).flatMap((category) => category.warnings),
+    },
+    missingSections,
+  }
+}
+
+export function parseV2ContentResponse(
+  raw: string,
+  input: Pick<
+    V2ContentEvaluationInput,
+    'transcript' | 'mechanicallyCounted' | 'unreliableTranscriptSpans'
+  >,
+): Omit<V2ContentEvaluation, 'provider' | 'calls'> {
+  const parsed = parseV2ContentResponseWithDiagnostics(raw, input)
+  if (parsed.missingSections.length > 0) {
     throw new V2ContentParseError(
       'schema_invalid',
-      'The v2 content response did not contain a usable category.',
+      `The v2 content response was missing required sections: ${parsed.missingSections.join(', ')}.`,
+      parsed.missingSections,
     )
   }
-  return {
-    version: V2_CONTENT_DETECTOR_VERSION,
-    status: checked ? 'checked' : 'not_checked',
-    categories,
-    warnings: Object.values(categories).flatMap((category) => category.warnings),
-  }
+  return parsed.result
 }
 
 /** Makes at most two calls and retries only explicitly recoverable provider/output failures. */
@@ -415,7 +444,17 @@ export async function runV2ContentEvaluation(
         transcript: input.transcript,
         timeoutMs: input.timeoutMs,
       })
-      return { ...parseV2ContentResponse(raw, input), provider: input.provider.name, calls }
+      const parsed = parseV2ContentResponseWithDiagnostics(raw, input)
+      if (parsed.missingSections.length === 0) {
+        return { ...parsed.result, provider: input.provider.name, calls }
+      }
+
+      const failure = reportContentProviderFailure(
+        new ContentProviderFailure('schema_invalid', input.provider.name),
+        input.provider.name,
+      )
+      if (attempt === 0 && isRetryableContentProviderFailure(failure)) continue
+      return { ...parsed.result, provider: input.provider.name, calls }
     } catch (error) {
       const failure =
         error instanceof V2ContentParseError

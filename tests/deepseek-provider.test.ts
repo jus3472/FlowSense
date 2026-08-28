@@ -328,7 +328,7 @@ describe('v2 provider retry boundary', () => {
     expect(result).toMatchObject({
       status: 'not_checked',
       calls: 2,
-      warnings: [CONTENT_PROVIDER_UNAVAILABLE_MESSAGE],
+      warnings: ['structure was missing', 'grammar was missing', 'vocabulary was missing'],
       categories: {
         structure: { status: 'not_checked', component: null },
         grammar: { status: 'not_checked', component: null },

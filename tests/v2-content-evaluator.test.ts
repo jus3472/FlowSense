@@ -96,16 +96,20 @@ describe('v2 content response validation', () => {
     })
   })
 
-  it('fails missing categories in the user favor without inventing deductions', () => {
-    const parsed = parseV2ContentResponse(
-      JSON.stringify({ version: V2_CONTENT_DETECTOR_VERSION, structure: structure() }),
-      {
-        transcript: TRANSCRIPT,
-      },
-    )
-    expect(parsed.categories.structure.status).toBe('checked')
-    expect(parsed.categories.grammar).toMatchObject({ status: 'not_checked', component: null })
-    expect(parsed.categories.vocabulary).toMatchObject({ status: 'not_checked', component: null })
+  it('classifies a structure-only response as schema-invalid with ordered missing sections', () => {
+    try {
+      parseV2ContentResponse(
+        JSON.stringify({ version: V2_CONTENT_DETECTOR_VERSION, structure: structure() }),
+        { transcript: TRANSCRIPT },
+      )
+      throw new Error('Expected the partial content response to be rejected')
+    } catch (error) {
+      expect(error).toBeInstanceOf(V2ContentParseError)
+      expect(error).toMatchObject({
+        code: 'schema_invalid',
+        missingSections: ['grammar', 'vocabulary'],
+      })
+    }
   })
 
   it('throws only for malformed response envelopes', () => {
@@ -147,19 +151,22 @@ describe('v2 content response validation', () => {
     ).toThrow(/unsupported version/)
   })
 
-  it('neutralizes an incomplete structure envelope and validates passed checks', () => {
-    const incomplete = parseV2ContentResponse(
-      response({
-        structure: {
-          checks: { main_point: { passed: false, severity: 'clear', observation: 'x' } },
-        },
+  it('rejects an incomplete structure envelope and validates passed checks', () => {
+    expect(() =>
+      parseV2ContentResponse(
+        response({
+          structure: {
+            checks: { main_point: { passed: false, severity: 'clear', observation: 'x' } },
+          },
+        }),
+        { transcript: TRANSCRIPT },
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'schema_invalid',
+        missingSections: ['structure'],
       }),
-      { transcript: TRANSCRIPT },
     )
-    expect(incomplete.categories.structure).toMatchObject({
-      status: 'not_checked',
-      component: null,
-    })
 
     const passed = parseV2ContentResponse(response({ structure: structure() }), {
       transcript: TRANSCRIPT,
@@ -170,14 +177,17 @@ describe('v2 content response validation', () => {
       findings: [],
     })
 
-    const malformedPass = parseV2ContentResponse(
-      response({ structure: structure({ completion: { passed: true, severity: 'minor' } }) }),
-      { transcript: TRANSCRIPT },
+    expect(() =>
+      parseV2ContentResponse(
+        response({ structure: structure({ completion: { passed: true, severity: 'minor' } }) }),
+        { transcript: TRANSCRIPT },
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'schema_invalid',
+        missingSections: ['structure'],
+      }),
     )
-    expect(malformedPass.categories.structure).toMatchObject({
-      status: 'not_checked',
-      component: null,
-    })
   })
 
   it('drops grammar and vocabulary findings without exact transcript evidence', () => {
@@ -720,11 +730,23 @@ describe('v2 provider behavior and prompt contract', () => {
     expect(result).toMatchObject({
       status: 'not_checked',
       calls: 2,
-      warnings: ['The content provider was unavailable.'],
+      warnings: ['structure was missing', 'grammar was missing', 'vocabulary was missing'],
       categories: {
-        structure: { status: 'not_checked', component: null },
-        grammar: { status: 'not_checked', component: null },
-        vocabulary: { status: 'not_checked', component: null },
+        structure: {
+          status: 'not_checked',
+          component: null,
+          warnings: ['structure was missing'],
+        },
+        grammar: {
+          status: 'not_checked',
+          component: null,
+          warnings: ['grammar was missing'],
+        },
+        vocabulary: {
+          status: 'not_checked',
+          component: null,
+          warnings: ['vocabulary was missing'],
+        },
       },
     })
     expect(complete).toHaveBeenCalledTimes(2)
@@ -744,13 +766,14 @@ describe('v2 provider behavior and prompt contract', () => {
     warning.mockRestore()
   })
 
-  it('preserves a partially usable response without retrying valid checked categories', async () => {
+  it('retries a structure-only response and accepts all required sections from the second call', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const complete = vi
       .fn<V2ContentDetectorProvider['complete']>()
-      .mockResolvedValue(
+      .mockResolvedValueOnce(
         JSON.stringify({ version: V2_CONTENT_DETECTOR_VERSION, structure: structure() }),
       )
+      .mockResolvedValueOnce(response())
 
     const result = await runV2ContentEvaluation({
       provider: provider(complete),
@@ -760,12 +783,131 @@ describe('v2 provider behavior and prompt contract', () => {
     })
 
     expect(result.status).toBe('checked')
-    expect(result.calls).toBe(1)
+    expect(result.calls).toBe(2)
     expect(result.categories.structure.status).toBe('checked')
-    expect(result.categories.grammar.status).toBe('not_checked')
-    expect(result.categories.vocabulary.status).toBe('not_checked')
-    expect(complete).toHaveBeenCalledTimes(1)
-    expect(warning).not.toHaveBeenCalled()
+    expect(result.categories.grammar.status).toBe('checked')
+    expect(result.categories.vocabulary.status).toBe('checked')
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(warning).toHaveBeenCalledTimes(1)
+    expect(warning).toHaveBeenCalledWith({
+      provider: 'deepseek',
+      model: 'fake-v2',
+      code: 'schema_invalid',
+      status: null,
+    })
+    warning.mockRestore()
+  })
+
+  it('retries partial content instead of silently accepting missing grammar and vocabulary', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const partial = JSON.stringify({
+      version: V2_CONTENT_DETECTOR_VERSION,
+      structure: structure(),
+    })
+    const complete = vi.fn<V2ContentDetectorProvider['complete']>().mockResolvedValue(partial)
+
+    const result = await runV2ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: 'Describe a park.',
+      transcript: TRANSCRIPT,
+    })
+
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(result.calls).toBe(2)
+    expect(result.status).toBe('checked')
+    expect(result.categories).toMatchObject({
+      structure: { status: 'checked', warnings: [] },
+      grammar: {
+        status: 'not_checked',
+        component: null,
+        warnings: ['grammar was missing'],
+      },
+      vocabulary: {
+        status: 'not_checked',
+        component: null,
+        warnings: ['vocabulary was missing'],
+      },
+    })
+    expect(result.warnings).toEqual(['grammar was missing', 'vocabulary was missing'])
+    expect(warning).toHaveBeenCalledTimes(2)
+    expect(warning.mock.calls.map(([diagnostic]) => diagnostic)).toEqual([
+      {
+        provider: 'deepseek',
+        model: 'fake-v2',
+        code: 'schema_invalid',
+        status: null,
+      },
+      {
+        provider: 'deepseek',
+        model: 'fake-v2',
+        code: 'schema_invalid',
+        status: null,
+      },
+    ])
+    warning.mockRestore()
+  })
+
+  it('retries when structure alone is missing and classifies the first response as schema-invalid', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const withoutStructure = JSON.stringify({
+      version: V2_CONTENT_DETECTOR_VERSION,
+      grammar: { findings: [] },
+      vocabulary: { findings: [] },
+    })
+    const complete = vi
+      .fn<V2ContentDetectorProvider['complete']>()
+      .mockResolvedValueOnce(withoutStructure)
+      .mockResolvedValueOnce(response())
+
+    const result = await runV2ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: 'Describe a park.',
+      transcript: TRANSCRIPT,
+    })
+
+    expect(result.calls).toBe(2)
+    expect(result.categories.structure.status).toBe('checked')
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(warning).toHaveBeenCalledWith({
+      provider: 'deepseek',
+      model: 'fake-v2',
+      code: 'schema_invalid',
+      status: null,
+    })
+    expect(() => parseV2ContentResponse(withoutStructure, { transcript: TRANSCRIPT })).toThrowError(
+      expect.objectContaining({
+        code: 'schema_invalid',
+        missingSections: ['structure'],
+      }),
+    )
+    warning.mockRestore()
+  })
+
+  it('keeps partial-response diagnostics bounded and excludes private provider inputs', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const partial = JSON.stringify({
+      version: V2_CONTENT_DETECTOR_VERSION,
+      structure: structure(),
+      ignored_provider_body: 'PRIVATE_PROVIDER_BODY_SENTINEL',
+    })
+    const complete = vi.fn<V2ContentDetectorProvider['complete']>().mockResolvedValue(partial)
+
+    const result = await runV2ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: 'PRIVATE_PROMPT_SENTINEL',
+      transcript: 'PRIVATE_TRANSCRIPT_SENTINEL',
+    })
+
+    expect(result.warnings).toEqual(['grammar was missing', 'vocabulary was missing'])
+    expect(warning).toHaveBeenCalledTimes(2)
+    const logged = JSON.stringify(warning.mock.calls)
+    expect(logged).not.toContain('PRIVATE_PROMPT_SENTINEL')
+    expect(logged).not.toContain('PRIVATE_TRANSCRIPT_SENTINEL')
+    expect(logged).not.toContain('PRIVATE_PROVIDER_BODY_SENTINEL')
+    expect(logged).not.toContain(partial)
     warning.mockRestore()
   })
 
