@@ -1,36 +1,37 @@
 import type { Metadata } from 'next'
-import Link from 'next/link'
-import { Card } from '@/components/ui/card'
-import { PRACTICE_MODE_OPTIONS } from '@/lib/practice/navigation'
+import { redirect } from 'next/navigation'
+import { PracticeOverview } from '@/components/curriculum/practice-overview'
+import { RetryButton } from '@/components/system/retry-button'
+import { ErrorState } from '@/components/ui/error-state'
+import { loadAuthenticatedCurriculumOverview } from '@/lib/curriculum/server'
 
 export const metadata: Metadata = {
   title: 'Practice',
 }
 
-export default function PracticePage() {
+export default async function PracticePage() {
+  const outcome = await loadAuthenticatedCurriculumOverview()
+  if (outcome.status === 'unauthenticated') redirect('/login')
+  const failureDescription =
+    outcome.status === 'failure' &&
+    (outcome.reason === 'invalid_response' || outcome.reason.startsWith('invalid_'))
+      ? 'Your saved path information could not be read. Try loading it again.'
+      : 'The connection to your practice paths failed. Try loading them again.'
+
   return (
     <div className="flex flex-col gap-8 pt-4 pb-12">
       <div className="flex flex-col gap-2">
-        <h1 className="prompt-display text-foreground text-2xl">Choose a practice</h1>
-        <p className="text-muted text-base">Pick a format, then choose a prompt that fits.</p>
+        <h1 className="prompt-display text-foreground text-2xl">Practice</h1>
+        <p className="text-muted text-base">Continue a path or choose a standalone prompt.</p>
       </div>
 
-      <div className="flex flex-col gap-4">
-        {PRACTICE_MODE_OPTIONS.map((option) => (
-          <Link key={option.mode} href={`/practice/${option.mode}`} className="rounded-card">
-            <Card className="hover:bg-surface-sunken flex flex-col gap-2 transition duration-150 ease-out">
-              <h2 className="text-foreground text-lg font-medium">{option.label}</h2>
-              <p className="text-muted text-sm">{option.description}</p>
-            </Card>
-          </Link>
-        ))}
-        <Link href="/practice/custom" className="rounded-card">
-          <Card className="hover:bg-surface-sunken flex flex-col gap-2 transition duration-150 ease-out">
-            <h2 className="text-foreground text-lg font-medium">Custom Prompt</h2>
-            <p className="text-muted text-sm">Practice with a prompt you bring.</p>
-          </Card>
-        </Link>
-      </div>
+      {outcome.status === 'failure' ? (
+        <ErrorState title="Your practice paths did not load" description={failureDescription}>
+          <RetryButton />
+        </ErrorState>
+      ) : (
+        <PracticeOverview overview={outcome.data} />
+      )}
     </div>
   )
 }

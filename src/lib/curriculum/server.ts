@@ -2,10 +2,11 @@ import 'server-only'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { classifySpeakingActivity } from '@/lib/activity/speaking'
-import type {
-  CurriculumInputError,
-  CurriculumPathProgress,
-  PathSlug,
+import {
+  PATH_SLUGS,
+  type CurriculumInputError,
+  type CurriculumPathProgress,
+  type PathSlug,
 } from '@/lib/curriculum/contracts'
 import {
   curriculumPromptOutcome,
@@ -19,6 +20,11 @@ import {
 } from '@/lib/curriculum/data'
 import { buildCurriculumPathProgress } from '@/lib/curriculum/progression'
 import { validateCurriculumPathDefinition } from '@/lib/curriculum/navigation'
+import {
+  buildCurriculumOverview,
+  parseCurriculumPreferenceRows,
+  type CurriculumOverviewData,
+} from '@/lib/curriculum/overview'
 import { createClient } from '@/lib/supabase/server'
 import type { Database } from '@/lib/types/database'
 
@@ -30,6 +36,7 @@ const PROGRESS_COLUMNS = 'lesson_id, best_score, best_attempt_id'
 const NEUTRAL_ATTEMPT_COLUMNS = 'lesson_id, status, duration_ms, transcript, score, section_scores'
 const PROMPT_COLUMNS =
   'id, text, active, mode, difficulty, target_duration_seconds, free_practice_visible'
+const PREFERENCE_COLUMNS = 'path_id, rank'
 
 export const CURRICULUM_ATTEMPT_PAGE_SIZE = 100
 
@@ -42,6 +49,8 @@ export type CurriculumLoadOperation =
   | 'attempt_evidence'
   | 'lesson_lookup'
   | 'prompt'
+  | 'preferences'
+  | 'overview'
 
 type CurriculumFailureReason =
   'authentication' | 'query' | 'invalid_response' | CurriculumInputError['kind']
@@ -71,6 +80,13 @@ export type CurriculumLessonAccessOutcome =
   | { status: 'not_found'; resource: 'path' | 'lesson' }
   | { status: 'denied'; reason: 'inactive' | 'locked' | 'path_mismatch' }
   | CurriculumLoadFailure
+
+export type CurriculumOverviewLoadOutcome =
+  | { status: 'ready'; data: CurriculumOverviewData }
+  | { status: 'unauthenticated' }
+  | CurriculumLoadFailure
+
+export type CurriculumPathLoader = typeof loadCurriculumPathForUser
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -285,6 +301,52 @@ export async function loadCurriculumPathForUser(
   return built.ok ? { status: 'ready', data: built.value } : inputFailure(built.error)
 }
 
+/** Owner-scoped overview loader. The injectable path loader keeps assembly directly testable. */
+export async function loadCurriculumOverviewForUser(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  pathLoader: CurriculumPathLoader = loadCurriculumPathForUser,
+): Promise<CurriculumOverviewLoadOutcome> {
+  let preferenceRows: unknown
+  try {
+    const { data, error } = await supabase
+      .from('profile_path_preferences')
+      .select(PREFERENCE_COLUMNS)
+      .eq('user_id', userId)
+      .order('rank', { ascending: true })
+    if (error) return queryFailure('preferences', error)
+    preferenceRows = data
+  } catch (error) {
+    return queryFailure('preferences', error)
+  }
+
+  const preferences = parseCurriculumPreferenceRows(preferenceRows)
+  if (!preferences) return invalidResponse('preferences')
+
+  const pathOutcomes = await Promise.all(
+    PATH_SLUGS.map((slug) => pathLoader(supabase, userId, slug)),
+  )
+  const pathProgress: CurriculumPathProgress[] = []
+  for (const outcome of pathOutcomes) {
+    if (outcome.status !== 'ready') {
+      if (outcome.status === 'unauthenticated') return outcome
+      if (outcome.status === 'not_found') return invalidResponse('overview')
+      return outcome
+    }
+    pathProgress.push(outcome.data)
+  }
+
+  const overview = buildCurriculumOverview(pathProgress, preferences)
+  return overview.ok
+    ? { status: 'ready', data: overview.value }
+    : invalidResponse(
+        overview.error.code.startsWith('invalid_preference') ||
+          overview.error.code === 'unknown_preference_path'
+          ? 'preferences'
+          : 'overview',
+      )
+}
+
 async function lessonExistsOutsidePath(
   supabase: SupabaseClient<Database>,
   lessonSlug: string,
@@ -395,4 +457,10 @@ export async function loadAuthenticatedCurriculumLessonAccess(
   const auth = await authenticatedCurriculumClient()
   if (auth.status !== 'ready') return auth
   return loadCurriculumLessonAccessForUser(auth.client, auth.userId, pathSlug, lessonSlug)
+}
+
+export async function loadAuthenticatedCurriculumOverview(): Promise<CurriculumOverviewLoadOutcome> {
+  const auth = await authenticatedCurriculumClient()
+  if (auth.status !== 'ready') return auth
+  return loadCurriculumOverviewForUser(auth.client, auth.userId)
 }
