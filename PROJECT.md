@@ -119,10 +119,17 @@ npm run build
 npm run db:push
 npm run inspect:attempts
 npm run inspect:scores
+npm run inspect:content-reliability
 npm run inspect:rewrites
 ```
 
 Inspection scripts need the local database connection. `npm run inspect:rewrites` is read-only by default, but `npm run inspect:rewrites -- --write` persists enforced rewrites and may make provider requests during retries.
+
+`npm run inspect:content-reliability -- --limit 100` is always read-only and reports only aggregate
+result versions, category states, provider-call counts, and completion timestamps. Use
+`--since <ISO-8601>` for a deployment window. It does not select response text, private context,
+audio paths, user identifiers, secrets, or raw provider responses. Exact historical provider
+failure codes are unavailable because those bounded diagnostics are logged but not persisted.
 
 ## Known Risks
 

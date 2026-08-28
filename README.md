@@ -53,25 +53,32 @@ remain not checked and no pronunciation deductions are applied.
 
 ## Commands
 
-| Command                             | Purpose                                     |
-| ----------------------------------- | ------------------------------------------- |
-| `npm run dev`                       | Start the local development server          |
-| `npm run build`                     | Create a production build                   |
-| `npm run lint`                      | Run ESLint                                  |
-| `npm run typecheck`                 | Run strict TypeScript checking              |
-| `npm run test`                      | Run the Vitest suite                        |
-| `npm run test:e2e`                  | Run deterministic Chromium critical flows   |
-| `npm run verify`                    | Run typecheck, lint, and tests              |
-| `npm run db:push`                   | Apply migrations in `supabase/migrations`   |
-| `npm run db:preflight`              | Compare migrations with the database ledger |
-| `npm run test:migrations`           | Test migrations on a disposable database    |
-| `npm run inspect:attempts`          | Inspect stored capture timelines            |
-| `npm run inspect:scores`            | Inspect scored attempt breakdowns           |
-| `npm run inspect:rewrites`          | Audit stored tightened rewrites             |
-| `npm run check:scoring-calibration` | Run generated v2 scoring calibration corpus |
+| Command                               | Purpose                                     |
+| ------------------------------------- | ------------------------------------------- |
+| `npm run dev`                         | Start the local development server          |
+| `npm run build`                       | Create a production build                   |
+| `npm run lint`                        | Run ESLint                                  |
+| `npm run typecheck`                   | Run strict TypeScript checking              |
+| `npm run test`                        | Run the Vitest suite                        |
+| `npm run test:e2e`                    | Run deterministic Chromium critical flows   |
+| `npm run verify`                      | Run typecheck, lint, and tests              |
+| `npm run db:push`                     | Apply migrations in `supabase/migrations`   |
+| `npm run db:preflight`                | Compare migrations with the database ledger |
+| `npm run test:migrations`             | Test migrations on a disposable database    |
+| `npm run inspect:attempts`            | Inspect stored capture timelines            |
+| `npm run inspect:scores`              | Inspect scored attempt breakdowns           |
+| `npm run inspect:content-reliability` | Inspect aggregate content-provider health   |
+| `npm run inspect:rewrites`            | Audit stored tightened rewrites             |
+| `npm run check:scoring-calibration`   | Run generated v2 scoring calibration corpus |
 
 `npm run inspect:rewrites -- --write` updates stored rewrites and can call the content provider
 when a retry is necessary. Run it deliberately.
+
+`npm run inspect:content-reliability -- --limit 100` runs a read-only aggregate over recent
+completed attempts. Add `--since <ISO-8601>` to inspect a deployment window. It never selects or
+prints prompt text, transcript text, private context, audio paths, user identifiers, secrets, or raw
+provider responses. Stored attempts do not currently persist exact provider failure codes, so the
+report labels those detailed causes unavailable instead of treating them as zero.
 
 ## Browser tests
 
