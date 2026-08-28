@@ -329,6 +329,16 @@ Make no production scoring changes. Build a reviewed, generated corpus with:
 This phase should distinguish a single minor issue from a broadly weak response rather than expecting
 one isolated word or error to produce a low overall score.
 
+Phase 1 is implemented as a separate reviewed-range layer alongside the original exact drift corpus.
+It contains 18 generated fixtures: four mode-specific strong anchors, nine weakness scenarios, and
+five fairness counterexamples. Run `npm run check:scoring-calibration` to inspect both layers.
+
+Reviewed ranges use normalized category scores from 0 through 100. `INSIDE` is within the inclusive
+range, `ABOVE` is more generous, `BELOW` is harsher, and `UNAVAILABLE` means the generated evidence did
+not produce a score. Only `strict` misses fail the command. `broad` and `informational` misses remain
+visible observations and do not force scoring changes. The generated content findings are
+hand-authored, so this layer does not test whether the live provider would detect the same findings.
+
 ### Phase 2: provider rubric and output calibration
 
 Using only the reviewed synthetic corpus, evaluate one provider-instruction change at a time:
@@ -377,17 +387,22 @@ evaluator and provider results; the system is bounded, evidence-aware, versioned
 required evidence is unavailable. Production's primary loop does not depend on changing these
 numbers.
 
-The concern remains important for trust: the current corpus objectively permits very high scores for
-severe isolated Fluency signals and does not contain enough realistic content variation to validate
-Structure, Grammar, or Vocabulary separation.
+The concern remains important for trust. The Phase 1 range output currently reports nonblocking
+`ABOVE` observations for filler-heavy and rushed Fluency, plus long-repetitive and off-topic
+Structure. Realistic multi-finding Grammar and Vocabulary cases fall inside their reviewed ranges when
+the hand-authored detector output supplies each valid finding.
 
-The next task should be **Phase 1 only: expand the generated calibration corpus and add reviewed score
-ranges across all four modes**. Do not change production scoring in that task.
+The next calibration task should be **Phase 2 only: use the synthetic corpus to evaluate provider
+rubric and output consistency without changing production thresholds or weights**. That work should
+remain offline and versioned until a reviewed change is approved.
 
 ## Key implementation references
 
 - [Generated calibration corpus](../src/lib/scoring/v2/calibration.ts)
 - [Calibration regression tests](../tests/scoring-calibration.test.ts)
+- [Phase 1 reviewed fixtures](../fixtures/scoring/phase1-calibration.json)
+- [Reviewed-range evaluator](../src/lib/scoring/v2/calibration-reviewed.ts)
+- [Reviewed-range tests](../tests/scoring-calibration-reviewed.test.ts)
 - [Mode rubrics](../src/lib/scoring/v2/rubrics.ts)
 - [Score assembler](../src/lib/scoring/v2/assemble.ts)
 - [Fluency evaluator](../src/lib/scoring/v2/fluency.ts)

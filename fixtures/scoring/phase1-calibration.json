@@ -1,0 +1,538 @@
+{
+  "version": "phase1.reviewed.1",
+  "fixtures": [
+    {
+      "id": "practice-strong",
+      "scenario": "strong_response",
+      "kind": "reference",
+      "mode": "practice",
+      "prompt": "Describe how you would use an unexpected free afternoon.",
+      "transcript": "I would spend the afternoon at the park, walk the lake trail, and read for an hour because quiet outdoor time helps me reset.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 90, "max": 100, "level": "strict" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 90, "max": 100, "level": "strict" },
+        "grammar": { "min": 90, "max": 100, "level": "strict" },
+        "structure": { "min": 90, "max": 100, "level": "strict" },
+        "delivery": { "min": 85, "max": 100, "level": "strict" }
+      },
+      "review_note": "Complete, specific, and supported reference response using generated healthy capture evidence."
+    },
+    {
+      "id": "practice-fluent-poor-structure",
+      "scenario": "fluent_poorly_structured",
+      "kind": "weakness",
+      "mode": "practice",
+      "prompt": "Explain one practical way to improve a team handoff.",
+      "transcript": "The office kitchen needs a schedule. I bought a bicycle last year. Before deciding, the deadline changed. A checklist could help, but the handoff is the main point, and that is all.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [
+          {
+            "check": "logical_progression",
+            "severity": "clear",
+            "quote": null,
+            "observation": "The ideas do not follow a useful order.",
+            "suggestion": "Lead with the handoff recommendation and then support it."
+          },
+          {
+            "check": "topic_drift",
+            "severity": "clear",
+            "quote": "I bought a bicycle last year.",
+            "observation": "This detail does not support the handoff recommendation.",
+            "suggestion": "Remove the unrelated detail."
+          }
+        ],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 85, "max": 100, "level": "strict" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 80, "max": 100, "level": "broad" },
+        "grammar": { "min": 80, "max": 100, "level": "broad" },
+        "structure": { "min": 20, "max": 60, "level": "informational" },
+        "delivery": { "min": 85, "max": 100, "level": "strict" }
+      },
+      "review_note": "Smooth mechanics with two independent Structure problems: order and one anchored off-topic detail."
+    },
+    {
+      "id": "practice-clear-but-vague",
+      "scenario": "clear_but_vague",
+      "kind": "weakness",
+      "mode": "practice",
+      "prompt": "Describe a plan for a free afternoon.",
+      "transcript": "I would do some stuff somewhere nice because those things would make everything better for the rest of my afternoon.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [],
+        "grammar_findings": [],
+        "vocabulary_findings": [
+          {
+            "kind": "vague_language",
+            "severity": "clear",
+            "quote": "some stuff",
+            "observation": "The phrase does not identify the planned activity.",
+            "suggestion": "Name the activity."
+          },
+          {
+            "kind": "imprecise_wording",
+            "severity": "minor",
+            "quote": "somewhere nice",
+            "observation": "The phrase does not identify the place.",
+            "suggestion": "Name the place."
+          },
+          {
+            "kind": "vague_language",
+            "severity": "minor",
+            "quote": "those things",
+            "observation": "The reference does not identify what would help.",
+            "suggestion": "Refer to the specific activities."
+          }
+        ]
+      },
+      "expectations": {
+        "fluency": { "min": 85, "max": 100, "level": "strict" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 35, "max": 70, "level": "informational" },
+        "grammar": { "min": 85, "max": 100, "level": "strict" },
+        "structure": { "min": 65, "max": 100, "level": "broad" },
+        "delivery": { "min": 85, "max": 100, "level": "strict" }
+      },
+      "review_note": "Clearly recognized and complete enough to follow, with three distinct vague spans."
+    },
+    {
+      "id": "practice-simple-precise",
+      "scenario": "simple_vocabulary_precise",
+      "kind": "fairness",
+      "mode": "practice",
+      "prompt": "Describe a specific plan for a free afternoon.",
+      "transcript": "I would walk to the library, return two books, and read by the window because that quiet routine helps me plan the evening.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 80, "max": 100, "level": "broad" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 90, "max": 100, "level": "strict" },
+        "grammar": { "min": 85, "max": 100, "level": "strict" },
+        "structure": { "min": 85, "max": 100, "level": "strict" },
+        "delivery": { "min": 80, "max": 100, "level": "broad" }
+      },
+      "review_note": "Plain words are specific and appropriate; Vocabulary must not reward unnecessary complexity."
+    },
+    {
+      "id": "practice-concise-complete",
+      "scenario": "concise_complete",
+      "kind": "fairness",
+      "mode": "practice",
+      "prompt": "Name one useful way to spend a free afternoon and explain why.",
+      "transcript": "I would read at the library because the quiet helps me focus.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 75, "max": 100, "level": "broad" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 85, "max": 100, "level": "strict" },
+        "grammar": { "min": 85, "max": 100, "level": "strict" },
+        "structure": { "min": 85, "max": 100, "level": "strict" },
+        "delivery": { "min": 75, "max": 100, "level": "broad" }
+      },
+      "review_note": "A short answer still supplies a choice and a reason; length alone must not reduce Structure."
+    },
+    {
+      "id": "interview-strong",
+      "scenario": "strong_response",
+      "kind": "reference",
+      "mode": "interview",
+      "prompt": "Tell me about a time you adjusted a plan when a deadline changed.",
+      "transcript": "When a mock project deadline moved forward, I listed the unfinished tasks, agreed on owners with the group, and checked progress that afternoon, so we finished the handoff on time.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 90, "max": 100, "level": "strict" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 90, "max": 100, "level": "strict" },
+        "grammar": { "min": 90, "max": 100, "level": "strict" },
+        "structure": { "min": 90, "max": 100, "level": "strict" },
+        "delivery": { "min": 85, "max": 100, "level": "strict" }
+      },
+      "review_note": "Safe synthetic situation, action, and outcome reference response."
+    },
+    {
+      "id": "interview-grammar-weak-understandable",
+      "scenario": "grammatically_weak_understandable",
+      "kind": "weakness",
+      "mode": "interview",
+      "prompt": "Tell me about a time you managed a handoff problem.",
+      "transcript": "I lead the handoff last week, the notes was incomplete, and my teammates was waiting, so we reorganized the work and finished on time.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [],
+        "grammar_findings": [
+          {
+            "kind": "grammatical_error",
+            "severity": "clear",
+            "quote": "I lead",
+            "observation": "The past-tense verb form is incorrect.",
+            "suggestion": "Use I led."
+          },
+          {
+            "kind": "grammatical_error",
+            "severity": "clear",
+            "quote": "notes was",
+            "observation": "The verb does not agree with the plural subject.",
+            "suggestion": "Use notes were."
+          },
+          {
+            "kind": "grammatical_error",
+            "severity": "clear",
+            "quote": "teammates was",
+            "observation": "The verb does not agree with the plural subject.",
+            "suggestion": "Use teammates were."
+          }
+        ],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 80, "max": 100, "level": "strict" },
+        "clarity": { "min": 85, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 75, "max": 100, "level": "broad" },
+        "grammar": { "min": 20, "max": 60, "level": "informational" },
+        "structure": { "min": 75, "max": 100, "level": "broad" },
+        "delivery": { "min": 80, "max": 100, "level": "strict" }
+      },
+      "review_note": "Three distinct grammar errors reduce Grammar while the response remains understandable and relevant."
+    },
+    {
+      "id": "interview-filler-heavy-relevant",
+      "scenario": "filler_heavy_relevant",
+      "kind": "weakness",
+      "mode": "interview",
+      "prompt": "Tell me how you kept a handoff organized.",
+      "transcript": "Um, I coordinated the handoff, um, by listing the open tasks, um, and checking each owner, um, so the work stayed organized and finished on time.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 35, "max": 70, "level": "informational" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 85, "max": 100, "level": "strict" },
+        "grammar": { "min": 85, "max": 100, "level": "strict" },
+        "structure": { "min": 85, "max": 100, "level": "strict" },
+        "delivery": { "min": 80, "max": 100, "level": "strict" }
+      },
+      "review_note": "Repeated fillers affect Fluency only; the answer remains relevant and organized."
+    },
+    {
+      "id": "interview-understandable-grammar-variation",
+      "scenario": "second_language_understandable_grammar_variation",
+      "kind": "fairness",
+      "mode": "interview",
+      "prompt": "Tell me how you handled a delay on the way to a group meeting.",
+      "transcript": "The delay, I explained it when I joined the meeting, then I shared my notes and we finished the work together.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 75, "max": 100, "level": "broad" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 85, "max": 100, "level": "strict" },
+        "grammar": { "min": 85, "max": 100, "level": "strict" },
+        "structure": { "min": 85, "max": 100, "level": "strict" },
+        "delivery": { "min": 75, "max": 100, "level": "broad" }
+      },
+      "review_note": "Understandable spoken topic-fronting remains effective; the text does not identify a speaker background and must not become a status judgment."
+    },
+    {
+      "id": "presentation-strong",
+      "scenario": "strong_response",
+      "kind": "reference",
+      "mode": "presentation",
+      "prompt": "Pitch one small change that would improve a shared room.",
+      "transcript": "I recommend adding a labeled supply shelf near the entrance because people can return common items quickly, reduce clutter on the tables, and see what needs to be replaced.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 90, "max": 100, "level": "strict" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 90, "max": 100, "level": "strict" },
+        "grammar": { "min": 90, "max": 100, "level": "strict" },
+        "structure": { "min": 90, "max": 100, "level": "strict" },
+        "delivery": { "min": 85, "max": 100, "level": "strict" }
+      },
+      "review_note": "Specific proposal, reason, effects, and recommendation with healthy generated capture evidence."
+    },
+    {
+      "id": "presentation-monotone-organized",
+      "scenario": "monotone_well_organized",
+      "kind": "weakness",
+      "mode": "presentation",
+      "prompt": "Pitch one small change that would improve a shared room.",
+      "transcript": "I recommend adding a labeled supply shelf near the entrance because people can return common items quickly, reduce clutter on the tables, and see what needs to be replaced.",
+      "timing": "healthy",
+      "pitch": "flat",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 85, "max": 100, "level": "strict" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 85, "max": 100, "level": "strict" },
+        "grammar": { "min": 85, "max": 100, "level": "strict" },
+        "structure": { "min": 90, "max": 100, "level": "strict" },
+        "delivery": { "min": 0, "max": 35, "level": "strict" }
+      },
+      "review_note": "Flat generated pitch should move Delivery without changing the well-organized content."
+    },
+    {
+      "id": "presentation-rushed-complete",
+      "scenario": "rushed_complete",
+      "kind": "weakness",
+      "mode": "presentation",
+      "prompt": "Pitch one small change that would improve a shared room.",
+      "transcript": "I recommend adding a labeled supply shelf near the entrance because people can return common items quickly, reduce clutter on the tables, and see what needs to be replaced.",
+      "timing": "rushed",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 35, "max": 70, "level": "informational" },
+        "clarity": { "min": 85, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 85, "max": 100, "level": "strict" },
+        "grammar": { "min": 85, "max": 100, "level": "strict" },
+        "structure": { "min": 90, "max": 100, "level": "strict" },
+        "delivery": { "min": 85, "max": 100, "level": "strict" }
+      },
+      "review_note": "Complete content on a compressed timeline; pace belongs to Fluency and must not be charged again under Delivery."
+    },
+    {
+      "id": "presentation-long-repetitive",
+      "scenario": "long_repetitive",
+      "kind": "weakness",
+      "mode": "presentation",
+      "prompt": "Pitch one small change that would improve a shared room.",
+      "transcript": "I recommend a weekly cleanup because it keeps the room usable. A weekly cleanup would keep the room usable. The room stays usable with a weekly cleanup. That is why I recommend a weekly cleanup every week.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [
+          {
+            "check": "unnecessary_repetition",
+            "severity": "clear",
+            "quote": "A weekly cleanup would keep the room usable.",
+            "observation": "The sentence repeats the recommendation without adding support.",
+            "suggestion": "Replace the repeated sentence with one concrete benefit or example."
+          }
+        ],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 65, "max": 100, "level": "broad" },
+        "clarity": { "min": 85, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 85, "max": 100, "level": "strict" },
+        "grammar": { "min": 85, "max": 100, "level": "strict" },
+        "structure": { "min": 25, "max": 65, "level": "informational" },
+        "delivery": { "min": 75, "max": 100, "level": "broad" }
+      },
+      "review_note": "One repeated idea is charged under Structure only; Vocabulary does not charge the same wording again."
+    },
+    {
+      "id": "presentation-intelligible-accent",
+      "scenario": "intelligible_accent_non_native_phrasing",
+      "kind": "fairness",
+      "mode": "presentation",
+      "prompt": "Pitch one small change that would improve a shared room.",
+      "transcript": "For me, this shelf change is useful because people find the shared supplies quickly, and then the tables stay clear for everyone.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "intelligible_accent",
+      "content": {
+        "structure_failures": [],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 80, "max": 100, "level": "broad" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 85, "max": 100, "level": "strict" },
+        "grammar": { "min": 85, "max": 100, "level": "strict" },
+        "structure": { "min": 85, "max": 100, "level": "strict" },
+        "delivery": { "min": 75, "max": 100, "level": "broad" }
+      },
+      "review_note": "High-confidence words and non-deductible generated pronunciation metadata protect intelligible accent and phrasing."
+    },
+    {
+      "id": "conversation-strong",
+      "scenario": "strong_response",
+      "kind": "reference",
+      "mode": "conversation",
+      "prompt": "Explain a shared-plan decision to someone affected by it.",
+      "transcript": "I moved the planning call to Thursday because two people cannot attend on Friday, and I wanted to explain the reason early so we can confirm whether Thursday works for everyone.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 90, "max": 100, "level": "strict" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 90, "max": 100, "level": "strict" },
+        "grammar": { "min": 90, "max": 100, "level": "strict" },
+        "structure": { "min": 90, "max": 100, "level": "strict" },
+        "delivery": { "min": 85, "max": 100, "level": "strict" }
+      },
+      "review_note": "Clear decision, reason, consequence, and invitation to respond."
+    },
+    {
+      "id": "conversation-concise-underexplained",
+      "scenario": "concise_underexplained",
+      "kind": "weakness",
+      "mode": "conversation",
+      "prompt": "Explain why you moved a shared planning call.",
+      "transcript": "I moved the planning call because that would help everyone involved.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [
+          {
+            "check": "relevant_support",
+            "severity": "clear",
+            "quote": null,
+            "observation": "The answer states a benefit without explaining what changed or who needed it.",
+            "suggestion": "Add the scheduling reason."
+          }
+        ],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 80, "max": 100, "level": "strict" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 70, "max": 100, "level": "broad" },
+        "grammar": { "min": 85, "max": 100, "level": "strict" },
+        "structure": { "min": 45, "max": 75, "level": "broad" },
+        "delivery": { "min": 75, "max": 100, "level": "broad" }
+      },
+      "review_note": "The support gap, not the word count, distinguishes this case from the concise complete fairness case."
+    },
+    {
+      "id": "conversation-off-topic-fluent",
+      "scenario": "off_topic_fluent",
+      "kind": "weakness",
+      "mode": "conversation",
+      "prompt": "Explain how you would raise a concern about repeated schedule changes.",
+      "transcript": "I enjoy walking through the park in the morning because the paths are quiet and the trees make the route pleasant before the day begins.",
+      "timing": "healthy",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [
+          {
+            "check": "answered_prompt",
+            "severity": "clear",
+            "quote": null,
+            "observation": "The response does not address raising a scheduling concern.",
+            "suggestion": "State the concern and how you would raise it."
+          }
+        ],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 85, "max": 100, "level": "strict" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 80, "max": 100, "level": "broad" },
+        "grammar": { "min": 85, "max": 100, "level": "strict" },
+        "structure": { "min": 0, "max": 40, "level": "informational" },
+        "delivery": { "min": 80, "max": 100, "level": "strict" }
+      },
+      "review_note": "One whole-response non-answer finding avoids stacking narrower Structure deductions for the same problem."
+    },
+    {
+      "id": "conversation-slower-clear",
+      "scenario": "slower_clear_structure",
+      "kind": "fairness",
+      "mode": "conversation",
+      "prompt": "Explain a shared-plan decision to someone affected by it.",
+      "transcript": "I moved the call to Thursday. Two people cannot attend on Friday. Thursday gives everyone time to join, and I want to check whether that works for you.",
+      "timing": "slower",
+      "pitch": "varied",
+      "pronunciation": "none",
+      "content": {
+        "structure_failures": [],
+        "grammar_findings": [],
+        "vocabulary_findings": []
+      },
+      "expectations": {
+        "fluency": { "min": 70, "max": 100, "level": "broad" },
+        "clarity": { "min": 90, "max": 100, "level": "strict" },
+        "vocabulary": { "min": 85, "max": 100, "level": "strict" },
+        "grammar": { "min": 85, "max": 100, "level": "strict" },
+        "structure": { "min": 90, "max": 100, "level": "strict" },
+        "delivery": { "min": 75, "max": 100, "level": "broad" }
+      },
+      "review_note": "Slower generated timing may move Fluency, but clear order and support remain independent."
+    }
+  ]
+}

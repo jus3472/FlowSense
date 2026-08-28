@@ -89,10 +89,28 @@ screenshots, videos, and the HTML report are written to ignored Playwright outpu
 
 ## Scoring calibration
 
-`npm run check:scoring-calibration` runs generated, local-only evaluator fixtures against checked-in
-v2 baselines. It prints each case's overall and category result, lists stable-path differences, and
-exits nonzero on drift. It makes no provider or network calls and never rewrites baselines. After
-reviewing an intentional rubric or evaluator change, update the versioned expectations manually in
+`npm run check:scoring-calibration` runs two primary generated, local-only v2 corpora plus the existing
+Delivery-next calibration evidence. The exact snapshot corpus prints `PASS` or `DRIFT` and exits
+nonzero on implementation drift. The reviewed range corpus reads
+`fixtures/scoring/phase1-calibration.json` and compares normalized category scores from 0 through 100
+with reviewed ranges:
+
+- `INSIDE` is within the inclusive range.
+- `ABOVE` is more generous than the reviewed range.
+- `BELOW` is harsher than the reviewed range.
+- `UNAVAILABLE` means the generated evidence did not produce a category score.
+
+Within the reviewed-range suite, only an out-of-range or unavailable `strict` expectation makes the
+command fail. `broad` and `informational` misses are printed as nonblocking observations so calibration
+concerns remain visible without forcing a scoring change. Weighted points are context only; ranges
+compare normalized category components so modes remain comparable.
+
+Both corpora use generated transcripts, timelines, and hand-authored provider output; the reviewed
+corpus also includes literal generated prompts. They and the Delivery-next evidence make no provider
+or network calls, never read production attempts, and never rewrite baselines. Because provider output
+is hand-authored, the range corpus evaluates scoring behavior after detection; it does not validate
+live provider detection or provider mode sensitivity. After reviewing an intentional rubric or
+evaluator change, update the exact versioned expectations manually in
 `src/lib/scoring/v2/calibration.ts` in the same review as the scoring change.
 The unclear-pronunciation and intelligible second-language-accent fixtures carry normalized
 evidence only, with `eligibleForDeductions=false`. They do not assess native similarity or deduct
