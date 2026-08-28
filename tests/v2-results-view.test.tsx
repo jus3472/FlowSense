@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react'
 import type { AnchorHTMLAttributes, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { V2ResultsView } from '@/components/results/v2-results-view'
+import type { StructuredLessonResultModel } from '@/lib/curriculum/result'
 import { V2_SCORE_PAYLOAD_VERSION, type V2ScorePayload } from '@/lib/scoring/v2/assemble'
 
 vi.mock('next/link', () => ({
@@ -63,6 +64,36 @@ const props = {
   transcript: 'I took a walk.',
   durationMs: 12_000,
   audioUrl: 'https://example.test/audio',
+}
+
+const curriculumResult: StructuredLessonResultModel = {
+  attemptId: 'attempt-1',
+  state: 'passed',
+  currentScore: 84,
+  currentStars: 2,
+  bestScore: 84,
+  bestStars: 2,
+  bestAttemptId: 'attempt-1',
+  personalBest: true,
+  path: { slug: 'general-speaking', title: 'General Speaking' },
+  chapter: { level: 'beginner', title: 'Beginner' },
+  lesson: {
+    id: 'lesson-1',
+    slug: 'general-speaking-beginner-01-start',
+    title: 'Start clearly',
+    position: 1,
+    checkpoint: false,
+  },
+  nextLesson: { level: 'beginner', position: 2 },
+  pathComplete: false,
+  primaryAction: {
+    label: 'Continue',
+    href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-02-next',
+  },
+  secondaryAction: {
+    label: 'Retry for 3 stars',
+    href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-01-start/record?retry=attempt-1',
+  },
 }
 
 describe('V2ResultsView', () => {
@@ -225,5 +256,41 @@ describe('V2ResultsView', () => {
   it('shows no comparison navigation when no valid parent exists', () => {
     render(<V2ResultsView {...props} payload={payload()} />)
     expect(screen.queryByRole('link', { name: 'View previous response' })).not.toBeInTheDocument()
+  })
+
+  it('adds lesson progression without replacing categories, transcript, audio, or comparison', () => {
+    render(
+      <V2ResultsView
+        {...props}
+        payload={payload()}
+        curriculumResult={curriculumResult}
+        comparison={{
+          rows: [
+            {
+              category: 'clarity',
+              label: 'Clarity',
+              currentPoints: 20,
+              previousPoints: 16,
+              maxPoints: 20,
+              deltaPoints: 4,
+              withinNoise: false,
+            },
+          ],
+        }}
+        previousAttemptId="attempt-0"
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Lesson complete' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Continue' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Retry for 3 stars' })).toBeInTheDocument()
+    for (const label of ['Fluency', 'Clarity', 'Vocabulary', 'Grammar', 'Structure', 'Delivery']) {
+      expect(screen.getByText(label)).toBeInTheDocument()
+    }
+    expect(screen.getByText('I took a walk.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Play Your answer')).toBeInTheDocument()
+    expect(screen.getByText('Clarity 16 → 20')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View previous response' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Try Again' })).not.toBeInTheDocument()
   })
 })

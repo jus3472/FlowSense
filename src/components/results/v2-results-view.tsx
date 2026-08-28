@@ -1,5 +1,6 @@
 import { AudioPlayer } from '@/components/record/audio-player'
 import type { Route } from 'next'
+import { LessonResultSummary } from '@/components/curriculum/lesson-result-summary'
 import { TranscriptPanel } from '@/components/results/transcript-panel'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -16,6 +17,7 @@ import {
 } from '@/lib/results/v2'
 import type { V2ScorePayload } from '@/lib/scoring/v2/assemble'
 import type { RetryComparison } from '@/lib/results/retry-comparison'
+import type { StructuredLessonResultModel } from '@/lib/curriculum/result'
 
 interface V2ResultsViewProps {
   attemptId: string
@@ -27,6 +29,7 @@ interface V2ResultsViewProps {
   payload: V2ScorePayload
   comparison?: RetryComparison | null
   previousAttemptId?: string | null
+  curriculumResult?: StructuredLessonResultModel | null
 }
 
 export function V2ResultsView({
@@ -39,6 +42,7 @@ export function V2ResultsView({
   payload,
   comparison = null,
   previousAttemptId = null,
+  curriculumResult = null,
 }: V2ResultsViewProps) {
   const strongest = strongestV2Category(payload)
   const priority = priorityV2Category(payload)
@@ -48,16 +52,24 @@ export function V2ResultsView({
 
   return (
     <div className="flex flex-col gap-8 pb-12">
+      {curriculumResult ? <LessonResultSummary result={curriculumResult} /> : null}
+
       <header className="flex flex-col gap-3">
         <p className="text-muted text-sm">Your prompt</p>
-        <h1 className="text-foreground text-xl font-semibold">{promptText}</h1>
+        {curriculumResult ? (
+          <h2 className="text-foreground text-xl font-semibold">{promptText}</h2>
+        ) : (
+          <h1 className="text-foreground text-xl font-semibold">{promptText}</h1>
+        )}
         {additionalContext ? (
           <p className="text-muted text-sm">Context: {additionalContext}</p>
         ) : null}
       </header>
 
       <Card className="flex flex-col gap-4">
-        {complete ? (
+        {curriculumResult ? (
+          <p className="text-foreground text-lg font-semibold">Response details</p>
+        ) : complete ? (
           <div>
             <p className="text-muted text-sm">Overall result</p>
             <p className="numeric text-foreground text-3xl font-semibold sm:text-4xl">
@@ -159,9 +171,11 @@ export function V2ResultsView({
 
       {transcript ? <TranscriptPanel segments={segments} /> : null}
       {audioUrl ? <AudioPlayer src={audioUrl} durationMs={durationMs} /> : null}
-      <ButtonLink href={`/record?retry=${attemptId}`} size="lg" fullWidth>
-        Try Again
-      </ButtonLink>
+      {!curriculumResult ? (
+        <ButtonLink href={`/record?retry=${attemptId}`} size="lg" fullWidth>
+          Try Again
+        </ButtonLink>
+      ) : null}
     </div>
   )
 }
