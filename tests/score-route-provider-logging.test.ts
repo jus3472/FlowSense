@@ -48,7 +48,7 @@ const GENERIC_ERROR = 'The content provider was unavailable.'
 const PROVIDER_DIAGNOSTIC = {
   provider: 'deepseek',
   model: 'deepseek-v4-flash',
-  code: 'http_error',
+  code: 'server_error',
   status: 503,
 } as const
 

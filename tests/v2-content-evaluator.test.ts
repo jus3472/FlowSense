@@ -612,7 +612,8 @@ describe('next-version Structure semantic precedence', () => {
 })
 
 describe('v2 provider behavior and prompt contract', () => {
-  it('retries malformed JSON once, then returns not_checked', async () => {
+  it('retries malformed JSON once and accepts a valid second response', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const complete = vi
       .fn<V2ContentDetectorProvider['complete']>()
       .mockResolvedValueOnce('not json')
@@ -625,9 +626,22 @@ describe('v2 provider behavior and prompt contract', () => {
     })
     expect(checked.status).toBe('checked')
     expect(checked.calls).toBe(2)
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(warning).toHaveBeenCalledTimes(1)
+    expect(warning).toHaveBeenCalledWith({
+      provider: 'deepseek',
+      model: 'fake-v2',
+      code: 'malformed_json',
+      status: null,
+    })
+    warning.mockRestore()
+  })
 
+  it('returns safe not_checked content after both malformed responses fail', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const complete = vi.fn<V2ContentDetectorProvider['complete']>().mockResolvedValue('not json')
     const failed = await runV2ContentEvaluation({
-      provider: provider(async () => 'not json'),
+      provider: provider(complete),
       mode: 'practice',
       prompt: 'Describe a park.',
       transcript: TRANSCRIPT,
@@ -635,6 +649,124 @@ describe('v2 provider behavior and prompt contract', () => {
     expect(failed.status).toBe('not_checked')
     expect(failed.calls).toBe(2)
     expect(failed.categories.grammar.component).toBeNull()
+    expect(failed.warnings).toEqual(['The content provider was unavailable.'])
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(warning).toHaveBeenCalledTimes(2)
+    expect(warning).toHaveBeenNthCalledWith(1, {
+      provider: 'deepseek',
+      model: 'fake-v2',
+      code: 'malformed_json',
+      status: null,
+    })
+    expect(warning).toHaveBeenNthCalledWith(2, {
+      provider: 'deepseek',
+      model: 'fake-v2',
+      code: 'malformed_json',
+      status: null,
+    })
+    warning.mockRestore()
+  })
+
+  it('retries a wholly schema-invalid versioned response and accepts a valid second response', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const schemaInvalid = JSON.stringify({
+      version: V2_CONTENT_DETECTOR_VERSION,
+      structure: {},
+      grammar: {},
+      vocabulary: {},
+    })
+    const complete = vi
+      .fn<V2ContentDetectorProvider['complete']>()
+      .mockResolvedValueOnce(schemaInvalid)
+      .mockResolvedValueOnce(response())
+
+    const result = await runV2ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: 'Describe a park.',
+      transcript: TRANSCRIPT,
+    })
+
+    expect(result.status).toBe('checked')
+    expect(result.calls).toBe(2)
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(warning).toHaveBeenCalledWith({
+      provider: 'deepseek',
+      model: 'fake-v2',
+      code: 'schema_invalid',
+      status: null,
+    })
+    warning.mockRestore()
+  })
+
+  it('returns safe not_checked content after both wholly schema-invalid responses fail', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const complete = vi.fn<V2ContentDetectorProvider['complete']>().mockResolvedValue(
+      JSON.stringify({
+        version: V2_CONTENT_DETECTOR_VERSION,
+        structure: {},
+        grammar: {},
+        vocabulary: {},
+      }),
+    )
+
+    const result = await runV2ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: 'Describe a park.',
+      transcript: TRANSCRIPT,
+    })
+
+    expect(result).toMatchObject({
+      status: 'not_checked',
+      calls: 2,
+      warnings: ['The content provider was unavailable.'],
+      categories: {
+        structure: { status: 'not_checked', component: null },
+        grammar: { status: 'not_checked', component: null },
+        vocabulary: { status: 'not_checked', component: null },
+      },
+    })
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(warning).toHaveBeenCalledTimes(2)
+    expect(warning).toHaveBeenNthCalledWith(1, {
+      provider: 'deepseek',
+      model: 'fake-v2',
+      code: 'schema_invalid',
+      status: null,
+    })
+    expect(warning).toHaveBeenNthCalledWith(2, {
+      provider: 'deepseek',
+      model: 'fake-v2',
+      code: 'schema_invalid',
+      status: null,
+    })
+    warning.mockRestore()
+  })
+
+  it('preserves a partially usable response without retrying valid checked categories', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const complete = vi
+      .fn<V2ContentDetectorProvider['complete']>()
+      .mockResolvedValue(
+        JSON.stringify({ version: V2_CONTENT_DETECTOR_VERSION, structure: structure() }),
+      )
+
+    const result = await runV2ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: 'Describe a park.',
+      transcript: TRANSCRIPT,
+    })
+
+    expect(result.status).toBe('checked')
+    expect(result.calls).toBe(1)
+    expect(result.categories.structure.status).toBe('checked')
+    expect(result.categories.grammar.status).toBe('not_checked')
+    expect(result.categories.vocabulary.status).toBe('not_checked')
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(warning).not.toHaveBeenCalled()
+    warning.mockRestore()
   })
 
   it('does not retry provider outages', async () => {
@@ -655,7 +787,7 @@ describe('v2 provider behavior and prompt contract', () => {
     expect(warning).toHaveBeenCalledWith({
       provider: 'deepseek',
       model: 'fake-v2',
-      code: 'transport_error',
+      code: 'unknown_provider_failure',
       status: null,
     })
     warning.mockRestore()
@@ -725,5 +857,11 @@ describe('v2 provider behavior and prompt contract', () => {
     expect(V2_CONTENT_SYSTEM_PROMPT).toMatch(/never penalize stylistic preference/i)
     expect(V2_CONTENT_SYSTEM_PROMPT).toMatch(/not fancy words or vocabulary level/i)
     expect(V2_CONTENT_SYSTEM_PROMPT).toMatch(/fillers, false starts, or closers/i)
+  })
+
+  it('explicitly forbids returning the requested schema inside an outer wrapper', () => {
+    expect(V2_CONTENT_SYSTEM_PROMPT).toMatch(
+      /do not return response_shape, response, result, analysis, or any other outer wrapper/i,
+    )
   })
 })

@@ -1,6 +1,6 @@
 import type { V2ContentDetectorRequest } from '@/lib/scoring/v2/content/contracts'
 
-export const V2_CONTENT_SYSTEM_PROMPT = `You are a structured detector for spoken responses. Return JSON only.
+export const V2_CONTENT_SYSTEM_PROMPT = `You are a structured detector for spoken responses. Return JSON only. Return exactly the object described by response_shape. The top-level object must contain version, structure, grammar, and vocabulary. Do not return response_shape, response, result, analysis, or any other outer wrapper.
 
 Assess structure with these checks: answered_prompt, main_point, logical_progression, relevant_support, unnecessary_repetition, topic_drift, completion. Whole-response structure checks may explain themselves without a transcript quote.
 

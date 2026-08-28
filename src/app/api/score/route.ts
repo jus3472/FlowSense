@@ -14,7 +14,7 @@ import {
   markOwnedAttemptFailure,
   transitionOwnedAttempt,
 } from '@/lib/attempts/server'
-import { createDeepSeekModel } from '@/lib/deepseek/provider'
+import { createDeepSeekModel, reportContentProviderFailure } from '@/lib/deepseek/provider'
 import {
   CONTENT_SYSTEM_PROMPT,
   REWRITE_SYSTEM_PROMPT,
@@ -103,10 +103,10 @@ function unreliableSpans(transcript: string, words: readonly TranscriptWord[]) {
 }
 
 function unavailableProvider(error: unknown): V2ContentDetectorProvider {
-  void error
+  const failure = reportContentProviderFailure(error, 'deepseek', 'configuration_error')
   return {
     name: 'deepseek',
-    complete: async () => Promise.reject(new Error('Content provider unavailable.')),
+    complete: async () => Promise.reject(failure),
   }
 }
 

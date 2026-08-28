@@ -1,5 +1,7 @@
 import {
   CONTENT_PROVIDER_UNAVAILABLE_MESSAGE,
+  ContentProviderFailure,
+  isRetryableContentProviderFailure,
   reportContentProviderFailure,
 } from '@/lib/deepseek/provider'
 import {
@@ -34,7 +36,10 @@ const GRAMMAR_KINDS = ['grammatical_error'] as const
 const MAX_FINDINGS_PER_CATEGORY = 8
 
 export class V2ContentParseError extends Error {
-  constructor(message: string) {
+  constructor(
+    readonly code: 'malformed_json' | 'schema_invalid',
+    message: string,
+  ) {
     super(message)
     this.name = 'V2ContentParseError'
   }
@@ -146,14 +151,22 @@ function parsePayload(raw: string): Record<string, unknown> {
   try {
     parsed = JSON.parse(raw)
   } catch {
-    // A retry is appropriate only for malformed JSON, matching the v1 policy.
-    throw new V2ContentParseError('The v2 content response was not a JSON object.')
+    throw new V2ContentParseError(
+      'malformed_json',
+      'The v2 content response was not a JSON object.',
+    )
   }
   if (!isRecord(parsed)) {
-    throw new V2ContentParseError('The v2 content response was not a JSON object.')
+    throw new V2ContentParseError(
+      'schema_invalid',
+      'The v2 content response was not a JSON object.',
+    )
   }
   if (parsed.version !== V2_CONTENT_DETECTOR_VERSION) {
-    throw new V2ContentParseError('The v2 content response had an unsupported version.')
+    throw new V2ContentParseError(
+      'schema_invalid',
+      'The v2 content response had an unsupported version.',
+    )
   }
   return parsed
 }
@@ -366,6 +379,12 @@ export function parseV2ContentResponse(
     vocabulary: parseFindings(payload.vocabulary, 'vocabulary', context),
   }
   const checked = Object.values(categories).some((category) => category.status === 'checked')
+  if (!checked) {
+    throw new V2ContentParseError(
+      'schema_invalid',
+      'The v2 content response did not contain a usable category.',
+    )
+  }
   return {
     version: V2_CONTENT_DETECTOR_VERSION,
     status: checked ? 'checked' : 'not_checked',
@@ -374,7 +393,7 @@ export function parseV2ContentResponse(
   }
 }
 
-/** Retries one malformed response, but never retries an outage or rejection. */
+/** Makes at most two calls and retries only explicitly recoverable provider/output failures. */
 export async function runV2ContentEvaluation(
   input: V2ContentEvaluationInput,
 ): Promise<V2ContentEvaluation> {
@@ -398,11 +417,15 @@ export async function runV2ContentEvaluation(
       })
       return { ...parseV2ContentResponse(raw, input), provider: input.provider.name, calls }
     } catch (error) {
-      if (!(error instanceof V2ContentParseError)) {
-        reportContentProviderFailure(error, input.provider.name)
-        return notChecked(input.provider.name, CONTENT_PROVIDER_UNAVAILABLE_MESSAGE, calls)
-      }
-      if (attempt === 1) return notChecked(input.provider.name, error.message, calls)
+      const failure =
+        error instanceof V2ContentParseError
+          ? reportContentProviderFailure(
+              new ContentProviderFailure(error.code, input.provider.name),
+              input.provider.name,
+            )
+          : reportContentProviderFailure(error, input.provider.name)
+      if (attempt === 0 && isRetryableContentProviderFailure(failure)) continue
+      return notChecked(input.provider.name, CONTENT_PROVIDER_UNAVAILABLE_MESSAGE, calls)
     }
   }
   return notChecked(input.provider.name, CONTENT_PROVIDER_UNAVAILABLE_MESSAGE, calls)

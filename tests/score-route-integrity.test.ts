@@ -34,6 +34,7 @@ vi.mock('@/lib/attempts/legacy-recheck', () => ({
 
 vi.mock('@/lib/deepseek/provider', () => ({
   createDeepSeekModel: vi.fn(() => ({ name: 'deepseek', complete: mocks.deepSeekComplete })),
+  reportContentProviderFailure: vi.fn((error: unknown) => error),
 }))
 
 vi.mock('@/lib/env/server', () => ({

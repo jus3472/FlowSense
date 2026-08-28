@@ -365,7 +365,7 @@ describe('runContentCheck', () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const complete = vi
       .fn<ContentModel['complete']>()
-      .mockRejectedValue(new ContentProviderFailure('http_error', 'fake', 500))
+      .mockRejectedValue(new ContentProviderFailure('server_error', 'fake', 500))
     const outcome = await runContentCheck({
       model: model(complete),
       request,
@@ -376,7 +376,7 @@ describe('runContentCheck', () => {
     expect(warning).toHaveBeenCalledWith({
       provider: 'deepseek',
       model: 'fake',
-      code: 'http_error',
+      code: 'server_error',
       status: 500,
     })
     warning.mockRestore()

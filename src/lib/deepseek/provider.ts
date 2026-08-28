@@ -2,10 +2,21 @@ import { fetchWithTimeout, RequestTimeoutError } from '@/lib/net/fetch-with-time
 
 export const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 export const DEEPSEEK_MODEL = 'deepseek-v4-flash'
+export const DEEPSEEK_CONTENT_MAX_TOKENS = 4_096
 export const CONTENT_PROVIDER_UNAVAILABLE_MESSAGE = 'The content provider was unavailable.'
 
 export type ContentProviderFailureCode =
-  'configuration_error' | 'http_error' | 'invalid_response' | 'timeout' | 'transport_error'
+  | 'authentication_error'
+  | 'configuration_error'
+  | 'empty_response'
+  | 'malformed_json'
+  | 'network_failure'
+  | 'rate_limit'
+  | 'schema_invalid'
+  | 'server_error'
+  | 'timeout'
+  | 'truncated_response'
+  | 'unknown_provider_failure'
 
 export interface ContentProviderFailureDiagnostic {
   provider: 'deepseek'
@@ -50,7 +61,7 @@ const reportedFailures = new WeakSet<ContentProviderFailure>()
 export function reportContentProviderFailure(
   error: unknown,
   model: string,
-  fallbackCode: ContentProviderFailureCode = 'transport_error',
+  fallbackCode: ContentProviderFailureCode = 'unknown_provider_failure',
 ): ContentProviderFailure {
   const failure =
     error instanceof ContentProviderFailure
@@ -65,6 +76,24 @@ export function reportContentProviderFailure(
     console.warn(failure.diagnostic)
   }
   return failure
+}
+
+const RETRYABLE_FAILURE_CODES = new Set<ContentProviderFailureCode>([
+  'empty_response',
+  'malformed_json',
+  'network_failure',
+  'rate_limit',
+  'schema_invalid',
+  'server_error',
+  'timeout',
+  'truncated_response',
+])
+
+/** Keeps retry policy bounded to explicit, sanitized failure classes. */
+export function isRetryableContentProviderFailure(error: unknown): boolean {
+  return (
+    error instanceof ContentProviderFailure && RETRYABLE_FAILURE_CODES.has(error.diagnostic.code)
+  )
 }
 
 export interface ContentModelRequest {
@@ -84,6 +113,15 @@ export interface ContentModel {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function httpFailureCode(status: number): ContentProviderFailureCode {
+  if (status === 401 || status === 403) return 'authentication_error'
+  if (status === 408) return 'timeout'
+  if (status === 429) return 'rate_limit'
+  if (status >= 500 && status <= 599) return 'server_error'
+  if (status >= 400 && status <= 499) return 'configuration_error'
+  return 'unknown_provider_failure'
 }
 
 export function createDeepSeekModel(apiKey: string, model = DEEPSEEK_MODEL): ContentModel {
@@ -109,17 +147,22 @@ export function createDeepSeekModel(apiKey: string, model = DEEPSEEK_MODEL): Con
               thinking: { type: 'disabled' },
               response_format: { type: 'json_object' },
               temperature: 0,
+              max_tokens: DEEPSEEK_CONTENT_MAX_TOKENS,
             }),
           },
           { label: 'Checking your content', timeoutMs, discardNonOkBody: true },
         )
       } catch (error) {
-        throw reportContentProviderFailure(error, model)
+        throw reportContentProviderFailure(
+          error,
+          model,
+          error instanceof RequestTimeoutError ? 'timeout' : 'network_failure',
+        )
       }
 
       if (!response.ok) {
         throw reportContentProviderFailure(
-          new ContentProviderFailure('http_error', model, response.status),
+          new ContentProviderFailure(httpFailureCode(response.status), model, response.status),
           model,
         )
       }
@@ -129,17 +172,49 @@ export function createDeepSeekModel(apiKey: string, model = DEEPSEEK_MODEL): Con
         body = await response.json()
       } catch {
         throw reportContentProviderFailure(
-          new ContentProviderFailure('invalid_response', model, response.status),
+          new ContentProviderFailure('malformed_json', model, response.status),
           model,
         )
       }
       const choice = isRecord(body) && Array.isArray(body.choices) ? body.choices[0] : undefined
+      if (!isRecord(choice)) {
+        throw reportContentProviderFailure(
+          new ContentProviderFailure('schema_invalid', model, response.status),
+          model,
+        )
+      }
+
+      if (choice.finish_reason === 'length') {
+        throw reportContentProviderFailure(
+          new ContentProviderFailure('truncated_response', model, response.status),
+          model,
+        )
+      }
+      if (choice.finish_reason === 'insufficient_system_resource') {
+        throw reportContentProviderFailure(
+          new ContentProviderFailure('server_error', model, response.status),
+          model,
+        )
+      }
+      if (choice.finish_reason === 'content_filter') {
+        throw reportContentProviderFailure(
+          new ContentProviderFailure('unknown_provider_failure', model, response.status),
+          model,
+        )
+      }
+
       const message = isRecord(choice) ? choice.message : undefined
       const content = isRecord(message) ? message.content : undefined
 
-      if (typeof content !== 'string' || content.trim().length === 0) {
+      if (typeof content !== 'string') {
         throw reportContentProviderFailure(
-          new ContentProviderFailure('invalid_response', model, response.status),
+          new ContentProviderFailure('schema_invalid', model, response.status),
+          model,
+        )
+      }
+      if (content.trim().length === 0) {
+        throw reportContentProviderFailure(
+          new ContentProviderFailure('empty_response', model, response.status),
           model,
         )
       }
