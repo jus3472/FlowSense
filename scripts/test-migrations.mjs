@@ -11,6 +11,7 @@ const USERS = {
   missingProfile: '10000000-0000-4000-8000-000000000001',
   owner: '20000000-0000-4000-8000-000000000002',
   other: '30000000-0000-4000-8000-000000000003',
+  signedUpAfterCurriculum: '40000000-0000-4000-8000-000000000008',
 }
 const UPLOAD_ATTEMPTS = {
   owner: '50000000-0000-4000-8000-000000000005',
@@ -148,7 +149,7 @@ async function assertPromptCoverage(label) {
     select count(*)::integer as total,
       count(distinct (mode, difficulty))::integer as combinations
     from public.prompts
-    where active
+    where active and free_practice_visible
   `)
   assert(summary.rows[0]?.total === 60, `${label}: expected 60 active prompts`)
   assert(summary.rows[0]?.combinations === 12, `${label}: expected all 12 mode combinations`)
@@ -166,6 +167,7 @@ async function assertPromptCoverage(label) {
     where not exists (
       select 1 from public.prompts
       where prompts.active
+        and prompts.free_practice_visible
         and prompts.mode = expected.mode
         and prompts.difficulty = expected.difficulty
     )
@@ -734,6 +736,10 @@ async function assertLifecycleAndIdempotency(label) {
     deleteActions.attempts_retry_of_attempt_id_fkey === 'n',
     `${label}: retry FK must set null`,
   )
+  assert(
+    deleteActions.attempts_lesson_id_fkey === 'r',
+    `${label}: lesson FK must restrict deletion`,
+  )
 
   const feedbackFks = await client.query(`
     select count(*)::integer as count
@@ -743,6 +749,396 @@ async function assertLifecycleAndIdempotency(label) {
       and confdeltype = 'c'
   `)
   assert(feedbackFks.rows[0]?.count === 2, `${label}: feedback cascade FKs are missing`)
+}
+
+function structuredScorePayload(mode, score, { extraCategory = false } = {}) {
+  const maximums = {
+    fluency: 20,
+    clarity: 20,
+    vocabulary: 15,
+    grammar: 15,
+    structure: 15,
+    delivery: 15,
+  }
+  let remaining = score
+  const categories = Object.fromEntries(
+    Object.entries(maximums).map(([category, maximum]) => {
+      const earned = Math.min(maximum, remaining)
+      remaining -= earned
+      return [
+        category,
+        {
+          category,
+          availability: 'available',
+          status: 'scored',
+          earned_points: earned,
+          max_points: maximum,
+        },
+      ]
+    }),
+  )
+  if (extraCategory) {
+    categories.forged = {
+      category: 'forged',
+      availability: 'available',
+      status: 'scored',
+      earned_points: 0,
+      max_points: 0,
+    }
+  }
+  return {
+    version: 'v2.score.1',
+    rubric_version: 'v2',
+    mode,
+    total_earned_points: score,
+    total_max_points: 100,
+    categories,
+    warnings: [],
+  }
+}
+
+async function assertCurriculumCoverage(label) {
+  const counts = await client.query(`
+    select
+      (select count(*)::integer from public.practice_paths) as paths,
+      (select count(*)::integer from public.practice_chapters) as chapters,
+      (select count(*)::integer from public.practice_lessons) as lessons,
+      (select count(*)::integer from public.prompts where not free_practice_visible) as curriculum_prompts,
+      (select count(*)::integer from public.prompts where free_practice_visible) as free_prompts
+  `)
+  assert(counts.rows[0]?.paths === 4, `${label}: expected four curriculum paths`)
+  assert(counts.rows[0]?.chapters === 12, `${label}: expected twelve curriculum chapters`)
+  assert(counts.rows[0]?.lessons === 120, `${label}: expected 120 curriculum lessons`)
+  assert(
+    counts.rows[0]?.curriculum_prompts === 120,
+    `${label}: expected 120 curriculum-only prompts`,
+  )
+  assert(counts.rows[0]?.free_prompts === 60, `${label}: existing Free Practice prompts changed`)
+
+  const invalidChapters = await client.query(`
+    select chapter.id
+    from public.practice_chapters as chapter
+    left join public.practice_lessons as lesson on lesson.chapter_id = chapter.id
+    group by chapter.id
+    having count(lesson.id) <> 10
+      or count(*) filter (where lesson.checkpoint) <> 1
+      or max(lesson.position) filter (where lesson.checkpoint) <> 10
+  `)
+  assert(
+    invalidChapters.rowCount === 0,
+    `${label}: chapter lesson or checkpoint distribution failed`,
+  )
+
+  const pathModes = await client.query(`
+    select slug, mode, position
+    from public.practice_paths
+    order by position
+  `)
+  assert(
+    JSON.stringify(pathModes.rows) ===
+      JSON.stringify([
+        { slug: 'general-speaking', mode: 'practice', position: 1 },
+        { slug: 'interviews', mode: 'interview', position: 2 },
+        { slug: 'presentations', mode: 'presentation', position: 3 },
+        { slug: 'conversations', mode: 'conversation', position: 4 },
+      ]),
+    `${label}: path slug or mode mapping changed`,
+  )
+  assert(
+    pathModes.rows[0] &&
+      (await client.query("select id from public.practice_paths where slug = 'general-speaking'"))
+        .rows[0]?.id === 'ebaec575-9889-5d28-8a23-8b54fae728db',
+    `${label}: deterministic General Speaking id changed`,
+  )
+
+  const lessonSlugs = await client.query(`
+    select count(*)::integer as total,
+      count(distinct slug)::integer as distinct_slugs,
+      bool_and(slug ~ '^(general-speaking|interviews|presentations|conversations)-(beginner|intermediate|advanced)-[0-9]{2}-[a-z0-9-]+$') as valid
+    from public.practice_lessons
+  `)
+  assert(
+    lessonSlugs.rows[0]?.total === 120 &&
+      lessonSlugs.rows[0]?.distinct_slugs === 120 &&
+      lessonSlugs.rows[0]?.valid === true,
+    `${label}: lesson slugs are not globally stable`,
+  )
+}
+
+async function assertCurriculumSecurity(label) {
+  const preferencePrivileges = await client.query(`
+    select privilege_type
+    from information_schema.role_table_grants
+    where table_schema = 'public'
+      and table_name = 'profile_path_preferences'
+      and grantee = 'authenticated'
+    order by privilege_type
+  `)
+  assert(
+    JSON.stringify(preferencePrivileges.rows.map((row) => row.privilege_type)) === '["SELECT"]',
+    `${label}: preferences must expose only SELECT table privileges`,
+  )
+  const progressPrivileges = await client.query(`
+    select privilege_type
+    from information_schema.role_table_grants
+    where table_schema = 'public'
+      and table_name = 'lesson_progress'
+      and grantee = 'authenticated'
+    order by privilege_type
+  `)
+  assert(
+    JSON.stringify(progressPrivileges.rows.map((row) => row.privilege_type)) === '["SELECT"]',
+    `${label}: lesson progress must expose only SELECT`,
+  )
+
+  const policies = await client.query(`
+    select tablename, cmd
+    from pg_policies
+    where schemaname = 'public'
+      and tablename in ('profile_path_preferences', 'lesson_progress')
+    order by tablename, cmd
+  `)
+  assert(
+    JSON.stringify(policies.rows) ===
+      JSON.stringify([
+        { tablename: 'lesson_progress', cmd: 'SELECT' },
+        { tablename: 'profile_path_preferences', cmd: 'DELETE' },
+        { tablename: 'profile_path_preferences', cmd: 'INSERT' },
+        { tablename: 'profile_path_preferences', cmd: 'SELECT' },
+        { tablename: 'profile_path_preferences', cmd: 'UPDATE' },
+      ]),
+    `${label}: curriculum owner policies changed`,
+  )
+
+  const paths = await client.query(
+    `select id, slug from public.practice_paths
+     where slug in ('general-speaking', 'interviews', 'presentations') order by slug`,
+  )
+  const general = paths.rows.find((row) => row.slug === 'general-speaking')
+  const interviews = paths.rows.find((row) => row.slug === 'interviews')
+  const presentations = paths.rows.find((row) => row.slug === 'presentations')
+  assert(general && interviews && presentations, `${label}: preference test paths are missing`)
+  await client.query('update public.practice_paths set active = false where id = $1', [
+    presentations.id,
+  ])
+
+  await setAuthenticatedUser(USERS.owner)
+  try {
+    await client.query('select public.replace_profile_path_preferences($1::uuid[])', [
+      [interviews.id, general.id],
+    ])
+    const ownPreferences = await client.query(
+      'select user_id, path_id, rank from public.profile_path_preferences order by rank',
+    )
+    assert(
+      JSON.stringify(ownPreferences.rows) ===
+        JSON.stringify([
+          { user_id: USERS.owner, path_id: interviews.id, rank: 0 },
+          { user_id: USERS.owner, path_id: general.id, rank: 1 },
+        ]),
+      `${label}: atomic preference replacement failed`,
+    )
+    await expectPgError(
+      () =>
+        client.query('select public.replace_profile_path_preferences($1::uuid[])', [
+          [general.id, general.id],
+        ]),
+      '23514',
+      `${label}: duplicate atomic preferences`,
+    )
+    await expectPgError(
+      () =>
+        client.query('select public.replace_profile_path_preferences($1::uuid[])', [
+          [presentations.id],
+        ]),
+      '23514',
+      `${label}: inactive atomic preference`,
+    )
+    await expectPgError(
+      () =>
+        client.query(
+          `insert into public.profile_path_preferences (user_id, path_id, rank)
+           values ($1, $2, 2)`,
+          [USERS.owner, general.id],
+        ),
+      '42501',
+      `${label}: direct authenticated preference insert`,
+    )
+  } finally {
+    await resetRole()
+    await client.query('update public.practice_paths set active = true where id = $1', [
+      presentations.id,
+    ])
+  }
+
+  const lesson = await client.query(`
+    select lesson.id, lesson.prompt_id, path.mode
+    from public.practice_lessons as lesson
+    join public.practice_chapters as chapter on chapter.id = lesson.chapter_id
+    join public.practice_paths as path on path.id = chapter.path_id
+    where path.slug = 'general-speaking'
+    order by chapter.position, lesson.position
+    limit 1
+  `)
+  const target = lesson.rows[0]
+  assert(target, `${label}: progress test lesson is missing`)
+
+  const incomplete = await client.query(
+    `insert into public.attempts (
+       user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
+       prompt_difficulty, rubric_version, status, finished_at, score, section_scores
+     ) values ($1, $2, $3, 'Provider incomplete snapshot', $4, 'library', 'beginner',
+       'v2', 'done', '2026-08-28T10:00:00Z', null, $5::jsonb)
+     returning id`,
+    [
+      USERS.owner,
+      target.prompt_id,
+      target.id,
+      target.mode,
+      JSON.stringify({
+        ...structuredScorePayload(target.mode, 0),
+        total_earned_points: null,
+      }),
+    ],
+  )
+  const afterIncomplete = await client.query(
+    'select count(*)::integer as count from public.lesson_progress where user_id = $1 and lesson_id = $2',
+    [USERS.owner, target.id],
+  )
+  assert(afterIncomplete.rows[0]?.count === 0, `${label}: unavailable score created progress`)
+
+  const attempts = []
+  for (const [score, finishedAt] of [
+    [72, '2026-08-28T10:01:00Z'],
+    [65, '2026-08-28T10:02:00Z'],
+    [72, '2026-08-28T10:03:00Z'],
+  ]) {
+    const attempt = await client.query(
+      `insert into public.attempts (
+         user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
+         prompt_difficulty, rubric_version, status, finished_at, score, section_scores
+       ) values ($1, $2, $3, 'Structured snapshot', $4, 'library', 'beginner',
+         'v2', 'done', $5::timestamptz, $6, $7::jsonb)
+       returning id`,
+      [
+        USERS.owner,
+        target.prompt_id,
+        target.id,
+        target.mode,
+        finishedAt,
+        score,
+        JSON.stringify(structuredScorePayload(target.mode, score)),
+      ],
+    )
+    attempts.push({ id: attempt.rows[0].id, score })
+  }
+
+  const tiedBest = await client.query(
+    'select best_score, best_attempt_id from public.lesson_progress where user_id = $1 and lesson_id = $2',
+    [USERS.owner, target.id],
+  )
+  assert(
+    tiedBest.rows[0]?.best_score === 72 && tiedBest.rows[0]?.best_attempt_id === attempts[2].id,
+    `${label}: equal score did not prefer the newest completion`,
+  )
+
+  const higherAttempt = await client.query(
+    `insert into public.attempts (
+       user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
+       prompt_difficulty, rubric_version, status, finished_at, score, section_scores
+     ) values ($1, $2, $3, 'Higher structured snapshot', $4, 'library', 'beginner',
+       'v2', 'done', '2026-08-28T10:04:00Z', 80, $5::jsonb)
+     returning id`,
+    [
+      USERS.owner,
+      target.prompt_id,
+      target.id,
+      target.mode,
+      JSON.stringify(structuredScorePayload(target.mode, 80)),
+    ],
+  )
+  attempts.push({ id: higherAttempt.rows[0].id, score: 80 })
+
+  const best = await client.query(
+    'select best_score, best_attempt_id from public.lesson_progress where user_id = $1 and lesson_id = $2',
+    [USERS.owner, target.id],
+  )
+  assert(
+    best.rows[0]?.best_score === 80 && best.rows[0]?.best_attempt_id === attempts[3].id,
+    `${label}: higher score did not become the durable best`,
+  )
+  await expectPgError(
+    () =>
+      client.query(
+        'update public.lesson_progress set best_score = 70 where user_id = $1 and lesson_id = $2',
+        [USERS.owner, target.id],
+      ),
+    '23514',
+    `${label}: direct best-score regression guard`,
+  )
+
+  const malformedAttempt = await client.query(
+    `insert into public.attempts (
+       user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
+       prompt_difficulty, rubric_version, status, finished_at, score, section_scores
+     ) values ($1, $2, $3, 'Malformed structured snapshot', $4, 'library', 'beginner',
+       'v2', 'done', '2026-08-28T10:05:00Z', 90, $5::jsonb)
+     returning id`,
+    [
+      USERS.other,
+      target.prompt_id,
+      target.id,
+      target.mode,
+      JSON.stringify(structuredScorePayload(target.mode, 90, { extraCategory: true })),
+    ],
+  )
+  const malformedProgress = await client.query(
+    'select count(*)::integer as count from public.lesson_progress where best_attempt_id = $1',
+    [malformedAttempt.rows[0].id],
+  )
+  assert(malformedProgress.rows[0]?.count === 0, `${label}: malformed payload raised progress`)
+
+  await client.query('delete from public.attempts where id = $1', [attempts[3].id])
+  const afterDelete = await client.query(
+    'select best_score, best_attempt_id from public.lesson_progress where user_id = $1 and lesson_id = $2',
+    [USERS.owner, target.id],
+  )
+  assert(
+    afterDelete.rows[0]?.best_score === 80 && afterDelete.rows[0]?.best_attempt_id === null,
+    `${label}: deleting a best attempt erased achievement`,
+  )
+
+  await setAuthenticatedUser(USERS.owner)
+  try {
+    await expectPgError(
+      () =>
+        client.query(
+          `insert into public.lesson_progress (user_id, lesson_id, best_score)
+           values ($1, $2, 100)`,
+          [USERS.owner, target.id],
+        ),
+      '42501',
+      `${label}: authenticated progress forgery`,
+    )
+    const visible = await client.query('select user_id from public.lesson_progress')
+    assert(
+      visible.rows.every((row) => row.user_id === USERS.owner),
+      `${label}: lesson progress owner read leaked`,
+    )
+  } finally {
+    await resetRole()
+  }
+
+  await client.query('delete from public.attempts where id = $1', [incomplete.rows[0].id])
+}
+
+async function reapplyCurriculumData(migrations, label) {
+  const seed = migrations.find(({ name }) => name === 'curriculum_seed')
+  const backfill = migrations.find(({ name }) => name === 'path_preferences_backfill')
+  assert(seed && backfill, `${label}: curriculum data migrations are missing`)
+  await applyMigration(client, seed)
+  await applyMigration(client, backfill)
+  await assertCurriculumCoverage(`${label} reapplied`)
 }
 
 async function runFresh(migrations) {
@@ -759,6 +1155,9 @@ async function runFresh(migrations) {
   await assertLifecycleAndIdempotency('fresh')
   await assertAttemptSecurity('fresh')
   await assertNoteFeedbackSecurity('fresh')
+  await assertCurriculumCoverage('fresh')
+  await assertCurriculumSecurity('fresh')
+  await reapplyCurriculumData(migrations, 'fresh')
   console.log('pass fresh migration chain')
 }
 
@@ -916,15 +1315,207 @@ async function runUpgrade(migrations) {
   await assertLifecycleAndIdempotency('upgrade')
   await assertAttemptSecurity('upgrade')
   await assertNoteFeedbackSecurity('upgrade')
+  await assertCurriculumCoverage('upgrade')
+  await assertCurriculumSecurity('upgrade')
   console.log('pass original-four upgrade chain')
+}
+
+async function runPreCurriculumUpgrade(migrations) {
+  await bootstrapSupabaseSurface()
+  const preCurriculum = migrations.slice(0, 9)
+  const curriculum = migrations.slice(9)
+  assert(
+    preCurriculum.at(-1)?.name === 'note_feedback_write_boundary',
+    'pre-curriculum boundary must include all nine production migrations',
+  )
+  assert(
+    JSON.stringify(curriculum.map(({ name }) => name)) ===
+      JSON.stringify(['curriculum_schema', 'curriculum_seed', 'path_preferences_backfill']),
+    'expected exactly three curriculum migrations after the production boundary',
+  )
+
+  await applyAll(preCurriculum)
+  await seedAuthUser(USERS.missingProfile, 'Pre-curriculum General')
+  await seedAuthUser(USERS.owner, 'Pre-curriculum Owner')
+  await seedAuthUser(USERS.other, 'Pre-curriculum Other')
+  const ownerFocusAreas = [
+    'general-speaking',
+    'meetings',
+    'interviews',
+    'difficult-conversations',
+    'presentations',
+  ]
+  const otherFocusAreas = ['unknown-future-focus']
+  await client.query('update public.profiles set focus_areas = $2 where id = $1', [
+    USERS.owner,
+    ownerFocusAreas,
+  ])
+  await client.query('update public.profiles set focus_areas = $2 where id = $1', [
+    USERS.other,
+    otherFocusAreas,
+  ])
+
+  const existingPrompt = await client.query(`
+    select id, text, mode, difficulty, target_duration_seconds, collection_id
+    from public.prompts
+    order by created_at, id
+    limit 1
+  `)
+  const snapshot = {
+    sectionScores: { version: 'v2.score.1', preserved: true },
+    metrics: { capture: { duration_ms: 42000 }, preserved: true },
+    contentResult: { status: 'checked', preserved: true },
+  }
+  const existingAttempt = await client.query(
+    `insert into public.attempts (
+       user_id, prompt_id, prompt_text, transcript, duration_ms, score,
+       section_scores, metrics, content_result, practice_mode, prompt_source,
+       prompt_difficulty, rubric_version, status, finished_at, created_at
+     ) values ($1, $2, 'Immutable pre-curriculum prompt', 'Immutable pre-curriculum transcript',
+       42000, 73, $3::jsonb, $4::jsonb, $5::jsonb, 'practice', 'library',
+       'beginner', 'v2', 'done', $6::timestamptz, $6::timestamptz)
+     returning id`,
+    [
+      USERS.owner,
+      existingPrompt.rows[0].id,
+      JSON.stringify(snapshot.sectionScores),
+      JSON.stringify(snapshot.metrics),
+      JSON.stringify(snapshot.contentResult),
+      LEGACY_CREATED_AT,
+    ],
+  )
+  const before = await client.query(`
+    select
+      (select count(*)::integer from public.profiles) as profiles,
+      (select count(*)::integer from public.prompts) as prompts,
+      (select count(*)::integer from public.attempts) as attempts
+  `)
+
+  await applyAll(curriculum)
+
+  const after = await client.query(`
+    select
+      (select count(*)::integer from public.profiles) as profiles,
+      (select count(*)::integer from public.prompts where free_practice_visible) as free_prompts,
+      (select count(*)::integer from public.attempts) as attempts
+  `)
+  assert(after.rows[0]?.profiles === before.rows[0]?.profiles, 'pre-curriculum: users changed')
+  assert(
+    after.rows[0]?.free_prompts === before.rows[0]?.prompts,
+    'pre-curriculum: existing prompts stopped being Free Practice-visible',
+  )
+  assert(after.rows[0]?.attempts === before.rows[0]?.attempts, 'pre-curriculum: attempts changed')
+
+  const preservedAttempt = await client.query(
+    `select prompt_id, lesson_id, prompt_text, transcript, duration_ms, score,
+       section_scores, metrics, content_result, created_at, finished_at
+     from public.attempts where id = $1`,
+    [existingAttempt.rows[0].id],
+  )
+  const preserved = preservedAttempt.rows[0]
+  assert(preserved?.lesson_id === null, 'pre-curriculum: old attempt gained a lesson id')
+  assert(
+    preserved.prompt_id === existingPrompt.rows[0].id &&
+      preserved.prompt_text === 'Immutable pre-curriculum prompt' &&
+      preserved.transcript === 'Immutable pre-curriculum transcript' &&
+      preserved.duration_ms === 42000 &&
+      preserved.score === 73 &&
+      JSON.stringify(preserved.section_scores) === JSON.stringify(snapshot.sectionScores) &&
+      JSON.stringify(preserved.metrics) === JSON.stringify(snapshot.metrics) &&
+      JSON.stringify(preserved.content_result) === JSON.stringify(snapshot.contentResult) &&
+      preserved.created_at.toISOString() === LEGACY_CREATED_AT &&
+      preserved.finished_at.toISOString() === LEGACY_CREATED_AT,
+    'pre-curriculum: historical attempt snapshot changed',
+  )
+  const preservedPrompt = await client.query(
+    `select text, mode, difficulty, target_duration_seconds, collection_id, free_practice_visible
+     from public.prompts where id = $1`,
+    [existingPrompt.rows[0].id],
+  )
+  assert(
+    JSON.stringify(preservedPrompt.rows[0]) ===
+      JSON.stringify({ ...existingPrompt.rows[0], id: undefined, free_practice_visible: true }),
+    'pre-curriculum: existing prompt metadata changed',
+  )
+
+  const ownerPreferences = await client.query(
+    `
+    select path.slug, preference.rank
+    from public.profile_path_preferences as preference
+    join public.practice_paths as path on path.id = preference.path_id
+    where preference.user_id = $1
+    order by preference.rank
+  `,
+    [USERS.owner],
+  )
+  assert(
+    JSON.stringify(ownerPreferences.rows) ===
+      JSON.stringify([
+        { slug: 'interviews', rank: 0 },
+        { slug: 'presentations', rank: 1 },
+        { slug: 'conversations', rank: 2 },
+        { slug: 'general-speaking', rank: 3 },
+      ]),
+    'pre-curriculum: canonical preference backfill changed',
+  )
+  const otherPreferences = await client.query(
+    `
+    select path.slug, preference.rank
+    from public.profile_path_preferences as preference
+    join public.practice_paths as path on path.id = preference.path_id
+    where preference.user_id = $1
+  `,
+    [USERS.other],
+  )
+  assert(
+    JSON.stringify(otherPreferences.rows) ===
+      JSON.stringify([{ slug: 'general-speaking', rank: 0 }]),
+    'pre-curriculum: unknown focus did not map to General Speaking',
+  )
+  const focusAreas = await client.query(
+    'select id, focus_areas from public.profiles where id = any($1::uuid[]) order by id',
+    [[USERS.owner, USERS.other]],
+  )
+  assert(
+    JSON.stringify(focusAreas.rows.find((row) => row.id === USERS.owner)?.focus_areas) ===
+      JSON.stringify(ownerFocusAreas) &&
+      JSON.stringify(focusAreas.rows.find((row) => row.id === USERS.other)?.focus_areas) ===
+        JSON.stringify(otherFocusAreas),
+    'pre-curriculum: historical focus areas were rewritten',
+  )
+
+  await seedAuthUser(USERS.signedUpAfterCurriculum, 'New Curriculum User')
+  const signupFoundation = await client.query(
+    `
+    select path.slug, preference.rank
+    from public.profile_path_preferences as preference
+    join public.practice_paths as path on path.id = preference.path_id
+    where preference.user_id = $1
+  `,
+    [USERS.signedUpAfterCurriculum],
+  )
+  assert(
+    JSON.stringify(signupFoundation.rows) ===
+      JSON.stringify([{ slug: 'general-speaking', rank: 0 }]),
+    'pre-curriculum: signup did not receive the General Speaking foundation',
+  )
+
+  await assertPromptCoverage('pre-curriculum')
+  await assertCurriculumCoverage('pre-curriculum')
+  await assertLifecycleAndIdempotency('pre-curriculum')
+  await assertAttemptSecurity('pre-curriculum')
+  await assertCurriculumSecurity('pre-curriculum')
+  await reapplyCurriculumData(migrations, 'pre-curriculum')
+  console.log('pass nine-migration pre-curriculum upgrade chain')
 }
 
 try {
   await client.connect()
   const migrations = loadMigrations()
-  assert(migrations.length >= 9, 'Expected the full migration chain including note hardening.')
+  assert(migrations.length === 12, 'Expected nine production and three curriculum migrations.')
   await runFresh(migrations)
   await runUpgrade(migrations)
+  await runPreCurriculumUpgrade(migrations)
   console.log('Migration integration harness passed.')
 } catch (error) {
   console.error(`Migration integration harness failed: ${error.message}`)

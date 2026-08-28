@@ -15,7 +15,9 @@ export function promptRowsOutcome(
 
   const prompts: LibraryPrompt[] = []
   for (const row of data) {
-    if (!isRecord(row) || row.active !== true) return dataFailure()
+    if (!isRecord(row) || row.active !== true || row.free_practice_visible !== true) {
+      return dataFailure()
+    }
     const prompt = parseLibraryPrompt(row)
     if (!prompt) return dataFailure()
     prompts.push(prompt)
@@ -27,7 +29,9 @@ export function promptRowsOutcome(
 export function promptRowOutcome(data: unknown, queryFailed: boolean): DataOutcome<LibraryPrompt> {
   if (queryFailed) return dataFailure()
   if (data === null) return dataEmpty()
-  if (!isRecord(data) || data.active !== true) return dataFailure()
+  if (!isRecord(data) || data.active !== true || data.free_practice_visible !== true) {
+    return dataFailure()
+  }
 
   const prompt = parseLibraryPrompt(data)
   return prompt ? dataReady(prompt) : dataFailure()

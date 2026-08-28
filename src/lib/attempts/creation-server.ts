@@ -72,15 +72,18 @@ async function authoritativeSession(
 
   const { data, error } = await admin
     .from('prompts')
-    .select('id, text, active, mode, difficulty, target_duration_seconds, collection_id')
+    .select(
+      'id, text, active, mode, difficulty, target_duration_seconds, collection_id, free_practice_visible',
+    )
     .eq('id', payload.promptId ?? '')
     .eq('active', true)
+    .eq('free_practice_visible', true)
     .maybeSingle()
   if (error) {
     logAttemptDiagnostic('load_library_prompt', 'library_prompt_read_failed', null, error)
     return { session: null, failed: true }
   }
-  const prompt = parseLibraryPrompt(data)
+  const prompt = data?.free_practice_visible === true ? parseLibraryPrompt(data) : null
   return { session: prompt ? libraryCreationSession(payload, prompt) : null, failed: false }
 }
 
