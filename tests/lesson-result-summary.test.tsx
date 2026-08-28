@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import type { AnchorHTMLAttributes, ReactNode } from 'react'
+import type { Route } from 'next'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { LessonResultSummary } from '@/components/curriculum/lesson-result-summary'
@@ -43,11 +44,11 @@ function result(overrides: Partial<StructuredLessonResultModel> = {}): Structure
     pathComplete: false,
     primaryAction: {
       label: 'Continue',
-      href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-07-next',
+      href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-07-next' as Route,
     },
     secondaryAction: {
       label: 'Retry for 3 stars',
-      href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-06-setback/record?retry=current-attempt',
+      href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-06-setback/record?retry=current-attempt' as Route,
     },
     ...overrides,
   }
@@ -87,7 +88,7 @@ describe('LessonResultSummary', () => {
           bestStars: 0,
           primaryAction: {
             label: 'Try Again',
-            href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-06-setback/record?retry=current-attempt',
+            href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-06-setback/record?retry=current-attempt' as Route,
           },
           secondaryAction: null,
         })}
@@ -114,7 +115,7 @@ describe('LessonResultSummary', () => {
           personalBest: false,
           primaryAction: {
             label: 'Try Again',
-            href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-06-setback/record?retry=current-attempt',
+            href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-06-setback/record?retry=current-attempt' as Route,
           },
           secondaryAction: null,
         })}
@@ -149,7 +150,7 @@ describe('LessonResultSummary', () => {
           pathComplete: true,
           primaryAction: {
             label: 'View Path',
-            href: '/practice/paths/general-speaking',
+            href: '/practice/paths/general-speaking' as Route,
           },
         })}
       />,

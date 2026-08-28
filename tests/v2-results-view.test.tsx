@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { render, screen } from '@testing-library/react'
+import type { Route } from 'next'
 import type { AnchorHTMLAttributes, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { V2ResultsView } from '@/components/results/v2-results-view'
@@ -88,11 +89,11 @@ const curriculumResult: StructuredLessonResultModel = {
   pathComplete: false,
   primaryAction: {
     label: 'Continue',
-    href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-02-next',
+    href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-02-next' as Route,
   },
   secondaryAction: {
     label: 'Retry for 3 stars',
-    href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-01-start/record?retry=attempt-1',
+    href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-01-start/record?retry=attempt-1' as Route,
   },
 }
 

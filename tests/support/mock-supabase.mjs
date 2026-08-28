@@ -204,10 +204,11 @@ function fieldValue(row, field) {
 }
 
 function splitOrExpressions(value) {
+  const source = value.startsWith('(') && value.endsWith(')') ? value.slice(1, -1) : value
   const expressions = []
   let depth = 0
   let current = ''
-  for (const character of value) {
+  for (const character of source) {
     if (character === '(') depth += 1
     if (character === ')') depth -= 1
     if (character === ',' && depth === 0) {

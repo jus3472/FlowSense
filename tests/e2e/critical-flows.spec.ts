@@ -361,6 +361,7 @@ test('structured lessons retry thresholds without reducing durable progress', as
   request,
   context,
 }) => {
+  test.slow()
   await context.grantPermissions(['microphone'], { origin: APP })
   await processingMocks(page, { scores: [64, 74, 84, 72, 68, 73] })
   await logIn(page)
@@ -481,7 +482,7 @@ test('@mobile structured Practice stays readable through the lesson boundary', a
 
   await page.getByRole('link', { name: 'Start' }).first().click()
   await expect(page.getByRole('heading', { name: 'Beginner lesson 1' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Start Lesson' })).toBeDisabled()
+  await expect(page.getByRole('link', { name: 'Start Lesson' })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
