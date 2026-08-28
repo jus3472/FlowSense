@@ -8,3 +8,12 @@ export function curriculumPathHref(pathSlug: PathSlug): Route {
 export function curriculumLessonHref(pathSlug: PathSlug, lessonSlug: string): Route {
   return `/practice/paths/${pathSlug}/lessons/${encodeURIComponent(lessonSlug)}` as Route
 }
+
+export function curriculumLessonRecordHref(
+  pathSlug: PathSlug,
+  lessonSlug: string,
+  retryOfAttemptId?: string | null,
+): Route {
+  const base = `/practice/paths/${pathSlug}/lessons/${encodeURIComponent(lessonSlug)}/record`
+  return `${base}${retryOfAttemptId ? `?retry=${encodeURIComponent(retryOfAttemptId)}` : ''}` as Route
+}

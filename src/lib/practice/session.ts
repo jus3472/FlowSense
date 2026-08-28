@@ -6,9 +6,24 @@ import {
   type PromptDifficulty,
   type PromptSource,
 } from '@/lib/practice/contracts'
+import {
+  CHAPTER_LEVELS,
+  PATH_SLUGS,
+  type ChapterLevel,
+  type PathSlug,
+} from '@/lib/curriculum/contracts'
 
 export const MIN_TARGET_DURATION_SECONDS = 15
 export const MAX_TARGET_DURATION_SECONDS = 600
+
+export interface StructuredLessonSessionDescriptor {
+  lessonId: string
+  pathSlug: PathSlug
+  chapterLevel: ChapterLevel
+  lessonSlug: string
+  lessonPosition: number
+  checkpoint: boolean
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -22,6 +37,7 @@ export interface PracticeSessionDescriptor {
   targetDurationSeconds: number
   retryOfAttemptId: string | null
   additionalContext?: string
+  curriculum?: StructuredLessonSessionDescriptor
 }
 
 export function isUuid(value: unknown): value is string {
@@ -45,6 +61,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function parseStructuredLessonSessionDescriptor(
+  value: unknown,
+): StructuredLessonSessionDescriptor | null {
+  if (!isRecord(value)) return null
+  if (
+    !isUuid(value.lessonId) ||
+    typeof value.pathSlug !== 'string' ||
+    !(PATH_SLUGS as readonly string[]).includes(value.pathSlug) ||
+    typeof value.chapterLevel !== 'string' ||
+    !(CHAPTER_LEVELS as readonly string[]).includes(value.chapterLevel) ||
+    typeof value.lessonSlug !== 'string' ||
+    !/^[a-z]+(?:-[a-z0-9]+)*$/.test(value.lessonSlug) ||
+    typeof value.lessonPosition !== 'number' ||
+    !Number.isInteger(value.lessonPosition) ||
+    value.lessonPosition < 1 ||
+    value.lessonPosition > 10 ||
+    typeof value.checkpoint !== 'boolean' ||
+    value.checkpoint !== (value.lessonPosition === 10)
+  ) {
+    return null
+  }
+  return {
+    lessonId: value.lessonId,
+    pathSlug: value.pathSlug as PathSlug,
+    chapterLevel: value.chapterLevel as ChapterLevel,
+    lessonSlug: value.lessonSlug,
+    lessonPosition: value.lessonPosition,
+    checkpoint: value.checkpoint,
+  }
+}
+
 /** Validates source invariants before a descriptor becomes an attempt payload. */
 export function parsePracticeSessionDescriptor(value: unknown): PracticeSessionDescriptor | null {
   if (!isRecord(value)) return null
@@ -64,6 +111,10 @@ export function parsePracticeSessionDescriptor(value: unknown): PracticeSessionD
     value.additionalContext.trim().length <= 1_000
       ? value.additionalContext.trim()
       : undefined
+  const curriculum =
+    value.curriculum === undefined
+      ? undefined
+      : parseStructuredLessonSessionDescriptor(value.curriculum) ?? null
 
   if (
     promptText.length === 0 ||
@@ -72,7 +123,8 @@ export function parsePracticeSessionDescriptor(value: unknown): PracticeSessionD
     !includes(PRACTICE_MODES, value.mode) ||
     !includes(PROMPT_DIFFICULTIES, value.difficulty) ||
     !includes(PROMPT_SOURCES, value.source) ||
-    !isTargetDuration(value.targetDurationSeconds)
+    !isTargetDuration(value.targetDurationSeconds) ||
+    curriculum === null
   ) {
     return null
   }
@@ -92,6 +144,7 @@ export function parsePracticeSessionDescriptor(value: unknown): PracticeSessionD
     targetDurationSeconds: value.targetDurationSeconds,
     retryOfAttemptId,
     ...(additionalContext ? { additionalContext } : {}),
+    ...(curriculum ? { curriculum } : {}),
   }
 }
 
@@ -188,6 +241,7 @@ export function matchesRetrySession(
     requested.difficulty === canonical.difficulty &&
     requested.source === canonical.source &&
     requested.targetDurationSeconds === canonical.targetDurationSeconds &&
-    requested.additionalContext === canonical.additionalContext
+    requested.additionalContext === canonical.additionalContext &&
+    requested.curriculum === undefined
   )
 }

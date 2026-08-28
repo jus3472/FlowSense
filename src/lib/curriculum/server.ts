@@ -404,6 +404,11 @@ export async function loadCurriculumLessonAccessForUser(
 
   const prompt = curriculumPromptOutcome(promptRow, {
     lessonId: decision.lesson.lesson.id,
+    pathSlug,
+    chapterLevel: decision.chapter.level,
+    lessonSlug: decision.lesson.lesson.slug,
+    lessonPosition: decision.lesson.lesson.position,
+    checkpoint: decision.lesson.lesson.checkpoint,
     promptId: decision.lesson.lesson.promptId,
     mode: pathResult.data.path.mode,
     difficulty: decision.chapter.level,

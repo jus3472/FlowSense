@@ -276,6 +276,11 @@ describe('curriculum database parsing', () => {
   it('requires a complete matching curriculum prompt before reporting inactivity', () => {
     const expected = {
       lessonId: uuid(11),
+      pathSlug: 'general-speaking' as const,
+      chapterLevel: 'beginner' as const,
+      lessonSlug: 'general-speaking-beginner-01-start',
+      lessonPosition: 1,
+      checkpoint: false,
       promptId: uuid(101),
       mode: 'practice' as const,
       difficulty: 'beginner' as const,
@@ -418,6 +423,11 @@ describe('curriculum lesson access', () => {
       data: {
         session: {
           lessonId: lesson(tables, 0).id,
+          pathSlug: 'general-speaking',
+          chapterLevel: 'beginner',
+          lessonSlug: firstSlug,
+          lessonPosition: 1,
+          checkpoint: false,
           promptId: lesson(tables, 0).prompt_id,
           promptText: 'Prompt 1',
           mode: 'practice',

@@ -52,6 +52,11 @@ function allowedOutcome(
     data: {
       session: {
         lessonId: '10000000-0000-4000-8000-000000000004',
+        pathSlug: PATH_SLUG,
+        chapterLevel: 'beginner',
+        lessonSlug: LESSON_SLUG,
+        lessonPosition: 4,
+        checkpoint: false,
         promptId: '20000000-0000-4000-8000-000000000004',
         promptText: 'Tell me about a time you solved a small problem.',
         mode: 'interview',

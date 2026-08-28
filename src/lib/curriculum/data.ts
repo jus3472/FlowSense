@@ -203,6 +203,11 @@ export function decideCurriculumLessonAccess(
 
 export interface CurriculumLessonSession {
   lessonId: string
+  pathSlug: PathSlug
+  chapterLevel: (typeof CHAPTER_LEVELS)[number]
+  lessonSlug: string
+  lessonPosition: number
+  checkpoint: boolean
   promptId: string
   promptText: string
   mode: (typeof PRACTICE_MODES)[number]
@@ -220,6 +225,11 @@ export function curriculumPromptOutcome(
   value: unknown,
   expected: {
     lessonId: string
+    pathSlug: PathSlug
+    chapterLevel: (typeof CHAPTER_LEVELS)[number]
+    lessonSlug: string
+    lessonPosition: number
+    checkpoint: boolean
     promptId: string
     mode: (typeof PRACTICE_MODES)[number]
     difficulty: (typeof PROMPT_DIFFICULTIES)[number]
@@ -247,6 +257,11 @@ export function curriculumPromptOutcome(
     status: 'ready',
     data: {
       lessonId: expected.lessonId,
+      pathSlug: expected.pathSlug,
+      chapterLevel: expected.chapterLevel,
+      lessonSlug: expected.lessonSlug,
+      lessonPosition: expected.lessonPosition,
+      checkpoint: expected.checkpoint,
       promptId: value.id,
       promptText: text,
       mode: expected.mode,
