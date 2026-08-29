@@ -26,6 +26,17 @@ const PROMPTS = [
     created_at: '2026-01-01T00:00:00.000Z',
   },
 ]
+const CURRICULUM_ONLY_PROMPT = {
+  id: '60000000-0000-4000-8000-000000000001',
+  text: 'Curriculum-only bridge safety prompt.',
+  active: true,
+  mode: 'interview',
+  difficulty: 'beginner',
+  target_duration_seconds: 60,
+  collection_id: null,
+  free_practice_visible: false,
+  created_at: '2026-08-28T00:00:00.000Z',
+}
 const QUERY_CONTROL_KEYS = new Set(['select', 'order', 'limit', 'offset', 'or'])
 const WEIGHTS = {
   practice: [22, 20, 12, 12, 18, 16],
@@ -51,6 +62,7 @@ const user = () => ({
 
 function reset() {
   state = {
+    curriculumMigrated: false,
     userMetadata: { onboarded_at: '2026-01-01T00:00:00.000Z' },
     profile: {
       id: USER_ID,
@@ -110,10 +122,11 @@ function fieldValue(row, field) {
 }
 
 function splitOrExpressions(value) {
+  const source = value.startsWith('(') && value.endsWith(')') ? value.slice(1, -1) : value
   const expressions = []
   let depth = 0
   let current = ''
-  for (const character of value) {
+  for (const character of source) {
     if (character === '(') depth += 1
     if (character === ')') depth -= 1
     if (character === ',' && depth === 0) {
@@ -297,6 +310,10 @@ const server = createServer(async (req, res) => {
     if (input.onboarded === false) state.userMetadata = {}
     return json(res, 200, state)
   }
+  if (url.pathname === '/__e2e/migrate-curriculum' && req.method === 'POST') {
+    state.curriculumMigrated = true
+    return json(res, 200, state)
+  }
   if (url.pathname === '/__e2e/state' && req.method === 'GET') return json(res, 200, state)
 
   if (url.pathname.startsWith('/__e2e/transcribe/') && req.method === 'POST') {
@@ -439,11 +456,28 @@ const server = createServer(async (req, res) => {
     const table = url.pathname.split('/').at(-1)
     const select = url.searchParams.get('select')
     if (req.method === 'GET') {
+      if (
+        table === 'prompts' &&
+        !state.curriculumMigrated &&
+        (select?.includes('free_practice_visible') || url.searchParams.has('free_practice_visible'))
+      ) {
+        return json(res, 400, {
+          code: '42703',
+          details: null,
+          hint: null,
+          message: 'column prompts.free_practice_visible does not exist',
+        })
+      }
       const source =
         table === 'profiles'
           ? [state.profile]
           : table === 'prompts'
-            ? PROMPTS
+            ? state.curriculumMigrated
+              ? [
+                  ...PROMPTS.map((prompt) => ({ ...prompt, free_practice_visible: true })),
+                  CURRICULUM_ONLY_PROMPT,
+                ]
+              : PROMPTS
             : table === 'attempts'
               ? state.attempts
               : []

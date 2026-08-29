@@ -195,6 +195,55 @@ test('history and progress start empty after an isolated reset', async ({ page }
   await expect(page.getByText('No practice results yet')).toBeVisible()
 })
 
+test('compatibility bridge stays safe across the curriculum migration boundary', async ({
+  page,
+  request,
+  context,
+}) => {
+  test.slow()
+  await context.grantPermissions(['microphone'], { origin: APP })
+  await processingMocks(page)
+  await logIn(page)
+
+  await page.goto('/home')
+  await expect(page.getByText('Suggested prompt', { exact: true })).toBeVisible()
+  await page.goto('/practice/interview')
+  await expect(
+    page.getByText('Tell me about a time you solved a difficult problem.').first(),
+  ).toBeVisible()
+  await page.getByRole('link', { name: 'Choose this prompt' }).first().click()
+  await recordOne(page)
+  const beforeMigration = await currentState(request)
+  const legacyAttempt = attemptAt(beforeMigration, 0)
+
+  await page.goto('/history')
+  await expect(page.locator(`a[href="/attempts/${legacyAttempt.id}"]`)).toBeVisible()
+  await page.goto('/progress')
+  await expect(page.getByRole('heading', { name: 'Overall trend' })).toBeVisible()
+  await page.goto('/practice/custom')
+  await expect(page.getByRole('heading', { name: 'Practice your own prompt' })).toBeVisible()
+
+  const migration = await request.post(`${MOCK}/__e2e/migrate-curriculum`)
+  expect(migration.ok()).toBe(true)
+
+  await page.goto('/practice/interview')
+  await expect(
+    page.getByText('Tell me about a time you solved a difficult problem.').first(),
+  ).toBeVisible()
+  await expect(page.getByText('Curriculum-only bridge safety prompt.')).toHaveCount(0)
+  await page.goto('/record?prompt=60000000-0000-4000-8000-000000000001')
+  await expect(page.getByRole('heading', { name: 'That prompt is not available' })).toBeVisible()
+
+  await page.goto(`/attempts/${legacyAttempt.id}`)
+  await expect(page.getByText('Overall result')).toBeVisible()
+  await page.goto('/history')
+  await expect(page.locator(`a[href="/attempts/${legacyAttempt.id}"]`)).toBeVisible()
+  await page.goto('/progress')
+  await expect(page.getByRole('heading', { name: 'Overall trend' })).toBeVisible()
+  await page.goto('/practice/custom')
+  await expect(page.getByRole('heading', { name: 'Practice your own prompt' })).toBeVisible()
+})
+
 test('records once, shows processing and v2 results, retries, compares, filters, and deletes', async ({
   page,
   context,

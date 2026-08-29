@@ -19,9 +19,13 @@ import { parseLibraryPrompt } from '@/lib/prompts/selection'
 import type { CreateAttemptPayload } from '@/lib/recording/attempt-payload'
 import { RUBRIC_VERSION } from '@/lib/scoring/v2/contracts'
 import type { PracticeSessionDescriptor } from '@/lib/practice/session'
+import { queryWithFreePracticeVisibilityFallback } from '@/lib/prompts/visibility-compat'
 
 const CREATION_COLUMNS =
   'id, prompt_id, prompt_text, duration_ms, practice_mode, prompt_source, prompt_difficulty, rubric_version, retry_of_attempt_id, client_request_id, metrics, audio_path, transcript, status, failure_code'
+const LEGACY_PROMPT_COLUMNS =
+  'id, text, active, mode, difficulty, target_duration_seconds, collection_id'
+const VISIBLE_PROMPT_COLUMNS = `${LEGACY_PROMPT_COLUMNS}, free_practice_visible`
 
 export type AttemptCreationIntent = 'uploading' | 'abandoned'
 
@@ -70,12 +74,19 @@ async function authoritativeSession(
     return { session: customCreationSession(payload), failed: false }
   }
 
-  const { data, error } = await admin
-    .from('prompts')
-    .select('id, text, active, mode, difficulty, target_duration_seconds, collection_id')
-    .eq('id', payload.promptId ?? '')
-    .eq('active', true)
-    .maybeSingle()
+  const runPromptQuery = async (withVisibility: boolean) => {
+    let request = admin
+      .from('prompts')
+      .select(withVisibility ? VISIBLE_PROMPT_COLUMNS : LEGACY_PROMPT_COLUMNS)
+      .eq('id', payload.promptId ?? '')
+      .eq('active', true)
+    if (withVisibility) request = request.filter('free_practice_visible', 'eq', true)
+    return request.maybeSingle()
+  }
+  const { data, error } = await queryWithFreePracticeVisibilityFallback(
+    () => runPromptQuery(true),
+    () => runPromptQuery(false),
+  )
   if (error) {
     logAttemptDiagnostic('load_library_prompt', 'library_prompt_read_failed', null, error)
     return { session: null, failed: true }

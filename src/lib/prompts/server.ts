@@ -17,13 +17,16 @@ import {
   type RandomSource,
 } from '@/lib/prompts/selection'
 import { createClient } from '@/lib/supabase/server'
+import { queryWithFreePracticeVisibilityFallback } from '@/lib/prompts/visibility-compat'
 
 export type PromptQuery = Omit<PromptLibraryFilters, 'excludeIds'>
 
 export const RECENT_PROMPT_EXCLUSION_LIMIT = 8
 const RECENT_PROMPT_CANDIDATE_LIMIT = 30
 
-const PROMPT_COLUMNS = 'id, text, active, mode, difficulty, target_duration_seconds, collection_id'
+const LEGACY_PROMPT_COLUMNS =
+  'id, text, active, mode, difficulty, target_duration_seconds, collection_id'
+const VISIBLE_PROMPT_COLUMNS = `${LEGACY_PROMPT_COLUMNS}, free_practice_visible`
 
 function collectionFilter(query: PromptQuery): string | null | undefined {
   const collectionId = query.collectionId?.trim()
@@ -52,12 +55,21 @@ async function loadActivePrompts(query: PromptQuery = {}): Promise<DataOutcome<L
   if (collectionId === null) return dataEmpty()
 
   const supabase = await createClient()
-  let request = supabase.from('prompts').select(PROMPT_COLUMNS).eq('active', true)
-  if (query.mode) request = request.eq('mode', query.mode)
-  if (query.difficulty) request = request.eq('difficulty', query.difficulty)
-  if (collectionId) request = request.eq('collection_id', collectionId)
-
-  const { data, error } = await request
+  const runQuery = async (withVisibility: boolean) => {
+    let request = supabase
+      .from('prompts')
+      .select(withVisibility ? VISIBLE_PROMPT_COLUMNS : LEGACY_PROMPT_COLUMNS)
+      .eq('active', true)
+    if (withVisibility) request = request.filter('free_practice_visible', 'eq', true)
+    if (query.mode) request = request.eq('mode', query.mode)
+    if (query.difficulty) request = request.eq('difficulty', query.difficulty)
+    if (collectionId) request = request.eq('collection_id', collectionId)
+    return request
+  }
+  const { data, error } = await queryWithFreePracticeVisibilityFallback(
+    () => runQuery(true),
+    () => runQuery(false),
+  )
   const outcome = promptRowsOutcome(data, Boolean(error))
   if (outcome.status === 'failure') {
     logDataFailure('active_prompt_list', error, error ? undefined : 'invalid_response')
@@ -69,12 +81,19 @@ export async function getPromptById(id: string): Promise<DataOutcome<LibraryProm
   if (!isPromptId(id)) return dataEmpty()
 
   const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('prompts')
-    .select(PROMPT_COLUMNS)
-    .eq('id', id)
-    .eq('active', true)
-    .maybeSingle()
+  const runQuery = async (withVisibility: boolean) => {
+    let request = supabase
+      .from('prompts')
+      .select(withVisibility ? VISIBLE_PROMPT_COLUMNS : LEGACY_PROMPT_COLUMNS)
+      .eq('id', id)
+      .eq('active', true)
+    if (withVisibility) request = request.filter('free_practice_visible', 'eq', true)
+    return request.maybeSingle()
+  }
+  const { data, error } = await queryWithFreePracticeVisibilityFallback(
+    () => runQuery(true),
+    () => runQuery(false),
+  )
 
   const outcome = promptRowOutcome(data, Boolean(error))
   if (outcome.status === 'failure') {

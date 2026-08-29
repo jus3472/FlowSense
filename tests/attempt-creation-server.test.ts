@@ -88,14 +88,16 @@ function storedRow(
   }
 }
 
-function readQuery(result: { data: StoredRow | null; error: unknown }) {
+function readQuery(result: { data: unknown; error: unknown }) {
   const query = {
     select: vi.fn(),
     eq: vi.fn(),
+    filter: vi.fn(),
     maybeSingle: vi.fn(async () => result),
   }
   query.select.mockReturnValue(query)
   query.eq.mockReturnValue(query)
+  query.filter.mockReturnValue(query)
   return query
 }
 
@@ -136,6 +138,75 @@ beforeEach(() => {
 })
 
 describe('server attempt creation reconciliation', () => {
+  it('creates from an active library prompt against the pre-curriculum schema', async () => {
+    const promptId = '40000000-0000-4000-8000-000000000004'
+    const payload: CreateAttemptPayload = {
+      ...PAYLOAD,
+      promptId,
+      promptText: 'Describe a place you know well.',
+      mode: 'practice',
+      source: 'library',
+      additionalContext: undefined,
+    }
+    const missingColumn = {
+      code: '42703',
+      message: 'column prompts.free_practice_visible does not exist',
+    }
+    const existing = readQuery({ data: null, error: null })
+    const firstVisible = readQuery({ data: null, error: missingColumn })
+    const legacyPrompt = readQuery({
+      data: {
+        id: promptId,
+        text: payload.promptText,
+        active: true,
+        mode: 'practice',
+        difficulty: 'beginner',
+        target_duration_seconds: 30,
+        collection_id: 'spontaneous_description',
+      },
+      error: null,
+    })
+    const recheck = readQuery({ data: null, error: missingColumn })
+    const insert = insertQuery({ data: storedRow('uploading'), error: null })
+    const admin = adminFrom(existing, firstVisible, legacyPrompt, recheck, insert)
+
+    await expect(
+      ensureAttemptCreation({
+        admin: admin as never,
+        userId: USER_ID,
+        payload,
+        intent: 'uploading',
+      }),
+    ).resolves.toMatchObject({ status: 'ready', value: { created: true } })
+    expect(legacyPrompt.filter).not.toHaveBeenCalled()
+    expect(insert.insert).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a hidden post-migration prompt at the authoritative creation boundary', async () => {
+    const payload: CreateAttemptPayload = {
+      ...PAYLOAD,
+      promptId: '40000000-0000-4000-8000-000000000004',
+      promptText: 'Forged curriculum prompt.',
+      mode: 'practice',
+      source: 'library',
+      additionalContext: undefined,
+    }
+    const existing = readQuery({ data: null, error: null })
+    const hiddenPrompt = readQuery({ data: null, error: null })
+    const admin = adminFrom(existing, hiddenPrompt)
+
+    await expect(
+      ensureAttemptCreation({
+        admin: admin as never,
+        userId: USER_ID,
+        payload,
+        intent: 'uploading',
+      }),
+    ).resolves.toEqual({ status: 'unavailable' })
+    expect(hiddenPrompt.filter).toHaveBeenCalledWith('free_practice_visible', 'eq', true)
+    expect(admin.from).toHaveBeenCalledTimes(2)
+  })
+
   it('lets abandonment win first with a server id and a recoverable exact pointer', async () => {
     const inserted = storedRow('failed', ATTEMPT_FAILURE_CODES.clientUploadAbandoned)
     const existing = readQuery({ data: null, error: null })
