@@ -393,7 +393,7 @@ test('structured lessons retry thresholds without reducing durable progress', as
 }) => {
   test.slow()
   await context.grantPermissions(['microphone'], { origin: APP })
-  await processingMocks(page, { scores: [64, 74, 84, 72, 68, 73] })
+  await processingMocks(page, { scores: [64, 74, 86, 72, 92, 68, 73] })
   await logIn(page)
 
   const firstLesson = '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1'
@@ -456,46 +456,62 @@ test('structured lessons retry thresholds without reducing durable progress', as
   await expect(page.getByText('Passed', { exact: true })).toHaveCount(1)
   await expect(page.getByText('Not passed', { exact: true })).toHaveCount(1)
 
-  const passedHistoryRow = page.locator('li').filter({
-    has: page.locator(`a[href="/attempts/${passedAttempt.id}"]`),
+  await page.goto(firstLesson)
+  await page.getByRole('link', { name: 'Practice Again' }).click()
+  await recordOne(page)
+  await expect(page.getByText('Best: 86')).toBeVisible()
+  await expect(page.getByLabel('2 of 3 stars').first()).toBeVisible()
+  await page.getByRole('link', { name: 'Retry for 3 stars' }).click()
+  await recordOne(page)
+  await expect(page.getByText('Best: 86')).toBeVisible()
+  await page.getByRole('link', { name: 'Retry for 3 stars' }).click()
+  await recordOne(page)
+  await expect(page.getByText('Best: 92')).toBeVisible()
+  await expect(page.getByLabel('3 of 3 stars').first()).toBeVisible()
+
+  const upgradedRetryState = await currentState(request)
+  const attempt86 = attemptAt(upgradedRetryState, 2)
+  const attempt72 = attemptAt(upgradedRetryState, 3)
+  const attempt92 = attemptAt(upgradedRetryState, 4)
+  expect(attempt72).toMatchObject({
+    score: 72,
+    lesson_id: failedAttempt.lesson_id,
+    retry_of_attempt_id: attempt86.id,
   })
-  await passedHistoryRow.getByRole('button', { name: 'Delete response' }).click()
-  await passedHistoryRow.getByRole('button', { name: 'Confirm delete' }).click()
-  await expect(page.locator(`a[href="/attempts/${passedAttempt.id}"]`)).toHaveCount(0)
+  expect(attempt92).toMatchObject({
+    score: 92,
+    lesson_id: failedAttempt.lesson_id,
+    retry_of_attempt_id: attempt72.id,
+  })
+  expect(lessonBest(upgradedRetryState, failedAttempt.lesson_id)).toMatchObject({
+    best_score: 92,
+    best_attempt_id: attempt92.id,
+  })
+  expect(upgradedRetryState.practiceActivityDays).toHaveLength(1)
+
+  await page.goto('/history')
+  await expect(page.getByText('Beginner · Beginner lesson 1', { exact: true })).toHaveCount(5)
+  await expect(page.getByText('Passed', { exact: true })).toHaveCount(4)
+  await expect(page.getByText('Not passed', { exact: true })).toHaveCount(1)
+
+  const bestHistoryRow = page.locator('li').filter({
+    has: page.locator(`a[href="/attempts/${attempt92.id}"]`),
+  })
+  await bestHistoryRow.getByRole('button', { name: 'Delete response' }).click()
+  await bestHistoryRow.getByRole('button', { name: 'Confirm delete' }).click()
+  await expect(page.locator(`a[href="/attempts/${attempt92.id}"]`)).toHaveCount(0)
   await expect(page.locator(`a[href="/attempts/${failedAttempt.id}"]`)).toBeVisible()
 
   const deletionState = await currentState(request)
   expect(deletionState.practiceActivityDays).toHaveLength(1)
   expect(lessonBest(deletionState, failedAttempt.lesson_id)).toMatchObject({
-    best_score: 74,
+    best_score: 92,
     best_attempt_id: null,
   })
   await page.goto('/home')
   await expect(page.getByText('1 day streak', { exact: true })).toBeVisible()
   await expect(page.getByText('Beginner lesson 2', { exact: true })).toBeVisible()
-
-  await reset(request)
-  await page.goto(firstLesson)
-  await page.getByRole('link', { name: 'Start Lesson' }).click()
-  await recordOne(page)
-  await expect(page.getByText('Best: 84')).toBeVisible()
-  await page.getByRole('link', { name: 'Retry for 3 stars' }).click()
-  await recordOne(page)
-  await expect(page.getByText('Best: 84')).toBeVisible()
-
-  const lowerRetryState = await currentState(request)
-  const attempt84 = attemptAt(lowerRetryState, 0)
-  const attempt72 = attemptAt(lowerRetryState, 1)
-  if (!attempt84.lesson_id) throw new Error('Structured attempt is missing its lesson id.')
-  expect(attempt72).toMatchObject({
-    score: 72,
-    lesson_id: attempt84.lesson_id,
-    retry_of_attempt_id: attempt84.id,
-  })
-  expect(lessonBest(lowerRetryState, attempt84.lesson_id)).toMatchObject({
-    best_score: 84,
-    best_attempt_id: attempt84.id,
-  })
+  await expect(page.getByText('3 / 90 stars', { exact: true })).toBeVisible()
 
   await reset(request, true, { pathSlug: 'interviews', passedLessons: 9 })
   await page.goto('/practice/paths/interviews/lessons/interviews-beginner-10-skill-10')
@@ -528,6 +544,97 @@ test('structured lessons retry thresholds without reducing durable progress', as
     best_score: 73,
     best_attempt_id: attempt73.id,
   })
+})
+
+test('later checkpoints unlock the next chapter and finish the path', async ({
+  page,
+  request,
+  context,
+}) => {
+  test.slow()
+  await context.grantPermissions(['microphone'], { origin: APP })
+  await processingMocks(page, { scores: [68, 73, 74] })
+  await reset(request, true, { pathSlug: 'interviews', passedLessons: 19 })
+  await logIn(page)
+
+  const intermediateCheckpoint =
+    '/practice/paths/interviews/lessons/interviews-intermediate-10-skill-10'
+  await page.goto(intermediateCheckpoint)
+  await page.getByRole('link', { name: 'Start Lesson' }).click()
+  await recordOne(page)
+  await expect(page.getByRole('heading', { name: 'Lesson not passed' })).toBeVisible()
+  await page.goto('/practice/paths/interviews/lessons/interviews-advanced-01-skill-1')
+  await expect(page.getByRole('heading', { name: 'Lesson locked' })).toBeVisible()
+
+  await page.goto(intermediateCheckpoint)
+  await page.getByRole('link', { name: 'Try Again' }).click()
+  await recordOne(page)
+  await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
+  await page.getByRole('link', { name: 'Continue' }).click()
+  await expect(page).toHaveURL(/interviews-advanced-01-skill-1$/)
+  await expect(page.getByRole('heading', { name: 'Advanced lesson 1' })).toBeVisible()
+
+  await reset(request, true, { pathSlug: 'interviews', passedLessons: 29 })
+  await page.goto('/practice/paths/interviews/lessons/interviews-advanced-10-skill-10')
+  await page.getByRole('link', { name: 'Start Lesson' }).click()
+  await recordOne(page)
+  await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
+  await expect(page.getByText('Path complete', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'View Path' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Continue' })).toHaveCount(0)
+
+  await page.goto('/home')
+  await expect(page.getByRole('heading', { name: 'Interviews' })).toBeVisible()
+  await expect(page.getByText('Path complete', { exact: true })).toBeVisible()
+  await expect(page.getByText('30 / 30 lessons passed', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'View Path' })).toBeVisible()
+})
+
+test('structured provider-neutral retry counts activity without changing progress', async ({
+  page,
+  request,
+  context,
+}) => {
+  test.slow()
+  await context.grantPermissions(['microphone'], { origin: APP })
+  await processingMocks(page, { scores: [64] })
+  await logIn(page)
+
+  const firstLesson = '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1'
+  await page.goto(firstLesson)
+  await page.getByRole('link', { name: 'Start Lesson' }).click()
+  await recordOne(page)
+  const scoredState = await currentState(request)
+  const scoredAttempt = attemptAt(scoredState, 0)
+  if (!scoredAttempt.lesson_id) throw new Error('Structured attempt is missing its lesson id.')
+  expect(lessonBest(scoredState, scoredAttempt.lesson_id)?.best_score).toBe(64)
+
+  await page.unroute('**/api/transcribe')
+  await page.unroute('**/api/score')
+  await processingMocks(page, true)
+  await page.getByRole('link', { name: 'Try Again' }).click()
+  await recordOne(page)
+
+  await expect(page.getByRole('heading', { name: 'Result unavailable' })).toBeVisible()
+  await expect(page.getByText('Best: 64')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Try Again' })).toBeVisible()
+  await expect(page.getByText('/ 100', { exact: false })).toHaveCount(0)
+
+  const neutralState = await currentState(request)
+  const neutralAttempt = attemptAt(neutralState, 1)
+  expect(neutralAttempt).toMatchObject({ score: null, lesson_id: scoredAttempt.lesson_id })
+  expect(lessonBest(neutralState, scoredAttempt.lesson_id)).toMatchObject({
+    best_score: 64,
+    best_attempt_id: scoredAttempt.id,
+  })
+  expect(neutralState.practiceActivityDays).toHaveLength(1)
+
+  await page.goto('/home')
+  await expect(page.getByText('1 day streak', { exact: true })).toBeVisible()
+  await expect(page.getByText("Today's practice complete", { exact: true })).toBeVisible()
+  await expect(page.getByText('Best: 64 · Need 70 to continue', { exact: true })).toBeVisible()
+  await page.goto('/practice/paths/interviews/lessons/interviews-beginner-02-skill-2')
+  await expect(page.getByRole('heading', { name: 'Lesson locked' })).toBeVisible()
 })
 
 test('existing user can change Home priority without losing prior path progress', async ({
