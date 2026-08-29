@@ -522,7 +522,11 @@ const server = createServer(async (req, res) => {
   if (url.pathname === '/__e2e/reset' && req.method === 'POST') {
     const input = await body(req)
     reset()
-    if (input.onboarded === false) state.userMetadata = {}
+    if (input.onboarded === false) {
+      state.userMetadata = {}
+      state.profile.timezone = null
+      state.pathPreferences = [{ user_id: USER_ID, path_id: PRACTICE_PATHS[0].id, rank: 0 }]
+    }
     if (input.curriculum) seedLessonProgress(input.curriculum)
     return json(res, 200, state)
   }
@@ -732,6 +736,10 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST') {
       const rawInput = await body(req)
       const input = Array.isArray(rawInput) ? rawInput[0] : rawInput
+      if (table === 'profiles') {
+        Object.assign(state.profile, input)
+        return json(res, 201, singular(req, [selected(state.profile, select)]))
+      }
       if (table === 'attempts') {
         const duplicate = state.attempts.find(
           (attempt) =>
