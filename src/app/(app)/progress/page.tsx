@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { ProgressDashboard } from '@/components/progress/progress-dashboard'
 import { RetryButton } from '@/components/system/retry-button'
 import { ErrorState } from '@/components/ui/error-state'
+import { loadCurriculumOverviewForUser } from '@/lib/curriculum/server'
 import { parseProgressMode } from '@/lib/progress/display'
 import { getProgressDashboardData } from '@/lib/progress/server'
 import { createClient } from '@/lib/supabase/server'
@@ -18,14 +19,18 @@ export default async function ProgressPage({
   const parsed = parseProgressMode((await searchParams).mode)
   if (parsed.status === 'invalid') redirect('/progress')
 
+  const supabase = await createClient()
   const {
     data: { user },
-  } = await (await createClient()).auth.getUser()
+  } = await supabase.auth.getUser()
   if (!user) redirect('/login')
   const mode = parsed.mode
-  const result = await getProgressDashboardData(user.id, { now: new Date(), mode })
+  const [speakingResult, curriculumResult] = await Promise.all([
+    getProgressDashboardData(user.id, { now: new Date(), mode }),
+    loadCurriculumOverviewForUser(supabase, user.id),
+  ])
 
-  if (result.status === 'failure') {
+  if (speakingResult.status === 'failure' && curriculumResult.status !== 'ready') {
     return (
       <ErrorState
         title="Progress is unavailable"
@@ -36,5 +41,12 @@ export default async function ProgressPage({
     )
   }
 
-  return <ProgressDashboard dashboard={result.data} mode={mode} />
+  return (
+    <ProgressDashboard
+      dashboard={speakingResult.status === 'ready' ? speakingResult.data : null}
+      curriculum={curriculumResult.status === 'ready' ? curriculumResult.data : null}
+      curriculumUnavailable={curriculumResult.status !== 'ready'}
+      mode={mode}
+    />
+  )
 }
