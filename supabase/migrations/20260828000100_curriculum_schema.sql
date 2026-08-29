@@ -188,6 +188,139 @@ begin
 end;
 $$;
 
+-- Mirrors the score-affecting core of the application decoder for the frozen
+-- v2.score.1/v2 definition. Database-derived achievements must fail closed if
+-- a stored server result does not match its mode's exact category contract.
+create or replace function public.is_valid_v2_score_payload_for_attempt(
+  payload jsonb,
+  attempt_mode text,
+  attempt_score integer,
+  require_complete boolean
+)
+returns boolean
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  item record;
+  expected_max integer;
+  category_count integer := 0;
+  scored_count integer := 0;
+  earned_sum numeric := 0;
+  component numeric;
+  earned numeric;
+begin
+  if require_complete is null
+    or jsonb_typeof(payload) is distinct from 'object'
+    or payload ->> 'version' is distinct from 'v2.score.1'
+    or payload ->> 'rubric_version' is distinct from 'v2'
+    or payload ->> 'mode' is distinct from attempt_mode
+    or attempt_mode not in ('practice', 'interview', 'presentation', 'conversation')
+    or jsonb_typeof(payload -> 'total_max_points') is distinct from 'number'
+    or (payload ->> 'total_max_points')::numeric <> 100
+    or jsonb_typeof(payload -> 'categories') is distinct from 'object'
+    or jsonb_typeof(payload -> 'warnings') is distinct from 'array'
+    or exists (
+      select 1 from jsonb_array_elements(payload -> 'warnings') as warning(value)
+      where jsonb_typeof(warning.value) <> 'string'
+    ) then
+    return false;
+  end if;
+
+  for item in select key, value from jsonb_each(payload -> 'categories')
+  loop
+    category_count := category_count + 1;
+    expected_max := case attempt_mode
+      when 'practice' then case item.key
+        when 'fluency' then 22 when 'clarity' then 20 when 'vocabulary' then 12
+        when 'grammar' then 12 when 'structure' then 18 when 'delivery' then 16
+      end
+      when 'interview' then case item.key
+        when 'fluency' then 18 when 'clarity' then 22 when 'vocabulary' then 14
+        when 'grammar' then 12 when 'structure' then 22 when 'delivery' then 12
+      end
+      when 'presentation' then case item.key
+        when 'fluency' then 16 when 'clarity' then 20 when 'vocabulary' then 14
+        when 'grammar' then 10 when 'structure' then 20 when 'delivery' then 20
+      end
+      when 'conversation' then case item.key
+        when 'fluency' then 24 when 'clarity' then 22 when 'vocabulary' then 12
+        when 'grammar' then 12 when 'structure' then 14 when 'delivery' then 16
+      end
+    end;
+
+    if expected_max is null
+      or jsonb_typeof(item.value) is distinct from 'object'
+      or item.value ->> 'category' is distinct from item.key
+      or jsonb_typeof(item.value -> 'max_points') is distinct from 'number'
+      or (item.value ->> 'max_points')::numeric <> expected_max
+      or not (item.value ? 'measurements')
+      or jsonb_typeof(item.value -> 'evidence') is distinct from 'array'
+      or jsonb_typeof(item.value -> 'deductions') is distinct from 'array'
+      or jsonb_typeof(item.value -> 'warnings') is distinct from 'array'
+      or exists (
+        select 1 from jsonb_array_elements(item.value -> 'evidence') as evidence(value)
+        where jsonb_typeof(evidence.value) <> 'object'
+      )
+      or exists (
+        select 1 from jsonb_array_elements(item.value -> 'deductions') as deduction(value)
+        where jsonb_typeof(deduction.value) <> 'object'
+      )
+      or exists (
+        select 1 from jsonb_array_elements(item.value -> 'warnings') as warning(value)
+        where jsonb_typeof(warning.value) <> 'string'
+      ) then
+      return false;
+    end if;
+
+    if item.value ->> 'status' = 'scored' then
+      if item.value ->> 'availability' is distinct from 'available'
+        or jsonb_typeof(item.value -> 'component') is distinct from 'number'
+        or jsonb_typeof(item.value -> 'earned_points') is distinct from 'number' then
+        return false;
+      end if;
+      component := (item.value ->> 'component')::numeric;
+      earned := (item.value ->> 'earned_points')::numeric;
+      if component < 0 or component > 1
+        or earned <> round(component * expected_max) then
+        return false;
+      end if;
+      scored_count := scored_count + 1;
+      earned_sum := earned_sum + earned;
+    elsif item.value ->> 'status' = 'not_checked' then
+      if item.value ->> 'availability' is distinct from 'available'
+        or jsonb_typeof(item.value -> 'component') is distinct from 'null'
+        or jsonb_typeof(item.value -> 'earned_points') is distinct from 'null' then
+        return false;
+      end if;
+    elsif item.value ->> 'status' = 'unavailable' then
+      if item.value ->> 'availability' is distinct from 'unavailable'
+        or jsonb_typeof(item.value -> 'component') is distinct from 'null'
+        or jsonb_typeof(item.value -> 'earned_points') is distinct from 'null' then
+        return false;
+      end if;
+    else
+      return false;
+    end if;
+  end loop;
+
+  if category_count <> 6 then return false; end if;
+  if scored_count = 6 then
+    return jsonb_typeof(payload -> 'total_earned_points') = 'number'
+      and attempt_score is not null
+      and attempt_score between 0 and 100
+      and (payload ->> 'total_earned_points')::numeric = attempt_score
+      and earned_sum = attempt_score;
+  end if;
+  return not require_complete
+    and jsonb_typeof(payload -> 'total_earned_points') = 'null'
+    and attempt_score is null;
+exception when others then
+  return false;
+end;
+$$;
+
 -- Every stored best must point to the same user's completed structured attempt.
 -- A deleted attempt may clear the link without changing the durable best score.
 create or replace function public.enforce_lesson_progress_integrity()
@@ -241,33 +374,16 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
-declare
-  total_category_count integer;
-  category_count integer;
-  category_earned numeric;
-  category_max numeric;
 begin
   if new.lesson_id is null
     or new.status <> 'done'
-    or new.score is null
-    or new.score < 0
-    or new.score > 100
     or new.rubric_version is distinct from 'v2'
-    or jsonb_typeof(new.section_scores) is distinct from 'object'
-    or new.section_scores ->> 'version' is distinct from 'v2.score.1'
-    or new.section_scores ->> 'rubric_version' is distinct from 'v2'
-    or new.section_scores ->> 'mode' is distinct from new.practice_mode
-    or jsonb_typeof(new.section_scores -> 'categories') is distinct from 'object' then
-    return new;
-  end if;
-
-  if jsonb_typeof(new.section_scores -> 'total_earned_points') is distinct from 'number'
-    or jsonb_typeof(new.section_scores -> 'total_max_points') is distinct from 'number' then
-    return new;
-  end if;
-
-  if (new.section_scores ->> 'total_earned_points')::numeric <> new.score
-    or (new.section_scores ->> 'total_max_points')::numeric <> 100 then
+    or not public.is_valid_v2_score_payload_for_attempt(
+      new.section_scores,
+      new.practice_mode,
+      new.score,
+      true
+    ) then
     return new;
   end if;
 
@@ -281,31 +397,6 @@ begin
       and lesson.active and chapter.active and path.active
       and path.mode = new.practice_mode
   ) then
-    return new;
-  end if;
-
-  select count(*)::integer
-  into total_category_count
-  from jsonb_object_keys(new.section_scores -> 'categories');
-
-  select
-    count(*)::integer,
-    coalesce(sum((category.value ->> 'earned_points')::numeric), 0),
-    coalesce(sum((category.value ->> 'max_points')::numeric), 0)
-  into category_count, category_earned, category_max
-  from jsonb_each(new.section_scores -> 'categories') as category(key, value)
-  where category.key in ('fluency', 'clarity', 'vocabulary', 'grammar', 'structure', 'delivery')
-    and jsonb_typeof(category.value) = 'object'
-    and category.value ->> 'category' = category.key
-    and category.value ->> 'availability' = 'available'
-    and category.value ->> 'status' = 'scored'
-    and jsonb_typeof(category.value -> 'earned_points') = 'number'
-    and jsonb_typeof(category.value -> 'max_points') = 'number';
-
-  if total_category_count <> 6
-    or category_count <> 6
-    or category_earned <> new.score
-    or category_max <> 100 then
     return new;
   end if;
 
@@ -375,6 +466,8 @@ revoke all on function public.replace_profile_path_preferences(uuid[]) from publ
 grant execute on function public.replace_profile_path_preferences(uuid[])
   to authenticated, service_role;
 revoke all on function public.raise_lesson_progress_from_attempt() from public, anon, authenticated;
+revoke all on function public.is_valid_v2_score_payload_for_attempt(jsonb, text, integer, boolean)
+  from public, anon, authenticated;
 revoke all on function public.enforce_lesson_progress_integrity() from public, anon, authenticated;
 revoke all on function public.enforce_practice_path_identity() from public, anon, authenticated;
 revoke all on function public.enforce_practice_chapter_identity() from public, anon, authenticated;
