@@ -2,6 +2,13 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { reconcileCurrentUserStaleAttempts } from '@/lib/attempts/reconciliation'
 import {
+  CHAPTER_LEVELS,
+  PATH_SLUGS,
+  type ChapterLevel,
+  type PathSlug,
+} from '@/lib/curriculum/contracts'
+import { isPassingScore, starsForScore } from '@/lib/curriculum/thresholds'
+import {
   readHistoryStoredResult,
   summarizeHistoryScoreCohort,
   type HistoryScoreSummary,
@@ -24,7 +31,10 @@ type HistoryAttemptRow = Pick<
   | 'retry_of_attempt_id'
   | 'status'
   | 'failure_code'
+  | 'lesson_id'
 >
+
+type HistoryPageRow = HistoryAttemptRow & { lesson: unknown }
 
 type HistoryScoreRow = Pick<
   AttemptRow,
@@ -57,7 +67,66 @@ function applyMetadataFilter<T>(query: T, metadata: HistoryMetadataFilter): T {
   return query
 }
 
-function historyEntry(row: HistoryAttemptRow): HistoryEntry {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function finiteNumberOrNull(value: unknown): value is number | null {
+  return value === null || (typeof value === 'number' && Number.isFinite(value))
+}
+
+function historyPageRow(value: unknown): HistoryPageRow | null {
+  if (!isRecord(value)) return null
+  if (
+    typeof value.id !== 'string' ||
+    typeof value.created_at !== 'string' ||
+    typeof value.prompt_text !== 'string' ||
+    !finiteNumberOrNull(value.score) ||
+    (value.practice_mode !== null &&
+      !['practice', 'interview', 'presentation', 'conversation'].includes(
+        String(value.practice_mode),
+      )) ||
+    (value.prompt_source !== null &&
+      value.prompt_source !== 'library' &&
+      value.prompt_source !== 'custom') ||
+    (value.retry_of_attempt_id !== null && typeof value.retry_of_attempt_id !== 'string') ||
+    !['done', 'failed', 'timed_out'].includes(String(value.status)) ||
+    (value.failure_code !== null && typeof value.failure_code !== 'string') ||
+    (value.lesson_id !== null && typeof value.lesson_id !== 'string')
+  ) {
+    return null
+  }
+  return value as HistoryPageRow
+}
+
+function parseLessonContext(value: unknown) {
+  if (!isRecord(value) || !isRecord(value.chapter)) return null
+  const chapter = value.chapter
+  const path: unknown = chapter.path
+  if (!isRecord(path)) return null
+  if (
+    typeof value.title !== 'string' ||
+    !Number.isInteger(value.position) ||
+    typeof value.checkpoint !== 'boolean' ||
+    typeof chapter.title !== 'string' ||
+    !CHAPTER_LEVELS.includes(chapter.level as ChapterLevel) ||
+    typeof path.title !== 'string' ||
+    !PATH_SLUGS.includes(path.slug as PathSlug)
+  ) {
+    return null
+  }
+  return {
+    pathSlug: path.slug as PathSlug,
+    pathTitle: path.title,
+    chapterLevel: chapter.level as ChapterLevel,
+    chapterTitle: chapter.title,
+    lessonTitle: value.title,
+    lessonPosition: value.position as number,
+    checkpoint: value.checkpoint,
+  }
+}
+
+function historyEntry(row: HistoryPageRow): HistoryEntry | null {
   const stored =
     row.status === 'done'
       ? readHistoryStoredResult(row.section_scores, row.score)
@@ -66,6 +135,8 @@ function historyEntry(row: HistoryAttemptRow): HistoryEntry {
     row.status === 'done' || row.status === 'failed' || row.status === 'timed_out'
       ? row.status
       : undefined
+  const lesson = row.lesson_id === null ? null : parseLessonContext(row.lesson)
+  if (row.lesson_id !== null && lesson === null) return null
   return {
     id: row.id,
     createdAt: row.created_at,
@@ -77,6 +148,20 @@ function historyEntry(row: HistoryAttemptRow): HistoryEntry {
     retryOfAttemptId: row.retry_of_attempt_id,
     ...(terminalStatus ? { status: terminalStatus } : {}),
     failureCode: row.failure_code,
+    ...(lesson
+      ? {
+          lesson: {
+            ...lesson,
+            stars: starsForScore(stored.score),
+            outcome:
+              stored.score === null
+                ? ('neutral' as const)
+                : isPassingScore(stored.score)
+                  ? ('passed' as const)
+                  : ('not_passed' as const),
+          },
+        }
+      : {}),
   }
 }
 
@@ -143,7 +228,15 @@ export async function loadHistoryPage(
   let pageQuery = supabase
     .from('attempts')
     .select(
-      'id, created_at, prompt_text, score, section_scores, practice_mode, prompt_source, retry_of_attempt_id, status, failure_code',
+      `id, created_at, prompt_text, score, section_scores, practice_mode, prompt_source,
+       retry_of_attempt_id, status, failure_code, lesson_id,
+       lesson:practice_lessons!attempts_lesson_id_fkey(
+         title, position, checkpoint,
+         chapter:practice_chapters!practice_lessons_chapter_id_fkey(
+           title, level,
+           path:practice_paths!practice_chapters_path_id_fkey(slug, title)
+         )
+       )`,
     )
     .eq('user_id', userId)
     .in('status', ['done', 'failed', 'timed_out'])
@@ -154,14 +247,26 @@ export async function loadHistoryPage(
     .range(offset, offset + HISTORY_PAGE_SIZE)
   if (pageResult.error) return { status: 'failure', operation: 'page', error: pageResult.error }
 
-  const rows = pageResult.data ?? []
+  const rawRows: unknown = pageResult.data ?? []
+  if (!Array.isArray(rawRows)) {
+    return { status: 'failure', operation: 'page', error: { code: 'INVALID_RESPONSE' } }
+  }
+  const rows: HistoryEntry[] = []
+  for (const value of rawRows.slice(0, HISTORY_PAGE_SIZE)) {
+    const parsed = historyPageRow(value)
+    const entry = parsed ? historyEntry(parsed) : null
+    if (!entry) {
+      return { status: 'failure', operation: 'page', error: { code: 'INVALID_RESPONSE' } }
+    }
+    rows.push(entry)
+  }
   return {
     status: 'ready',
     data: {
-      entries: rows.slice(0, HISTORY_PAGE_SIZE).map(historyEntry),
+      entries: rows,
       scoreSummary: summary,
       hasAnyEntries: (existenceResult.data?.length ?? 0) > 0,
-      hasNext: rows.length > HISTORY_PAGE_SIZE,
+      hasNext: rawRows.length > HISTORY_PAGE_SIZE,
       hasPrevious: historyQuery.page > 1,
     },
   }

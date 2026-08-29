@@ -1,5 +1,6 @@
 import type { Route } from 'next'
 import { ATTEMPT_FAILURE_CODES, type AttemptStatus } from '@/lib/attempts/lifecycle'
+import type { ChapterLevel, PathSlug, Stars } from '@/lib/curriculum/contracts'
 import { dayKey } from '@/lib/streak'
 import type { PracticeMode, PromptSource } from '@/lib/practice/contracts'
 import type { HistoryResultKind } from '@/lib/results/history-cohort'
@@ -15,6 +16,19 @@ export interface HistoryEntry {
   retryOfAttemptId?: string | null
   status?: Extract<AttemptStatus, 'done' | 'failed' | 'timed_out'>
   failureCode?: string | null
+  lesson?: HistoryLessonContext
+}
+
+export interface HistoryLessonContext {
+  pathSlug: PathSlug
+  pathTitle: string
+  chapterLevel: ChapterLevel
+  chapterTitle: string
+  lessonTitle: string
+  lessonPosition: number
+  checkpoint: boolean
+  stars: Stars
+  outcome: 'passed' | 'not_passed' | 'neutral'
 }
 
 export interface HistoryGroup {
@@ -155,6 +169,12 @@ export function historyMode(entry: HistoryEntry): HistoryMetadataFilter {
 
 /** Concise stored metadata only. Null legacy values deliberately stay neutral. */
 export function historyContext(entry: HistoryEntry): string[] {
+  if (entry.lesson) {
+    return [
+      ...(entry.lesson.checkpoint ? ['Checkpoint'] : []),
+      ...(typeof entry.retryOfAttemptId === 'string' ? ['Retry'] : []),
+    ]
+  }
   const mode = entry.practiceMode ? MODE_LABEL[entry.practiceMode] : 'General'
   return [
     mode,
@@ -171,6 +191,18 @@ export function historyContext(entry: HistoryEntry): string[] {
           ? ['Processing timed out']
           : []),
   ]
+}
+
+export function historyLessonResultLabel(entry: HistoryEntry): string | null {
+  if (!entry.lesson) return null
+  if (entry.lesson.outcome === 'passed') return 'Passed'
+  if (entry.lesson.outcome === 'not_passed') return 'Not passed'
+  return 'Result unavailable'
+}
+
+export function historyStarsLabel(entry: HistoryEntry): string | null {
+  if (!entry.lesson || entry.lesson.stars === 0) return null
+  return `${'★'.repeat(entry.lesson.stars)}${'☆'.repeat(3 - entry.lesson.stars)}`
 }
 
 export function historyScoreLabel(entry: HistoryEntry): string {

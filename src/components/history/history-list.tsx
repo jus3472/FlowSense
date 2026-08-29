@@ -19,7 +19,9 @@ import {
   groupByDay,
   historyContext,
   historyHref,
+  historyLessonResultLabel,
   historyScoreLabel,
+  historyStarsLabel,
   timeLabel,
   type HistoryEntry,
   type HistoryMetadataFilter,
@@ -271,10 +273,17 @@ export function HistoryList({
                   className="bg-surface rounded-card hover:bg-surface-sunken focus:ring-accent-soft flex min-h-20 cursor-pointer items-start justify-between gap-4 p-6 pr-16 transition duration-150 ease-out focus:ring-2"
                 >
                   <div className="min-w-0 flex-1">
+                    {entry.lesson ? (
+                      <p className="text-muted text-xs font-medium">{entry.lesson.pathTitle}</p>
+                    ) : null}
                     <p className="text-foreground min-w-0 text-sm font-medium break-words">
-                      {entry.promptText}
+                      {entry.lesson
+                        ? `${entry.lesson.chapterLevel[0]?.toUpperCase()}${entry.lesson.chapterLevel.slice(1)} · ${entry.lesson.lessonTitle}`
+                        : entry.promptText}
                     </p>
-                    <p className="text-muted mt-1 text-xs">{historyContext(entry).join(' · ')}</p>
+                    {historyContext(entry).length > 0 ? (
+                      <p className="text-muted mt-1 text-xs">{historyContext(entry).join(' · ')}</p>
+                    ) : null}
                     <time
                       dateTime={entry.createdAt}
                       className="numeric text-muted mt-1 block text-xs"
@@ -282,13 +291,26 @@ export function HistoryList({
                       {timeLabel(entry.createdAt)}
                     </time>
                   </div>
-                  <span
-                    className={cn(
-                      'numeric text-foreground shrink-0 text-right',
-                      entry.score === null ? 'w-24 text-xs' : 'w-12 text-lg',
-                    )}
-                  >
-                    {historyScoreLabel(entry)}
+                  <span className="flex shrink-0 flex-col items-end gap-1 text-right">
+                    <span
+                      className={cn(
+                        'numeric text-foreground shrink-0 text-right',
+                        entry.score === null ? 'w-24 text-xs' : 'w-12 text-lg',
+                      )}
+                    >
+                      {historyScoreLabel(entry)}
+                    </span>
+                    {historyStarsLabel(entry) ? (
+                      <span
+                        aria-label={`${entry.lesson?.stars ?? 0} stars`}
+                        className="text-accent text-xs"
+                      >
+                        {historyStarsLabel(entry)}
+                      </span>
+                    ) : null}
+                    {historyLessonResultLabel(entry) ? (
+                      <span className="text-muted text-xs">{historyLessonResultLabel(entry)}</span>
+                    ) : null}
                   </span>
                 </Link>
 

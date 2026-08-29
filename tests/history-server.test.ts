@@ -28,6 +28,8 @@ interface FakeAttempt {
   retry_of_attempt_id: string | null
   status: AttemptStatus
   failure_code: string | null
+  lesson_id: string | null
+  lesson: unknown
 }
 
 interface Operation {
@@ -48,6 +50,8 @@ function attempt(index: number, over: Partial<FakeAttempt> = {}): FakeAttempt {
     retry_of_attempt_id: null,
     status: 'done',
     failure_code: null,
+    lesson_id: null,
+    lesson: null,
     ...over,
   }
 }
@@ -324,6 +328,71 @@ describe('history server loading', () => {
       'attempt-003',
       'attempt-002',
       'attempt-001',
+    ])
+  })
+
+  it('adds authoritative structured lesson context and derives stars from the stored result', async () => {
+    const setup = fakeSupabase([
+      attempt(1, {
+        score: 74,
+        lesson_id: 'lesson-1',
+        retry_of_attempt_id: 'attempt-000',
+        lesson: {
+          title: 'Handling conflict',
+          position: 10,
+          checkpoint: true,
+          chapter: {
+            title: 'Beginner Interviews',
+            level: 'beginner',
+            path: { slug: 'interviews', title: 'Interviews' },
+          },
+        },
+      }),
+      attempt(2, {
+        score: null,
+        section_scores: v2Snapshot({ notCheckedCategory: 'grammar' }) as unknown as Json,
+        lesson_id: 'lesson-2',
+        lesson: {
+          title: 'Explain a result',
+          position: 2,
+          checkpoint: false,
+          chapter: {
+            title: 'Beginner Presentations',
+            level: 'beginner',
+            path: { slug: 'presentations', title: 'Presentations' },
+          },
+        },
+      }),
+    ])
+
+    const result = await loadHistoryPage(setup.client, 'user-1', {
+      metadata: 'all',
+      page: 1,
+    })
+    if (result.status !== 'ready') throw new Error('expected ready history')
+    expect(result.data.entries.map((entry) => entry.lesson)).toEqual([
+      {
+        pathSlug: 'presentations',
+        pathTitle: 'Presentations',
+        chapterLevel: 'beginner',
+        chapterTitle: 'Beginner Presentations',
+        lessonTitle: 'Explain a result',
+        lessonPosition: 2,
+        checkpoint: false,
+        stars: 0,
+        outcome: 'neutral',
+      },
+      {
+        pathSlug: 'interviews',
+        pathTitle: 'Interviews',
+        chapterLevel: 'beginner',
+        chapterTitle: 'Beginner Interviews',
+        lessonTitle: 'Handling conflict',
+        lessonPosition: 10,
+        checkpoint: true,
+        stars: 1,
+        outcome: 'passed',
+      },
     ])
   })
 

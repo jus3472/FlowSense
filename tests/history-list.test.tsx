@@ -284,6 +284,70 @@ describe('HistoryList', () => {
     expect(screen.getByText('Conversation · Custom prompt · Retry')).toBeInTheDocument()
   })
 
+  it('shows structured lesson, stars, pass, checkpoint, and retry context', () => {
+    render(
+      <HistoryList
+        entries={[
+          {
+            ...entries[0]!,
+            score: 74,
+            retryOfAttemptId: 'prior-attempt',
+            lesson: {
+              pathSlug: 'interviews',
+              pathTitle: 'Interviews',
+              chapterLevel: 'beginner',
+              chapterTitle: 'Beginner Interviews',
+              lessonTitle: 'Handling conflict',
+              lessonPosition: 10,
+              checkpoint: true,
+              stars: 1,
+              outcome: 'passed',
+            },
+          },
+        ]}
+        focusPhrase="with less filler"
+      />,
+    )
+
+    expect(screen.getAllByText('Interviews')).toHaveLength(2)
+    expect(screen.getByText('Beginner · Handling conflict')).toBeInTheDocument()
+    expect(screen.getByText('Checkpoint · Retry')).toBeInTheDocument()
+    expect(screen.getByLabelText('1 stars')).toHaveTextContent('★☆☆')
+    expect(screen.getByText('Passed')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Handling conflict/ })).toHaveAttribute(
+      'href',
+      '/attempts/attempt-1',
+    )
+  })
+
+  it('shows a structured below-threshold response as not passed', () => {
+    render(
+      <HistoryList
+        entries={[
+          {
+            ...entries[0]!,
+            score: 64,
+            lesson: {
+              pathSlug: 'presentations',
+              pathTitle: 'Presentations',
+              chapterLevel: 'beginner',
+              chapterTitle: 'Beginner Presentations',
+              lessonTitle: 'Open with one point',
+              lessonPosition: 2,
+              checkpoint: false,
+              stars: 0,
+              outcome: 'not_passed',
+            },
+          },
+        ]}
+        focusPhrase="with less filler"
+      />,
+    )
+
+    expect(screen.getByText('Not passed')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/stars/)).not.toBeInTheDocument()
+  })
+
   it('uses the metadata selector and explains an empty filter', () => {
     render(
       <HistoryList
