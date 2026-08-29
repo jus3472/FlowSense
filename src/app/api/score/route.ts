@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { apiError } from '@/lib/api/responses'
+import { recordPracticeActivityDay } from '@/lib/activity/server'
 import { validateOwnedAttemptAudioPath } from '@/lib/attempts/audio-path'
 import { isLegacyRecheckSnapshot } from '@/lib/attempts/legacy-recheck'
 import {
@@ -357,6 +358,14 @@ export async function POST(request: Request) {
         return apiError('The score could not be saved.', 500)
       }
 
+      await recordPracticeActivityDay(admin, userId, {
+        status: 'done',
+        durationMs: attempt.duration_ms,
+        transcript: attempt.transcript,
+        score: assembled.total_earned_points,
+        sectionScores: assembled,
+      })
+
       return NextResponse.json({
         score: assembled.total_earned_points,
         section_scores: assembled,
@@ -518,6 +527,16 @@ export async function POST(request: Request) {
         )
       }
       return apiError('The score could not be saved.', 500)
+    }
+
+    if (!legacyRecheck) {
+      await recordPracticeActivityDay(admin, userId, {
+        status: 'done',
+        durationMs: attempt.duration_ms,
+        transcript: attempt.transcript,
+        score: assembled.score,
+        sectionScores: assembled.section_scores,
+      })
     }
 
     console.info('[score]', {

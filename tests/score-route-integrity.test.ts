@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   assembleScore: vi.fn(),
   assembleV2Score: vi.fn(),
+  recordPracticeActivityDay: vi.fn(),
   authenticatedAttemptContext: vi.fn(),
   collectPronunciationEvidence: vi.fn(),
   computeMechanical: vi.fn(),
@@ -17,6 +18,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock('server-only', () => ({}))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: vi.fn() }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
+vi.mock('@/lib/activity/server', () => ({
+  recordPracticeActivityDay: mocks.recordPracticeActivityDay,
+}))
 
 vi.mock('@/lib/attempts/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/attempts/server')>()
@@ -301,6 +305,11 @@ beforeEach(() => {
   mocks.isLegacyRecheckSnapshot.mockReturnValue(false)
   mocks.markOwnedAttemptFailure.mockResolvedValue(undefined)
   mocks.transitionOwnedAttempt.mockResolvedValue(true)
+  mocks.recordPracticeActivityDay.mockResolvedValue({
+    status: 'recorded',
+    localDate: '2026-08-28',
+    timezone: 'UTC',
+  })
   mocks.collectPronunciationEvidence.mockResolvedValue(null)
   mocks.deepSeekComplete.mockResolvedValue('{}')
   mocks.computeMechanical.mockReturnValue({
@@ -411,6 +420,7 @@ describe('score route database integrity', () => {
     expect(setup.attempts.update).toHaveBeenCalledTimes(1)
     expect(setup.updateTrace.filters).toContainEqual({ column: 'id', value: ATTEMPT_ID })
     expect(setup.updateTrace.filters).toContainEqual({ column: 'user_id', value: USER_ID })
+    expect(mocks.recordPracticeActivityDay).not.toHaveBeenCalled()
   })
 
   it('passes the shared provider timeout through the route work budget', async () => {
@@ -425,6 +435,16 @@ describe('score route database integrity', () => {
     const response = await POST(scoreRequest())
 
     expect(response.status).toBe(200)
+    expect(mocks.recordPracticeActivityDay).toHaveBeenCalledWith(
+      setup.admin,
+      USER_ID,
+      expect.objectContaining({
+        status: 'done',
+        durationMs: 20_000,
+        transcript: PRIVATE_TRANSCRIPT,
+        score: 82,
+      }),
+    )
     expect(mocks.deepSeekComplete).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ timeoutMs: 30_000 }),
     )

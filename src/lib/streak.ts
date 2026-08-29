@@ -6,6 +6,54 @@ export function dayKey(date: Date): string {
   return `${year}-${month}-${day}`
 }
 
+const LOCAL_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
+
+export interface ActivityStreak {
+  current: number
+  todayActive: boolean
+}
+
+function parseLocalDate(value: string): Date | null {
+  const match = LOCAL_DATE_PATTERN.exec(value)
+  if (!match) return null
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+    ? date
+    : null
+}
+
+function shiftLocalDate(value: string, days: number): string | null {
+  const date = parseLocalDate(value)
+  if (!date) return null
+  date.setUTCDate(date.getUTCDate() + days)
+  return `${date.getUTCFullYear()}-${`${date.getUTCMonth() + 1}`.padStart(2, '0')}-${`${date.getUTCDate()}`.padStart(2, '0')}`
+}
+
+/** Derives the current streak from durable local calendar dates. */
+export function computeActivityStreak(
+  localDates: readonly string[],
+  today: string,
+): ActivityStreak {
+  if (!parseLocalDate(today)) throw new Error('A valid local date is required.')
+
+  const days = new Set(localDates.filter((value) => parseLocalDate(value) !== null))
+  const todayActive = days.has(today)
+  let cursor = todayActive ? today : shiftLocalDate(today, -1)
+  let current = 0
+
+  while (cursor && days.has(cursor)) {
+    current += 1
+    cursor = shiftLocalDate(cursor, -1)
+  }
+
+  return { current, todayActive }
+}
+
 function shiftDays(date: Date, days: number): Date {
   const next = new Date(date)
   next.setDate(next.getDate() + days)

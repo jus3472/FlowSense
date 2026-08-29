@@ -797,6 +797,141 @@ function structuredScorePayload(mode, score, { extraCategory = false } = {}) {
   }
 }
 
+function activityV2Payload(mode, score, neutralCategory = null) {
+  const payload = structuredScorePayload(mode, score ?? 0)
+  const categories = Object.fromEntries(
+    Object.entries(payload.categories).map(([category, value]) => [
+      category,
+      category === neutralCategory
+        ? {
+            ...value,
+            availability: 'available',
+            status: 'not_checked',
+            component: null,
+            earned_points: null,
+            measurements: {},
+            evidence: [],
+            deductions: [],
+            warnings: ['Provider result was unavailable.'],
+          }
+        : {
+            ...value,
+            component: value.earned_points / value.max_points,
+            measurements: {},
+            evidence: [],
+            deductions: [],
+            warnings: [],
+          },
+    ]),
+  )
+  return { ...payload, total_earned_points: score, categories }
+}
+
+function legacyActivityPayload(score) {
+  return {
+    content: {
+      earned: Math.max(0, score - 50),
+      max: 50,
+      checks: {
+        answered: 14,
+        explained: 12,
+        word_choice: 12,
+        logical_order: 7,
+        no_repetition: 5,
+      },
+    },
+    delivery: {
+      earned: Math.min(50, score),
+      max: 50,
+      metrics: {
+        fillers: 18,
+        mid_sentence_pauses: 14,
+        energy: 8,
+        pace: 6,
+        time_to_first_word: 4,
+      },
+    },
+  }
+}
+
+async function assertActivitySecurity(label) {
+  const schema = await client.query(`
+    select
+      (select count(*)::integer from information_schema.columns
+       where table_schema = 'public' and table_name = 'profiles' and column_name = 'timezone')
+        as timezone_columns,
+      (select count(*)::integer from information_schema.tables
+       where table_schema = 'public' and table_name = 'practice_activity_days')
+        as activity_tables
+  `)
+  assert(schema.rows[0]?.timezone_columns === 1, `${label}: profile timezone is missing`)
+  assert(schema.rows[0]?.activity_tables === 1, `${label}: activity day table is missing`)
+
+  const privileges = await client.query(`
+    select privilege_type
+    from information_schema.role_table_grants
+    where table_schema = 'public'
+      and table_name = 'practice_activity_days'
+      and grantee = 'authenticated'
+    order by privilege_type
+  `)
+  assert(
+    JSON.stringify(privileges.rows.map((row) => row.privilege_type)) === '["SELECT"]',
+    `${label}: authenticated activity privileges must be SELECT only`,
+  )
+  const policies = await client.query(`
+    select cmd from pg_policies
+    where schemaname = 'public' and tablename = 'practice_activity_days'
+  `)
+  assert(
+    JSON.stringify(policies.rows) === JSON.stringify([{ cmd: 'SELECT' }]),
+    `${label}: activity owner policy changed`,
+  )
+
+  await client.query("update public.profiles set timezone = 'America/New_York' where id = $1", [
+    USERS.owner,
+  ])
+  await expectPgError(
+    () =>
+      client.query("update public.profiles set timezone = 'Mars/Olympus' where id = $1", [
+        USERS.owner,
+      ]),
+    '23514',
+    `${label}: invalid profile timezone`,
+  )
+  await client.query(
+    `insert into public.practice_activity_days (user_id, local_date, timezone)
+     values ($1, '2030-01-01', 'America/New_York'), ($2, '2030-01-01', 'UTC')
+     on conflict (user_id, local_date) do nothing`,
+    [USERS.owner, USERS.other],
+  )
+
+  await setAuthenticatedUser(USERS.owner)
+  try {
+    const visible = await client.query(
+      "select user_id from public.practice_activity_days where local_date = '2030-01-01'",
+    )
+    assert(
+      JSON.stringify(visible.rows) === JSON.stringify([{ user_id: USERS.owner }]),
+      `${label}: activity owner read leaked`,
+    )
+    await expectPgError(
+      () =>
+        client.query(
+          `insert into public.practice_activity_days (user_id, local_date, timezone)
+           values ($1, '2030-01-02', 'UTC')`,
+          [USERS.owner],
+        ),
+      '42501',
+      `${label}: browser forged an activity day`,
+    )
+  } finally {
+    await resetRole()
+  }
+  await client.query("delete from public.practice_activity_days where local_date >= '2030-01-01'")
+  await client.query('update public.profiles set timezone = null where id = $1', [USERS.owner])
+}
+
 async function assertCurriculumCoverage(label) {
   const counts = await client.query(`
     select
@@ -1157,6 +1292,7 @@ async function runFresh(migrations) {
   await assertNoteFeedbackSecurity('fresh')
   await assertCurriculumCoverage('fresh')
   await assertCurriculumSecurity('fresh')
+  await assertActivitySecurity('fresh')
   await reapplyCurriculumData(migrations, 'fresh')
   console.log('pass fresh migration chain')
 }
@@ -1317,13 +1453,15 @@ async function runUpgrade(migrations) {
   await assertNoteFeedbackSecurity('upgrade')
   await assertCurriculumCoverage('upgrade')
   await assertCurriculumSecurity('upgrade')
+  await assertActivitySecurity('upgrade')
   console.log('pass original-four upgrade chain')
 }
 
 async function runPreCurriculumUpgrade(migrations) {
   await bootstrapSupabaseSurface()
   const preCurriculum = migrations.slice(0, 9)
-  const curriculum = migrations.slice(9)
+  const curriculum = migrations.slice(9, 12)
+  const phase5 = migrations.slice(12)
   assert(
     preCurriculum.at(-1)?.name === 'note_feedback_write_boundary',
     'pre-curriculum boundary must include all nine production migrations',
@@ -1332,6 +1470,10 @@ async function runPreCurriculumUpgrade(migrations) {
     JSON.stringify(curriculum.map(({ name }) => name)) ===
       JSON.stringify(['curriculum_schema', 'curriculum_seed', 'path_preferences_backfill']),
     'expected exactly three curriculum migrations after the production boundary',
+  )
+  assert(
+    JSON.stringify(phase5.map(({ name }) => name)) === JSON.stringify(['practice_activity']),
+    'expected exactly one Phase 5 activity migration',
   )
 
   await applyAll(preCurriculum)
@@ -1506,16 +1648,84 @@ async function runPreCurriculumUpgrade(migrations) {
   await assertAttemptSecurity('pre-curriculum')
   await assertCurriculumSecurity('pre-curriculum')
   await reapplyCurriculumData(migrations, 'pre-curriculum')
+  await applyAll(phase5)
+  await assertActivitySecurity('pre-curriculum')
   console.log('pass nine-migration pre-curriculum upgrade chain')
+}
+
+async function runPrePhase5Upgrade(migrations) {
+  await bootstrapSupabaseSurface()
+  const prePhase5 = migrations.slice(0, 12)
+  const phase5 = migrations.slice(12)
+  assert(
+    prePhase5.at(-1)?.name === 'path_preferences_backfill',
+    'pre-Phase-5 boundary must include the curriculum preference backfill',
+  )
+  assert(
+    JSON.stringify(phase5.map(({ name }) => name)) === JSON.stringify(['practice_activity']),
+    'pre-Phase-5 upgrade must add only practice activity',
+  )
+
+  await applyAll(prePhase5)
+  await seedAuthUser(USERS.owner, 'Pre-Phase-5 Owner')
+  await seedAuthUser(USERS.other, 'Pre-Phase-5 Other')
+  const attempts = await client.query(
+    `insert into public.attempts (
+       user_id, prompt_text, transcript, duration_ms, score, section_scores,
+       practice_mode, rubric_version, status, finished_at, created_at
+     ) values
+       ($1, 'Below pass threshold', 'Valid response one', 30000, 64, $2::jsonb,
+        'practice', null, 'done', '2026-08-27T23:30:00Z', '2026-08-27T23:30:00Z'),
+       ($1, 'Provider incomplete', 'Valid response two', 30000, null, $3::jsonb,
+        'practice', 'v2', 'done', '2026-08-28T00:30:00Z', '2026-08-28T00:30:00Z'),
+       ($1, 'Failed response', 'Not activity', 30000, null, null,
+        'practice', 'v2', 'failed', '2026-08-29T00:30:00Z', '2026-08-29T00:30:00Z')
+     returning id`,
+    [
+      USERS.owner,
+      JSON.stringify(legacyActivityPayload(64)),
+      JSON.stringify(activityV2Payload('practice', null, 'grammar')),
+    ],
+  )
+
+  await applyAll(phase5)
+  const backfilled = await client.query(
+    `select local_date::text, timezone
+     from public.practice_activity_days
+     where user_id = $1 order by local_date`,
+    [USERS.owner],
+  )
+  assert(
+    JSON.stringify(backfilled.rows) ===
+      JSON.stringify([
+        { local_date: '2026-08-27', timezone: 'UTC' },
+        { local_date: '2026-08-28', timezone: 'UTC' },
+      ]),
+    'pre-Phase-5: conservative UTC activity backfill changed',
+  )
+  await client.query('delete from public.attempts where id = any($1::uuid[])', [
+    attempts.rows.map((row) => row.id),
+  ])
+  const afterDelete = await client.query(
+    'select count(*)::integer as count from public.practice_activity_days where user_id = $1',
+    [USERS.owner],
+  )
+  assert(afterDelete.rows[0]?.count === 2, 'pre-Phase-5: attempt deletion erased activity')
+  await assertActivitySecurity('pre-Phase-5')
+  console.log('pass exact pre-Phase-5 upgrade chain')
 }
 
 try {
   await client.connect()
   const migrations = loadMigrations()
-  assert(migrations.length === 12, 'Expected nine production and three curriculum migrations.')
+  assert(
+    migrations.length === 13,
+    'Expected nine production, three curriculum, and one Phase 5 migration.',
+  )
   await runFresh(migrations)
   await runUpgrade(migrations)
   await runPreCurriculumUpgrade(migrations)
+  await runPrePhase5Upgrade(migrations)
   console.log('Migration integration harness passed.')
 } catch (error) {
   console.error(`Migration integration harness failed: ${error.message}`)

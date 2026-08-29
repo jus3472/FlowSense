@@ -21,6 +21,7 @@ export type ProfileRow = {
   id: string
   display_name: string | null
   focus_areas: string[]
+  timezone: string | null
   created_at: string
 }
 
@@ -121,6 +122,13 @@ export type LessonProgressRow = {
   updated_at: string
 }
 
+export type PracticeActivityDayRow = {
+  user_id: string
+  local_date: string
+  timezone: string
+  created_at: string
+}
+
 export type Database = {
   public: {
     Tables: {
@@ -218,6 +226,15 @@ export type Database = {
           best_score: number
         }
         Update: Partial<Omit<LessonProgressRow, 'user_id' | 'lesson_id' | 'created_at'>>
+        Relationships: []
+      }
+      practice_activity_days: {
+        Row: PracticeActivityDayRow
+        Insert: Partial<Omit<PracticeActivityDayRow, 'user_id' | 'local_date'>> & {
+          user_id: string
+          local_date: string
+        }
+        Update: never
         Relationships: []
       }
     }
