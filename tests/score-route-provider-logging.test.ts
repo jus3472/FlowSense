@@ -8,8 +8,13 @@ const mocks = vi.hoisted(() => ({
     console.error({ operation, code, ...(attemptId ? { attemptId } : {}) })
   }),
   markOwnedAttemptFailure: vi.fn(),
+  recordPracticeActivityDay: vi.fn(),
   runContentCheckSafely: vi.fn(),
   transitionOwnedAttempt: vi.fn(),
+}))
+
+vi.mock('@/lib/activity/server', () => ({
+  recordPracticeActivityDay: mocks.recordPracticeActivityDay,
 }))
 
 vi.mock('@/lib/attempts/server', () => ({
@@ -106,6 +111,11 @@ beforeEach(() => {
   }
   mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin })
   mocks.transitionOwnedAttempt.mockResolvedValue(true)
+  mocks.recordPracticeActivityDay.mockResolvedValue({
+    status: 'recorded',
+    localDate: '2026-08-28',
+    timezone: 'UTC',
+  })
   mocks.computeMechanical.mockReturnValue({
     metrics: {},
     pauses: [],
