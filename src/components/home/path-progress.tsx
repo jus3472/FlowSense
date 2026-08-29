@@ -18,12 +18,7 @@ export function HomePrimaryPath({ primary }: { primary: HomeCurriculumModel['pri
         </div>
 
         {primary.pathComplete ? (
-          <div className="flex flex-col gap-2">
-            <p className="text-positive text-base font-medium">Path complete</p>
-            <p className="numeric text-muted text-sm">
-              {primary.passedLessons} / {primary.totalLessons} lessons passed
-            </p>
-          </div>
+          <p className="text-positive text-base font-medium">Path complete</p>
         ) : (
           <div className="flex min-w-0 flex-col gap-2">
             {primary.transitionLabel ? (
