@@ -2,16 +2,18 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const home = readFileSync('src/app/(app)/home/page.tsx', 'utf8')
+const homePaths = readFileSync('src/components/home/path-progress.tsx', 'utf8')
 const record = readFileSync('src/app/(app)/record/page.tsx', 'utf8')
 const modePage = readFileSync('src/app/(app)/practice/[mode]/page.tsx', 'utf8')
 
 describe('practice hub routes', () => {
-  it('keeps the home fast start and browse path visible together', () => {
-    expect(home).toContain('recordHrefForPrompt(recommendedPrompt.id)')
-    expect(home).toContain('Suggested prompt')
-    expect(home).toContain('Start a response')
-    expect(home).toContain('href="/practice"')
-    expect(home).toContain('Browse practice')
+  it('keeps the primary path action and standalone practice choices visible together', () => {
+    expect(home).toContain('HomePrimaryPath')
+    expect(home).toContain('HomeOtherPractice')
+    expect(homePaths).toContain('Free Practice')
+    expect(homePaths).toContain('href="/practice/practice"')
+    expect(homePaths).toContain('Custom Prompt')
+    expect(homePaths).toContain('href="/practice/custom"')
   })
 
   it('uses the server prompt service for mode browsing and validates its route segment', () => {
@@ -41,13 +43,14 @@ describe('practice hub routes', () => {
     )
   })
 
-  it('keeps explicit modes exact and treats recent history only as an exclusion hint', () => {
+  it('keeps explicit modes exact and leaves prompt selection outside Home', () => {
     expect(record).toContain('pickRecordPrompt(')
     expect(record).toContain('requestedMode,')
     expect(record).not.toContain("recentPromptIdsResult.status === 'failure'")
     expect(modePage).toContain('const browseOutcome = await getPromptBrowseData(')
-    expect(home).toContain('responseData?.recentPromptIds ?? []')
-    expect(home).not.toContain('const recommendedOutcome = historyFailed')
+    expect(home).toContain('loadHomeResponseData(supabase, user.id)')
+    expect(home).not.toContain('pickPreferredPracticePrompt')
+    expect(home).not.toContain('recordHrefForPrompt')
   })
 
   it('keeps filter controls and prompt actions mobile-stable and token based', () => {

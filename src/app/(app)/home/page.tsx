@@ -1,16 +1,19 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { LastScore } from '@/components/home/last-score'
+import {
+  HomeOtherPractice,
+  HomePrimaryPath,
+  HomeSecondaryPaths,
+} from '@/components/home/path-progress'
 import { StreakDisplay } from '@/components/home/streak-display'
 import { TrendStrip } from '@/components/home/trend-strip'
 import { RetryButton } from '@/components/system/retry-button'
-import { ButtonLink } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
-import { focusPhrase, practiceModePriority, sanitizeFocusAreas } from '@/lib/focus-areas'
-import { loadHomeResponseData, logHomeDataFailure } from '@/lib/home/server'
-import { formatExpectedDuration, recordHrefForPrompt } from '@/lib/practice/navigation'
-import { pickPreferredPracticePrompt } from '@/lib/prompts/server'
-import { computeStreak } from '@/lib/streak'
+import { loadPracticeActivitySummary } from '@/lib/activity/server'
+import { loadCurriculumOverviewForUser } from '@/lib/curriculum/server'
+import { buildHomeCurriculumModel } from '@/lib/home/progression'
+import { loadHomeResponseData } from '@/lib/home/server'
 import { createClient } from '@/lib/supabase/server'
 
 export const metadata: Metadata = {
@@ -24,78 +27,66 @@ export default async function HomePage() {
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [profileResult, responseResult] = await Promise.all([
-    supabase.from('profiles').select('focus_areas').eq('id', user.id).maybeSingle(),
+  const [activityResult, curriculumResult, responseResult] = await Promise.all([
+    loadPracticeActivitySummary(supabase, user.id),
+    loadCurriculumOverviewForUser(supabase, user.id),
     loadHomeResponseData(supabase, user.id),
   ])
-
-  const areas = sanitizeFocusAreas(profileResult.data?.focus_areas ?? [])
-  const phrase = focusPhrase(areas)
-  if (profileResult.error) {
-    logHomeDataFailure('profile_preferences', 'query', profileResult.error)
-  }
-  const historyFailed = responseResult.status === 'failure'
+  const curriculum =
+    curriculumResult.status === 'ready' ? buildHomeCurriculumModel(curriculumResult.data) : null
+  const responseData = responseResult.status === 'ready' ? responseResult.data : null
   const historyErrorDescription =
     responseResult.status === 'failure' && responseResult.reason === 'invalid_response'
       ? 'Your saved response summary could not be read. Try loading it again.'
       : 'The connection to your account failed. Your recordings are safe.'
-  const responseData = responseResult.status === 'ready' ? responseResult.data : null
-  const recommendedOutcome = await pickPreferredPracticePrompt(
-    practiceModePriority(areas),
-    responseData?.recentPromptIds ?? [],
-  )
-  const recommendedPrompt = recommendedOutcome.status === 'ready' ? recommendedOutcome.data : null
-  const streak = computeStreak(responseData?.timestamps ?? [])
-  const latest = responseData?.latest ?? null
 
   return (
-    <div className="flex flex-col gap-12 pt-4 pb-12">
-      {historyFailed ? null : <StreakDisplay streak={streak} />}
-
-      {recommendedOutcome.status === 'failure' ? (
+    <div className="flex min-w-0 flex-col gap-12 pt-4 pb-12">
+      {activityResult.status === 'ready' ? (
+        <StreakDisplay summary={activityResult.data} />
+      ) : (
         <ErrorState
-          title="Your suggested prompt did not load"
-          description="The connection to the practice library failed. Try loading it again."
+          title="Your practice days did not load"
+          description="Your saved activity is still available. Try loading it again."
         >
           <RetryButton />
         </ErrorState>
-      ) : recommendedPrompt ? (
-        <div className="border-border bg-surface flex flex-col gap-2 rounded-lg border p-4">
-          <p className="text-muted text-sm">Suggested prompt</p>
-          <p className="text-foreground font-medium">{recommendedPrompt.text}</p>
-          <p className="text-muted text-sm">
-            {formatExpectedDuration(recommendedPrompt.targetDurationSeconds)}
-          </p>
-        </div>
-      ) : null}
-      {recommendedOutcome.status === 'failure' ? null : (
-        <ButtonLink
-          href={recommendedPrompt ? recordHrefForPrompt(recommendedPrompt.id) : '/practice/custom'}
-          size="lg"
-          fullWidth
-        >
-          {recommendedPrompt ? 'Start a response' : 'Enter a custom prompt'}
-        </ButtonLink>
       )}
-      <ButtonLink href="/practice" variant="secondary" fullWidth>
-        Browse practice
-      </ButtonLink>
 
-      {historyFailed ? (
+      {curriculum ? (
+        <>
+          <HomePrimaryPath primary={curriculum.primary} />
+          <HomeSecondaryPaths paths={curriculum.secondary} />
+        </>
+      ) : (
+        <ErrorState
+          title="Your path did not load"
+          description="Your lesson progress is still saved. Try loading it again."
+        >
+          <RetryButton />
+        </ErrorState>
+      )}
+
+      <HomeOtherPractice />
+
+      {responseResult.status === 'failure' ? (
         <ErrorState title="Your responses did not load" description={historyErrorDescription}>
           <RetryButton />
         </ErrorState>
       ) : (
-        <>
+        <section aria-labelledby="latest-response-heading" className="flex flex-col gap-4">
+          <h2 id="latest-response-heading" className="text-foreground text-lg font-semibold">
+            Latest response
+          </h2>
           <LastScore
-            attemptId={latest?.attemptId ?? null}
-            score={latest?.score ?? null}
-            summary={latest?.summary ?? null}
-            focusPhrase={phrase}
+            attemptId={responseData?.latest?.attemptId ?? null}
+            score={responseData?.latest?.score ?? null}
+            summary={responseData?.latest?.summary ?? null}
+            focusPhrase="in practice"
             unavailable={responseData?.latestUnavailable ?? false}
           />
           <TrendStrip scores={responseData?.scores ?? []} />
-        </>
+        </section>
       )}
     </div>
   )

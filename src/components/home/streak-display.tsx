@@ -1,21 +1,15 @@
-export function StreakDisplay({ streak }: { streak: number }) {
-  if (streak === 0) {
-    return (
-      <div className="flex flex-col gap-6">
-        <p className="section-label text-muted">No days recorded yet</p>
-        <p className="prompt-display text-foreground text-2xl">One prompt, 60 seconds</p>
-        <p className="text-muted text-base">One response a day is enough to keep it going.</p>
-      </div>
-    )
-  }
+import { Card } from '@/components/ui/card'
+import type { PracticeActivitySummary } from '@/lib/activity/server'
 
+export function StreakDisplay({ summary }: { summary: PracticeActivitySummary }) {
   return (
-    <div className="flex flex-col gap-6">
-      <p className="section-label text-muted">
-        <span className="numeric">{streak}</span> day{streak === 1 ? '' : 's'} in a row
+    <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+      <p className="numeric text-foreground text-base font-medium">{summary.current} day streak</p>
+      <p className={summary.todayActive ? 'text-positive text-sm' : 'text-muted text-sm'}>
+        {summary.dailyGoal === 'complete'
+          ? "Today's practice complete"
+          : 'Complete 1 response today'}
       </p>
-      <p className="prompt-display text-foreground text-2xl">One prompt, 60 seconds</p>
-      <p className="text-muted text-base">Answer today to keep it going.</p>
-    </div>
+    </Card>
   )
 }
