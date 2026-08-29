@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isValidIanaTimezone, localDateKey, safeTimezone } from '@/lib/timezone'
+import { browserTimezone, isValidIanaTimezone, localDateKey, safeTimezone } from '@/lib/timezone'
 
 describe('profile timezone', () => {
   it.each(['UTC', 'America/New_York', 'America/Los_Angeles', 'Europe/London'])(
@@ -15,6 +15,16 @@ describe('profile timezone', () => {
   it('uses UTC when a stored timezone is absent or invalid', () => {
     expect(safeTimezone(null)).toBe('UTC')
     expect(safeTimezone('Mars/Olympus')).toBe('UTC')
+  })
+
+  it('captures a browser timezone and falls back without blocking', () => {
+    expect(browserTimezone(() => 'America/New_York')).toBe('America/New_York')
+    expect(browserTimezone(() => 'Mars/Olympus')).toBe('UTC')
+    expect(
+      browserTimezone(() => {
+        throw new Error('unavailable')
+      }),
+    ).toBe('UTC')
   })
 
   it('uses the local date on opposite sides of midnight', () => {

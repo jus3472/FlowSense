@@ -17,6 +17,17 @@ export function safeTimezone(value: unknown): string {
   return isValidIanaTimezone(value) ? value : UTC_TIMEZONE
 }
 
+/** Reads the browser's current IANA timezone without making the form depend on it. */
+export function browserTimezone(
+  resolve: () => unknown = () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+): string {
+  try {
+    return safeTimezone(resolve())
+  } catch {
+    return UTC_TIMEZONE
+  }
+}
+
 /** Returns the calendar date at one instant in a validated IANA timezone. */
 export function localDateKey(instant: Date, timezone: string): string {
   if (!Number.isFinite(instant.getTime())) throw new Error('A valid instant is required.')

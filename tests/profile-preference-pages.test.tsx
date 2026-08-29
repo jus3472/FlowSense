@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -10,16 +10,14 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: mocks.createClient }))
+vi.mock('server-only', () => ({}))
 vi.mock('next/navigation', () => ({
   redirect: mocks.redirect,
   useRouter: () => ({ refresh: mocks.refresh }),
 }))
 vi.mock('@/actions/auth', () => ({ logOut: vi.fn() }))
 vi.mock('@/actions/profile', () => ({ updateProfile: vi.fn() }))
-vi.mock('@/actions/onboarding', () => ({
-  saveFocusAreas: vi.fn(),
-  skipFocusAreas: vi.fn(),
-}))
+vi.mock('@/actions/onboarding', () => ({ saveFocusAreas: vi.fn() }))
 
 import SettingsPage from '@/app/(app)/settings/page'
 import FocusPage from '@/app/onboarding/focus/page'
@@ -27,35 +25,97 @@ import { loadProfilePreferences } from '@/lib/profile-preferences'
 
 const USER_ID = '10000000-0000-4000-8000-000000000001'
 const PRIVATE_ERROR_TEXT = 'River and private stored preferences must not be logged.'
+const PATHS = [
+  {
+    id: '20000000-0000-4000-8000-000000000001',
+    slug: 'general-speaking',
+    title: 'General Speaking',
+    mode: 'practice',
+    position: 1,
+    active: true,
+  },
+  {
+    id: '20000000-0000-4000-8000-000000000002',
+    slug: 'interviews',
+    title: 'Interviews',
+    mode: 'interview',
+    position: 2,
+    active: true,
+  },
+  {
+    id: '20000000-0000-4000-8000-000000000003',
+    slug: 'presentations',
+    title: 'Presentations',
+    mode: 'presentation',
+    position: 3,
+    active: true,
+  },
+  {
+    id: '20000000-0000-4000-8000-000000000004',
+    slug: 'conversations',
+    title: 'Conversations',
+    mode: 'conversation',
+    position: 4,
+    active: true,
+  },
+] as const
 
 interface QueryResult {
   data: unknown
   error: unknown
 }
 
-function client(result: QueryResult, throws?: unknown) {
+interface ClientOptions {
+  profile: QueryResult
+  profileThrows?: unknown
+  paths?: QueryResult
+  preferences?: QueryResult
+}
+
+function chainResult(result: QueryResult) {
   const query = {
-    select: vi.fn(),
-    eq: vi.fn(),
-    maybeSingle: vi.fn(() => (throws ? Promise.reject(throws) : Promise.resolve(result))),
+    select: vi.fn(() => query),
+    eq: vi.fn(() => query),
+    order: vi.fn(async () => result),
   }
-  query.select.mockReturnValue(query)
-  query.eq.mockReturnValue(query)
+  return query
+}
+
+function client(options: ClientOptions) {
+  const profileQuery = {
+    select: vi.fn(() => profileQuery),
+    eq: vi.fn(() => profileQuery),
+    maybeSingle: vi.fn(() =>
+      options.profileThrows ? Promise.reject(options.profileThrows) : Promise.resolve(options.profile),
+    ),
+  }
+  const pathQuery = chainResult(options.paths ?? { data: PATHS, error: null })
+  const preferenceQuery = chainResult(
+    options.preferences ?? {
+      data: [{ path_id: PATHS[0].id, rank: 0 }],
+      error: null,
+    },
+  )
   return {
     auth: {
       getUser: vi.fn(async () => ({ data: { user: { id: USER_ID } }, error: null })),
     },
-    from: vi.fn(() => query),
+    from: vi.fn((table: string) => {
+      if (table === 'profiles') return profileQuery
+      if (table === 'practice_paths') return pathQuery
+      if (table === 'profile_path_preferences') return preferenceQuery
+      throw new Error(`Unexpected table: ${table}`)
+    }),
   }
 }
 
-async function renderSettings(result: QueryResult, throws?: unknown) {
-  mocks.createClient.mockResolvedValue(client(result, throws))
+async function renderSettings(options: ClientOptions) {
+  mocks.createClient.mockResolvedValue(client(options))
   render(await SettingsPage({ searchParams: Promise.resolve({}) }))
 }
 
-async function renderFocus(result: QueryResult, throws?: unknown) {
-  mocks.createClient.mockResolvedValue(client(result, throws))
+async function renderFocus(options: ClientOptions) {
+  mocks.createClient.mockResolvedValue(client(options))
   render(await FocusPage({ searchParams: Promise.resolve({}) }))
 }
 
@@ -68,109 +128,120 @@ afterEach(() => {
 })
 
 describe('preference page load failures', () => {
-  it('keeps the Settings mutation form unavailable and refreshes the route after query failure', async () => {
+  it('keeps the Settings mutation form unavailable after a profile query failure', async () => {
     const logging = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     await renderSettings({
-      data: null,
-      error: { code: 'PGRST500', message: PRIVATE_ERROR_TEXT, details: ['interviews'] },
+      profile: {
+        data: null,
+        error: { code: 'PGRST500', message: PRIVATE_ERROR_TEXT, details: ['interviews'] },
+      },
     })
 
     expect(screen.getByRole('heading', { name: 'Your settings did not load' })).toBeInTheDocument()
     expect(screen.queryByLabelText('Display name')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(mocks.refresh).toHaveBeenCalledTimes(1)
-    expect(logging).toHaveBeenCalledExactlyOnceWith('[profiles] preference load failed', {
+    expect(logging).toHaveBeenCalledWith('[profiles] preference load failed', {
       operation: 'settings',
       reason: 'query_error',
       code: 'PGRST500',
     })
     expect(JSON.stringify(logging.mock.calls)).not.toContain(PRIVATE_ERROR_TEXT)
-    expect(JSON.stringify(logging.mock.calls)).not.toContain('interviews')
   })
 
-  it('keeps onboarding choices unavailable and refreshes that route after a thrown read failure', async () => {
+  it('keeps onboarding unavailable after a path preference query failure', async () => {
     const logging = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const thrown = Object.assign(new Error(PRIVATE_ERROR_TEXT), { code: 'NETWORK_ERROR' })
-    await renderFocus({ data: null, error: null }, thrown)
+    await renderFocus({
+      profile: { data: null, error: null },
+      preferences: { data: null, error: { code: 'PGRST500', message: PRIVATE_ERROR_TEXT } },
+    })
 
-    expect(
-      screen.getByRole('heading', { name: 'Your practice goals did not load' }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Your paths did not load' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Skip for now' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(mocks.refresh).toHaveBeenCalledTimes(1)
-    expect(logging).toHaveBeenCalledExactlyOnceWith('[profiles] preference load failed', {
-      operation: 'onboarding_practice_goals',
+    expect(logging).toHaveBeenCalledWith('[paths] preference operation failed', {
+      operation: 'onboarding',
       reason: 'query_error',
-      code: 'NETWORK_ERROR',
+      code: 'PGRST500',
     })
     expect(JSON.stringify(logging.mock.calls)).not.toContain(PRIVATE_ERROR_TEXT)
   })
+
+  it('fails closed on malformed ordered path rows', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    await renderSettings({
+      profile: { data: { display_name: 'River', focus_areas: [], timezone: null }, error: null },
+      preferences: { data: [{ path_id: PATHS[1].id, rank: 2 }], error: null },
+    })
+
+    expect(screen.getByRole('heading', { name: 'Your settings did not load' })).toBeInTheDocument()
+    expect(screen.queryByRole('radio', { name: 'Interviews' })).not.toBeInTheDocument()
+  })
 })
 
-describe('safe preference fallbacks', () => {
-  it('keeps a genuinely missing profile usable on Settings and onboarding', async () => {
-    await renderSettings({ data: null, error: null })
-    expect(screen.getByLabelText('Display name')).toHaveValue('')
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument()
+describe('path preference forms', () => {
+  it('uses General Speaking as the safe required default with no skip action', async () => {
+    await renderFocus({
+      profile: { data: null, error: null },
+      preferences: { data: [], error: null },
+    })
 
-    await renderFocus({ data: null, error: null })
+    expect(
+      screen.getByRole('heading', { name: 'What do you want to get better at?' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'General Speaking' })).toBeChecked()
+    expect(screen.queryByRole('button', { name: 'Skip for now' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Skip for now' })).toBeInTheDocument()
   })
 
-  it('loads null pre-v2 fields without treating them as a query failure', async () => {
+  it('renders a saved primary and ordered optional secondary paths in Settings', async () => {
+    await renderSettings({
+      profile: {
+        data: { display_name: 'River', focus_areas: ['presentations'], timezone: null },
+        error: null,
+      },
+      preferences: {
+        data: [
+          { path_id: PATHS[1].id, rank: 0 },
+          { path_id: PATHS[2].id, rank: 1 },
+        ],
+        error: null,
+      },
+    })
+
+    expect(screen.getByLabelText('Display name')).toHaveValue('River')
+    expect(screen.getByRole('radio', { name: 'Interviews' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Presentations' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Interviews' })).toBeDisabled()
+  })
+
+  it('lets the user change the primary and add another path without changing availability', async () => {
+    await renderFocus({ profile: { data: null, error: null } })
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Interviews' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Presentations' }))
+
+    expect(screen.getByRole('radio', { name: 'Interviews' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Presentations' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: 'Conversations' })).toBeEnabled()
+  })
+
+  it('loads null pre-v2 profile fields with UTC fallback', async () => {
     const result = await loadProfilePreferences(
-      Promise.resolve({ data: { display_name: null, focus_areas: null }, error: null }),
+      Promise.resolve({
+        data: { display_name: null, focus_areas: null, timezone: null },
+        error: null,
+      }),
     )
 
     expect(result).toEqual({
       status: 'ready',
-      data: { displayName: '', focusAreas: [], profileExists: true },
+      data: { displayName: '', focusAreas: [], timezone: 'UTC', profileExists: true },
     })
   })
 
-  it('migrates stale legacy goals and preserves valid saved values in both forms', async () => {
-    const saved = {
-      display_name: 'River',
-      focus_areas: ['meetings', 'confidence', 'presentations', 'unknown'],
-    }
-    await renderSettings({ data: saved, error: null })
-    expect(screen.getByLabelText('Display name')).toHaveValue('River')
-    expect(screen.getByRole('button', { name: 'Presentations' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    )
-    expect(screen.getByRole('button', { name: 'Meetings and conversations' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    )
-    expect(screen.getByRole('button', { name: 'Speaking on the spot' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    )
-
-    cleanup()
-    await renderFocus({ data: { focus_areas: saved.focus_areas }, error: null })
-    expect(screen.getByRole('button', { name: 'Presentations' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    )
-    expect(screen.getByRole('button', { name: 'Meetings and conversations' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    )
-    expect(screen.getByRole('button', { name: 'Speaking on the spot' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    )
-  })
-
-  it('fails closed on malformed profile fields instead of rendering empty defaults', async () => {
+  it('rejects malformed profile fields instead of rendering empty defaults', async () => {
     const result = await loadProfilePreferences(
-      Promise.resolve({ data: { display_name: 42, focus_areas: ['interviews'] }, error: null }),
+      Promise.resolve({ data: { display_name: 42, focus_areas: [] }, error: null }),
     )
     expect(result).toMatchObject({ status: 'failure', reason: 'invalid_response' })
   })

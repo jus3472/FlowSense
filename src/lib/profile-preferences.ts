@@ -1,8 +1,10 @@
 import { sanitizeFocusAreas } from '@/lib/focus-areas'
+import { safeTimezone } from '@/lib/timezone'
 
 export interface LoadedProfilePreferences {
   displayName: string
   focusAreas: string[]
+  timezone: string
   profileExists: boolean
 }
 
@@ -33,11 +35,14 @@ function failure(
 }
 
 function parseProfilePreferences(data: unknown): LoadedProfilePreferences | null {
-  if (data === null) return { displayName: '', focusAreas: [], profileExists: false }
+  if (data === null) {
+    return { displayName: '', focusAreas: [], timezone: safeTimezone(null), profileExists: false }
+  }
   if (!isRecord(data)) return null
 
   const displayName = data.display_name
   const focusAreas = data.focus_areas
+  const timezone = data.timezone
   if (displayName !== undefined && displayName !== null && typeof displayName !== 'string') {
     return null
   }
@@ -48,10 +53,12 @@ function parseProfilePreferences(data: unknown): LoadedProfilePreferences | null
   ) {
     return null
   }
+  if (timezone !== undefined && timezone !== null && typeof timezone !== 'string') return null
 
   return {
     displayName: typeof displayName === 'string' ? displayName : '',
     focusAreas: sanitizeFocusAreas(Array.isArray(focusAreas) ? focusAreas : []),
+    timezone: safeTimezone(timezone),
     profileExists: true,
   }
 }

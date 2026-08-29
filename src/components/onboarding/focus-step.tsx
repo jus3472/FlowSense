@@ -1,66 +1,47 @@
 'use client'
 
-import { useState } from 'react'
-import { saveFocusAreas, skipFocusAreas } from '@/actions/onboarding'
+import { saveFocusAreas } from '@/actions/onboarding'
+import { PathPreferenceFields } from '@/components/onboarding/path-preference-fields'
 import { StepFrame } from '@/components/onboarding/step-frame'
-import { Chip } from '@/components/ui/chip'
 import { SubmitButton } from '@/components/ui/submit-button'
-import { FOCUS_AREAS } from '@/lib/focus-areas'
+import type { PathSlug } from '@/lib/curriculum/contracts'
+import type { PathPreferenceOption } from '@/lib/path-preferences'
 
 interface FocusStepProps {
-  initialSelected: string[]
-  saveFailed: boolean
+  paths: readonly PathPreferenceOption[]
+  initialPrimary: PathSlug
+  initialSecondaries: readonly PathSlug[]
+  error: 'primary' | 'save' | null
 }
 
-export function FocusStep({ initialSelected, saveFailed }: FocusStepProps) {
-  const [selected, setSelected] = useState<string[]>(initialSelected)
-
-  const toggle = (id: string) => {
-    setSelected((current) =>
-      current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
-    )
-  }
-
+export function FocusStep({ paths, initialPrimary, initialSecondaries, error }: FocusStepProps) {
   return (
-    <StepFrame step={2} title="What do you want to practice?">
+    <StepFrame step={2} title="What do you want to get better at?">
       <div className="flex flex-col gap-6">
         <p className="text-muted text-base">
-          Pick as many as you want. This shapes your practice suggestions.
+          Choose one primary path and any additional paths you want to follow.
         </p>
 
-        <div className="flex flex-wrap gap-2">
-          {FOCUS_AREAS.map((area) => (
-            <Chip
-              key={area.id}
-              label={area.label}
-              selected={selected.includes(area.id)}
-              onToggle={() => toggle(area.id)}
-            />
-          ))}
-        </div>
-
-        {saveFailed ? (
+        {error ? (
           <p role="alert" className="text-negative text-sm">
-            Your choices did not save. Check your connection and try again.
+            {error === 'primary'
+              ? 'Choose one primary path.'
+              : 'Your choices did not save. Check your connection and try again.'}
           </p>
         ) : null}
 
-        <div className="flex flex-col gap-3">
-          <form action={saveFocusAreas}>
-            {selected.map((id) => (
-              <input key={id} type="hidden" name="focus" value={id} />
-            ))}
+        <form action={saveFocusAreas} className="flex flex-col gap-8">
+          <PathPreferenceFields
+            paths={paths}
+            initialPrimary={initialPrimary}
+            initialSecondaries={initialSecondaries}
+          />
+          <div>
             <SubmitButton size="lg" fullWidth loadingLabel="Saving">
               Continue
             </SubmitButton>
-          </form>
-
-          <form action={skipFocusAreas}>
-            <SubmitButton variant="ghost" fullWidth loadingLabel="Skipping">
-              Skip for now
-            </SubmitButton>
-          </form>
-        </div>
+          </div>
+        </form>
       </div>
     </StepFrame>
   )

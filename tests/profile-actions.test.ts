@@ -9,187 +9,248 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: mocks.createClient }))
+vi.mock('server-only', () => ({}))
 vi.mock('next/navigation', () => ({ redirect: mocks.redirect }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 
-import { saveFocusAreas, skipFocusAreas } from '@/actions/onboarding'
+import { saveFocusAreas } from '@/actions/onboarding'
 import { updateProfile } from '@/actions/profile'
+import { initialProfileFormState } from '@/lib/forms'
 
-const userId = '10000000-0000-4000-8000-000000000001'
+const USER_ID = '10000000-0000-4000-8000-000000000001'
+const PATHS = [
+  {
+    id: '20000000-0000-4000-8000-000000000001',
+    slug: 'general-speaking',
+    title: 'General Speaking',
+    mode: 'practice',
+    position: 1,
+    active: true,
+  },
+  {
+    id: '20000000-0000-4000-8000-000000000002',
+    slug: 'interviews',
+    title: 'Interviews',
+    mode: 'interview',
+    position: 2,
+    active: true,
+  },
+  {
+    id: '20000000-0000-4000-8000-000000000003',
+    slug: 'presentations',
+    title: 'Presentations',
+    mode: 'presentation',
+    position: 3,
+    active: true,
+  },
+  {
+    id: '20000000-0000-4000-8000-000000000004',
+    slug: 'conversations',
+    title: 'Conversations',
+    mode: 'conversation',
+    position: 4,
+    active: true,
+  },
+] as const
 
-interface ProfileWriteResult {
-  data: Record<string, unknown> | null
-  error: { message: string } | null
+interface FakeClientOptions {
+  timezone?: string | null
+  rpcError?: unknown
+  metadataError?: unknown
+  keepReadback?: boolean
+  profileWriteData?: Record<string, unknown> | null
+  profileWriteError?: unknown
 }
 
-function fakeClient(options: {
-  profileResult: ProfileWriteResult
-  metadataError?: { message: string } | null
-}) {
+function fakeClient(options: FakeClientOptions = {}) {
+  let preferenceRows: Array<{ path_id: string; rank: number }> = [
+    { path_id: PATHS[0].id, rank: 0 },
+  ]
+  let profilePayload: Record<string, unknown> | null = null
   const events: string[] = []
-  const upsert = vi.fn((_payload: Record<string, unknown>) => {
-    events.push('profile')
-    return {
-      select: vi.fn(() => ({
-        maybeSingle: vi.fn(async () => options.profileResult),
-      })),
+
+  const profileQuery = {
+    select: vi.fn(() => profileQuery),
+    eq: vi.fn(() => profileQuery),
+    maybeSingle: vi.fn(async () => {
+      if (profilePayload) {
+        return {
+          data:
+            options.profileWriteData === undefined ? { ...profilePayload } : options.profileWriteData,
+          error: options.profileWriteError ?? null,
+        }
+      }
+      return { data: { id: USER_ID, timezone: options.timezone ?? null }, error: null }
+    }),
+    upsert: vi.fn((payload: Record<string, unknown>) => {
+      events.push('profile')
+      profilePayload = payload
+      return profileQuery
+    }),
+  }
+
+  const pathsQuery = {
+    select: vi.fn(() => pathsQuery),
+    eq: vi.fn(() => pathsQuery),
+    order: vi.fn(async () => ({ data: PATHS, error: null })),
+  }
+  const preferencesQuery = {
+    select: vi.fn(() => preferencesQuery),
+    eq: vi.fn(() => preferencesQuery),
+    order: vi.fn(async () => ({ data: preferenceRows, error: null })),
+  }
+  const rpc = vi.fn(async (_name: string, args: { path_ids: string[] }) => {
+    events.push('preferences')
+    if (!options.rpcError && !options.keepReadback) {
+      preferenceRows = args.path_ids.map((pathId, rank) => ({ path_id: pathId, rank }))
     }
+    return { data: null, error: options.rpcError ?? null }
   })
   const updateUser = vi.fn(async () => {
     events.push('metadata')
-    return { data: { user: { id: userId } }, error: options.metadataError ?? null }
+    return { data: { user: { id: USER_ID } }, error: options.metadataError ?? null }
   })
+
   return {
     client: {
       auth: {
-        getUser: vi.fn(async () => ({ data: { user: { id: userId } }, error: null })),
+        getUser: vi.fn(async () => ({ data: { user: { id: USER_ID } }, error: null })),
         updateUser,
       },
-      from: vi.fn(() => ({ upsert })),
+      from: vi.fn((table: string) => {
+        if (table === 'profiles') return profileQuery
+        if (table === 'practice_paths') return pathsQuery
+        if (table === 'profile_path_preferences') return preferencesQuery
+        throw new Error(`Unexpected table: ${table}`)
+      }),
+      rpc,
     },
     events,
+    profileQuery,
+    rpc,
     updateUser,
-    upsert,
   }
 }
 
+function preferenceForm(primary = 'general-speaking', secondaries: string[] = []) {
+  const formData = new FormData()
+  formData.set('primary_path', primary)
+  for (const secondary of secondaries) formData.append('secondary_path', secondary)
+  formData.set('timezone', 'America/New_York')
+  return formData
+}
+
 beforeEach(() => {
-  mocks.createClient.mockReset()
-  mocks.redirect.mockClear()
-  mocks.revalidatePath.mockReset()
+  vi.clearAllMocks()
 })
 
-describe('onboarding profile persistence', () => {
-  it('upserts and verifies mapped preferences before marking onboarding complete', async () => {
-    const setup = fakeClient({
-      profileResult: {
-        data: {
-          id: userId,
-          focus_areas: ['meetings-conversations', 'speaking-on-the-spot'],
-        },
-        error: null,
-      },
-    })
+describe('onboarding path persistence', () => {
+  it('verifies profile, timezone, atomic path order, and readback before completion', async () => {
+    const setup = fakeClient()
     mocks.createClient.mockResolvedValue(setup.client)
-    const formData = new FormData()
-    formData.append('focus', 'meetings')
-    formData.append('focus', 'confidence')
+
+    await expect(
+      saveFocusAreas(preferenceForm('interviews', ['presentations'])),
+    ).rejects.toMatchObject({ path: '/home' })
+
+    expect(setup.events).toEqual(['profile', 'preferences', 'metadata'])
+    expect(setup.profileQuery.upsert).toHaveBeenCalledWith(
+      {
+        id: USER_ID,
+        focus_areas: ['interviews', 'presentations'],
+        timezone: 'America/New_York',
+      },
+      { onConflict: 'id' },
+    )
+    expect(setup.rpc).toHaveBeenCalledWith('replace_profile_path_preferences', {
+      path_ids: [PATHS[1].id, PATHS[2].id],
+    })
+  })
+
+  it('requires a primary path before any authenticated write', async () => {
+    await expect(saveFocusAreas(new FormData())).rejects.toMatchObject({
+      path: '/onboarding/focus?error=primary',
+    })
+    expect(mocks.createClient).not.toHaveBeenCalled()
+  })
+
+  it('uses UTC for an invalid browser timezone', async () => {
+    const setup = fakeClient()
+    mocks.createClient.mockResolvedValue(setup.client)
+    const formData = preferenceForm()
+    formData.set('timezone', 'Mars/Olympus')
 
     await expect(saveFocusAreas(formData)).rejects.toMatchObject({ path: '/home' })
-    expect(setup.events).toEqual(['profile', 'metadata'])
-    expect(setup.upsert).toHaveBeenCalledWith(
-      {
-        id: userId,
-        focus_areas: ['meetings-conversations', 'speaking-on-the-spot'],
-      },
+    expect(setup.profileQuery.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ timezone: 'UTC' }),
       { onConflict: 'id' },
     )
   })
 
-  it.each([
-    { data: null, error: null },
-    { data: null, error: { message: 'write failed' } },
-    { data: { id: 'different-user', focus_areas: [] }, error: null },
-  ])(
-    'does not mark onboarding complete after an unverified profile write',
-    async (profileResult) => {
-      const setup = fakeClient({ profileResult })
+  it('does not overwrite a valid stored timezone', async () => {
+    const setup = fakeClient({ timezone: 'Europe/London' })
+    mocks.createClient.mockResolvedValue(setup.client)
+
+    await expect(saveFocusAreas(preferenceForm())).rejects.toMatchObject({ path: '/home' })
+    expect(setup.profileQuery.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ timezone: 'Europe/London' }),
+      { onConflict: 'id' },
+    )
+  })
+
+  it.each([{ rpcError: { code: 'PGRST500' } }, { keepReadback: true }])(
+    'does not complete onboarding after an atomic save failure or mismatched readback',
+    async (options) => {
+      const setup = fakeClient(options)
       mocks.createClient.mockResolvedValue(setup.client)
 
-      await expect(saveFocusAreas(new FormData())).rejects.toMatchObject({
+      await expect(saveFocusAreas(preferenceForm('interviews'))).rejects.toMatchObject({
         path: '/onboarding/focus?error=save',
       })
       expect(setup.updateUser).not.toHaveBeenCalled()
     },
   )
-
-  it('keeps onboarding recoverable when metadata fails after a durable profile write', async () => {
-    const setup = fakeClient({
-      profileResult: { data: { id: userId, focus_areas: [] }, error: null },
-      metadataError: { message: 'metadata failed' },
-    })
-    mocks.createClient.mockResolvedValue(setup.client)
-
-    await expect(saveFocusAreas(new FormData())).rejects.toMatchObject({
-      path: '/onboarding/focus?error=save',
-    })
-    expect(setup.events).toEqual(['profile', 'metadata'])
-  })
-
-  it('creates a missing profile before completing a skipped preference step', async () => {
-    const setup = fakeClient({
-      profileResult: { data: { id: userId }, error: null },
-    })
-    mocks.createClient.mockResolvedValue(setup.client)
-
-    await expect(skipFocusAreas()).rejects.toMatchObject({ path: '/home' })
-    expect(setup.upsert).toHaveBeenCalledWith({ id: userId }, { onConflict: 'id' })
-    expect(setup.events).toEqual(['profile', 'metadata'])
-  })
 })
 
-describe('settings profile persistence', () => {
-  it('upserts a missing profile and verifies the saved values', async () => {
-    const setup = fakeClient({
-      profileResult: {
-        data: { id: userId, display_name: 'River', focus_areas: ['presentations'] },
-        error: null,
-      },
-    })
+describe('settings path persistence', () => {
+  it('changes the primary path through the atomic RPC without mutating progress or scores', async () => {
+    const setup = fakeClient({ timezone: 'America/Los_Angeles' })
     mocks.createClient.mockResolvedValue(setup.client)
-    const formData = new FormData()
+    const formData = preferenceForm('conversations', ['general-speaking'])
     formData.set('display_name', ' River ')
-    formData.append('focus', 'presentations')
 
-    await expect(
-      updateProfile({ status: 'idle', message: null, displayNameError: null }, formData),
-    ).resolves.toEqual({ status: 'saved', message: 'Saved.', displayNameError: null })
-    expect(setup.upsert).toHaveBeenCalledWith(
-      { id: userId, display_name: 'River', focus_areas: ['presentations'] },
-      { onConflict: 'id' },
-    )
-  })
-
-  it('returns a safe error when an upsert affects no profile row', async () => {
-    const setup = fakeClient({ profileResult: { data: null, error: null } })
-    mocks.createClient.mockResolvedValue(setup.client)
-
-    await expect(
-      updateProfile({ status: 'idle', message: null, displayNameError: null }, new FormData()),
-    ).resolves.toEqual({
-      status: 'error',
-      message: 'Your changes did not save. Check your connection and try again.',
+    await expect(updateProfile(initialProfileFormState, formData)).resolves.toEqual({
+      status: 'saved',
+      message: 'Saved.',
       displayNameError: null,
     })
-  })
-
-  it('round-trips an ordered valid name and practice-goal selection', async () => {
-    const setup = fakeClient({
-      profileResult: {
-        data: {
-          id: userId,
-          display_name: 'River',
-          focus_areas: ['difficult-conversations', 'general-speaking'],
-        },
-        error: null,
-      },
-    })
-    mocks.createClient.mockResolvedValue(setup.client)
-    const formData = new FormData()
-    formData.set('display_name', 'River')
-    formData.append('focus', 'difficult-conversations')
-    formData.append('focus', 'general-speaking')
-
-    await expect(
-      updateProfile({ status: 'idle', message: null, displayNameError: null }, formData),
-    ).resolves.toEqual({ status: 'saved', message: 'Saved.', displayNameError: null })
-    expect(setup.upsert).toHaveBeenCalledWith(
-      {
-        id: userId,
-        display_name: 'River',
-        focus_areas: ['difficult-conversations', 'general-speaking'],
-      },
+    expect(setup.profileQuery.upsert).toHaveBeenCalledWith(
+      { id: USER_ID, display_name: 'River', timezone: 'America/Los_Angeles' },
       { onConflict: 'id' },
     )
+    expect(setup.rpc).toHaveBeenCalledWith('replace_profile_path_preferences', {
+      path_ids: [PATHS[3].id, PATHS[0].id],
+    })
+    expect(setup.client.from).not.toHaveBeenCalledWith('lesson_progress')
+    expect(setup.client.from).not.toHaveBeenCalledWith('attempts')
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/home')
+  })
+
+  it('returns a visible error when the primary path is missing', async () => {
+    await expect(updateProfile(initialProfileFormState, new FormData())).resolves.toEqual({
+      status: 'error',
+      message: 'Choose one primary path.',
+      displayNameError: null,
+    })
+    expect(mocks.createClient).not.toHaveBeenCalled()
+  })
+
+  it('does not report saved when preference readback differs', async () => {
+    const setup = fakeClient({ keepReadback: true })
+    mocks.createClient.mockResolvedValue(setup.client)
+
+    await expect(
+      updateProfile(initialProfileFormState, preferenceForm('interviews')),
+    ).resolves.toMatchObject({ status: 'error' })
   })
 })

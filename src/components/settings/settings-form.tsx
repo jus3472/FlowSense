@@ -1,27 +1,28 @@
 'use client'
 
-import { useActionState, useState } from 'react'
+import { useActionState } from 'react'
 import { updateProfile } from '@/actions/profile'
+import { PathPreferenceFields } from '@/components/onboarding/path-preference-fields'
 import { Button } from '@/components/ui/button'
-import { Chip } from '@/components/ui/chip'
 import { TextField } from '@/components/ui/text-field'
-import { FOCUS_AREAS } from '@/lib/focus-areas'
+import type { PathSlug } from '@/lib/curriculum/contracts'
 import { initialProfileFormState } from '@/lib/forms'
+import type { PathPreferenceOption } from '@/lib/path-preferences'
 
 interface SettingsFormProps {
   displayName: string
-  focusAreas: string[]
+  paths: readonly PathPreferenceOption[]
+  primarySlug: PathSlug
+  secondarySlugs: readonly PathSlug[]
 }
 
-export function SettingsForm({ displayName, focusAreas }: SettingsFormProps) {
-  const [selected, setSelected] = useState<string[]>(focusAreas)
+export function SettingsForm({
+  displayName,
+  paths,
+  primarySlug,
+  secondarySlugs,
+}: SettingsFormProps) {
   const [state, formAction, pending] = useActionState(updateProfile, initialProfileFormState)
-
-  const toggle = (id: string) => {
-    setSelected((current) =>
-      current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
-    )
-  }
 
   return (
     <form action={formAction} className="flex flex-col gap-8">
@@ -35,22 +36,11 @@ export function SettingsForm({ displayName, focusAreas }: SettingsFormProps) {
         error={state.displayNameError}
       />
 
-      <fieldset className="flex flex-col gap-4">
-        <legend className="text-foreground text-sm font-medium">What you want to practice</legend>
-        <div className="flex flex-wrap gap-2">
-          {FOCUS_AREAS.map((area) => (
-            <Chip
-              key={area.id}
-              label={area.label}
-              selected={selected.includes(area.id)}
-              onToggle={() => toggle(area.id)}
-            />
-          ))}
-        </div>
-        {selected.map((id) => (
-          <input key={id} type="hidden" name="focus" value={id} />
-        ))}
-      </fieldset>
+      <PathPreferenceFields
+        paths={paths}
+        initialPrimary={primarySlug}
+        initialSecondaries={secondarySlugs}
+      />
 
       {state.message ? (
         <p
