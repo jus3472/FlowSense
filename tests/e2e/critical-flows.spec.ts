@@ -37,6 +37,13 @@ interface E2EState {
     best_score: number
     best_attempt_id: string | null
   }>
+  pathPreferences: Array<{ user_id: string; path_id: string; rank: number }>
+  practiceActivityDays: Array<{
+    user_id: string
+    local_date: string
+    timezone: string
+    created_at: string
+  }>
   lifecycleEvents: Array<{ attemptId: string; status: string }>
   uploadedObjects: Array<{ name: string; size: number }>
   uploads: number

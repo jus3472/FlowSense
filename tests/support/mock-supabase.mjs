@@ -119,11 +119,13 @@ function reset() {
       id: USER_ID,
       display_name: 'Test Speaker',
       focus_areas: ['interviews'],
+      timezone: 'UTC',
       created_at: '2026-01-01T00:00:00.000Z',
     },
     attempts: [],
     lessonProgress: [],
     pathPreferences: [{ user_id: USER_ID, path_id: PRACTICE_PATHS[1].id, rank: 0 }],
+    practiceActivityDays: [],
     lifecycleEvents: [],
     uploadedObjects: [],
     uploads: 0,
@@ -188,6 +190,23 @@ function selected(row, value) {
   for (const field of value.split(',')) {
     const key = field.trim()
     if (key in row) output[key] = row[key]
+  }
+  if (value.includes('lesson:practice_lessons') && typeof row.lesson_id === 'string') {
+    const lesson = PRACTICE_LESSONS.find((candidate) => candidate.id === row.lesson_id)
+    const chapter = PRACTICE_CHAPTERS.find((candidate) => candidate.id === lesson?.chapter_id)
+    const path = PRACTICE_PATHS.find((candidate) => candidate.id === chapter?.path_id)
+    if (lesson && chapter && path) {
+      output.lesson = {
+        title: lesson.title,
+        position: lesson.position,
+        checkpoint: lesson.checkpoint,
+        chapter: {
+          title: chapter.title,
+          level: chapter.level,
+          path: { slug: path.slug, title: path.title },
+        },
+      }
+    }
   }
   return output
 }
@@ -321,6 +340,22 @@ function queryRows(req, rows, url, paginate = true) {
 
 function timestamp() {
   return new Date(RUN_STARTED_AT + state.clock++ * 1_000).toISOString()
+}
+
+function earnedLocalDate(instant, timezone) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone || 'UTC',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  const parts = Object.fromEntries(
+    formatter
+      .formatToParts(new Date(instant))
+      .filter((part) => ['year', 'month', 'day'].includes(part.type))
+      .map((part) => [part.type, part.value]),
+  )
+  return `${parts.year}-${parts.month}-${parts.day}`
 }
 
 function allocateScore(weights, score) {
@@ -548,6 +583,16 @@ const server = createServer(async (req, res) => {
     attempt.failure_code = null
     state.lifecycleEvents.push({ attemptId: attempt.id, status: 'done' })
     raiseLessonProgress(attempt)
+    const timezone = state.profile.timezone || 'UTC'
+    const localDate = earnedLocalDate(attempt.finished_at, timezone)
+    if (!state.practiceActivityDays.some((day) => day.local_date === localDate)) {
+      state.practiceActivityDays.push({
+        user_id: USER_ID,
+        local_date: localDate,
+        timezone,
+        created_at: timestamp(),
+      })
+    }
     return json(res, 200, {
       score: attempt.score,
       wordCount: attempt.metrics.transcript.words.length,
@@ -636,6 +681,24 @@ const server = createServer(async (req, res) => {
   if (url.pathname.startsWith('/rest/v1/')) {
     const table = url.pathname.split('/').at(-1)
     const select = url.searchParams.get('select')
+    if (table === 'replace_profile_path_preferences' && req.method === 'POST') {
+      const input = await body(req)
+      const pathIds = Array.isArray(input.path_ids) ? input.path_ids : []
+      if (
+        pathIds.length < 1 ||
+        pathIds.length > PRACTICE_PATHS.length ||
+        new Set(pathIds).size !== pathIds.length ||
+        pathIds.some((id) => !PRACTICE_PATHS.some((path) => path.id === id && path.active))
+      ) {
+        return json(res, 400, { code: '23514', message: 'invalid path preferences' })
+      }
+      state.pathPreferences = pathIds.map((pathId, rank) => ({
+        user_id: USER_ID,
+        path_id: pathId,
+        rank,
+      }))
+      return json(res, 200, null)
+    }
     if (req.method === 'GET') {
       const source =
         table === 'profiles'
@@ -654,7 +717,9 @@ const server = createServer(async (req, res) => {
                       ? state.lessonProgress
                       : table === 'profile_path_preferences'
                         ? state.pathPreferences
-                        : []
+                        : table === 'practice_activity_days'
+                          ? state.practiceActivityDays
+                          : []
       const { rows, total } = queryRows(req, source, url)
       const output = rows.map((row) => selected(row, select))
       const { offset } = requestedRange(req, url)
@@ -727,6 +792,9 @@ const server = createServer(async (req, res) => {
       const matched = queryRows(req, state.attempts, url, false).rows
       const doomed = new Set(matched.map((row) => row.id))
       state.attempts = state.attempts.filter((row) => !doomed.has(row.id))
+      for (const progress of state.lessonProgress) {
+        if (doomed.has(progress.best_attempt_id)) progress.best_attempt_id = null
+      }
       return json(
         res,
         200,
