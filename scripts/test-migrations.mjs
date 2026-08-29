@@ -751,28 +751,63 @@ async function assertLifecycleAndIdempotency(label) {
   assert(feedbackFks.rows[0]?.count === 2, `${label}: feedback cascade FKs are missing`)
 }
 
-function structuredScorePayload(mode, score, { extraCategory = false } = {}) {
-  const maximums = {
-    fluency: 20,
+const V2_CATEGORY_WEIGHTS = {
+  practice: { fluency: 22, clarity: 20, vocabulary: 12, grammar: 12, structure: 18, delivery: 16 },
+  interview: { fluency: 18, clarity: 22, vocabulary: 14, grammar: 12, structure: 22, delivery: 12 },
+  presentation: {
+    fluency: 16,
     clarity: 20,
-    vocabulary: 15,
-    grammar: 15,
-    structure: 15,
-    delivery: 15,
+    vocabulary: 14,
+    grammar: 10,
+    structure: 20,
+    delivery: 20,
+  },
+  conversation: {
+    fluency: 24,
+    clarity: 22,
+    vocabulary: 12,
+    grammar: 12,
+    structure: 14,
+    delivery: 16,
+  },
+}
+
+function allocateScore(maximums, score) {
+  const entries = Object.entries(maximums)
+  const raw = entries.map(([, maximum]) => (maximum * score) / 100)
+  const earned = raw.map(Math.floor)
+  let remaining = score - earned.reduce((sum, value) => sum + value, 0)
+  const order = raw
+    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+    .sort((left, right) => right.fraction - left.fraction || left.index - right.index)
+  for (const item of order) {
+    if (remaining <= 0) break
+    earned[item.index] += 1
+    remaining -= 1
   }
-  let remaining = score
+  return Object.fromEntries(entries.map(([category], index) => [category, earned[index]]))
+}
+
+function structuredScorePayload(mode, score, { extraCategory = false } = {}) {
+  const maximums = V2_CATEGORY_WEIGHTS[mode]
+  assert(maximums, `unsupported structured score mode: ${mode}`)
+  const allocated = allocateScore(maximums, score)
   const categories = Object.fromEntries(
     Object.entries(maximums).map(([category, maximum]) => {
-      const earned = Math.min(maximum, remaining)
-      remaining -= earned
+      const earned = allocated[category]
       return [
         category,
         {
           category,
           availability: 'available',
           status: 'scored',
+          component: earned / maximum,
           earned_points: earned,
           max_points: maximum,
+          measurements: {},
+          evidence: [],
+          deductions: [],
+          warnings: [],
         },
       ]
     }),
@@ -782,8 +817,13 @@ function structuredScorePayload(mode, score, { extraCategory = false } = {}) {
       category: 'forged',
       availability: 'available',
       status: 'scored',
+      component: 0,
       earned_points: 0,
       max_points: 0,
+      measurements: {},
+      evidence: [],
+      deductions: [],
+      warnings: [],
     }
   }
   return {
@@ -795,6 +835,46 @@ function structuredScorePayload(mode, score, { extraCategory = false } = {}) {
     categories,
     warnings: [],
   }
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value))
+}
+
+function malformedV2Payloads(mode, score) {
+  const wrongWeights = cloneJson(structuredScorePayload(mode, score))
+  wrongWeights.categories.fluency.max_points += 1
+  wrongWeights.categories.clarity.max_points -= 1
+
+  const missingFields = cloneJson(structuredScorePayload(mode, score))
+  delete missingFields.categories.grammar.component
+
+  const incoherentComponent = cloneJson(structuredScorePayload(mode, score))
+  incoherentComponent.categories.structure.component = 0
+
+  const offsetEarned = cloneJson(structuredScorePayload(mode, score))
+  offsetEarned.categories.fluency.earned_points = -1
+  offsetEarned.categories.fluency.component = -1 / offsetEarned.categories.fluency.max_points
+  offsetEarned.categories.clarity.earned_points +=
+    1 + structuredScorePayload(mode, score).categories.fluency.earned_points
+  offsetEarned.categories.clarity.component =
+    offsetEarned.categories.clarity.earned_points / offsetEarned.categories.clarity.max_points
+
+  const malformedWarnings = cloneJson(structuredScorePayload(mode, score))
+  malformedWarnings.categories.vocabulary.warnings = [42]
+
+  const malformedEvidence = cloneJson(structuredScorePayload(mode, score))
+  malformedEvidence.categories.delivery.evidence = [null]
+
+  return [
+    wrongWeights,
+    missingFields,
+    incoherentComponent,
+    offsetEarned,
+    malformedWarnings,
+    malformedEvidence,
+    structuredScorePayload(mode, score, { extraCategory: true }),
+  ]
 }
 
 function activityV2Payload(mode, score, neutralCategory = null) {
@@ -816,11 +896,6 @@ function activityV2Payload(mode, score, neutralCategory = null) {
           }
         : {
             ...value,
-            component: value.earned_points / value.max_points,
-            measurements: {},
-            evidence: [],
-            deductions: [],
-            warnings: [],
           },
     ]),
   )
@@ -1212,26 +1287,56 @@ async function assertCurriculumSecurity(label) {
     `${label}: direct best-score regression guard`,
   )
 
-  const malformedAttempt = await client.query(
+  for (const [index, payload] of malformedV2Payloads(target.mode, 90).entries()) {
+    const malformedAttempt = await client.query(
+      `insert into public.attempts (
+         user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
+         prompt_difficulty, rubric_version, status, finished_at, score, section_scores
+       ) values ($1, $2, $3, 'Malformed structured snapshot', $4, 'library', 'beginner',
+         'v2', 'done', $5::timestamptz, 90, $6::jsonb)
+       returning id`,
+      [
+        USERS.other,
+        target.prompt_id,
+        target.id,
+        target.mode,
+        `2026-08-28T10:${String(index + 5).padStart(2, '0')}:00Z`,
+        JSON.stringify(payload),
+      ],
+    )
+    const malformedProgress = await client.query(
+      'select count(*)::integer as count from public.lesson_progress where best_attempt_id = $1',
+      [malformedAttempt.rows[0].id],
+    )
+    assert(
+      malformedProgress.rows[0]?.count === 0,
+      `${label}: malformed payload ${index + 1} raised progress`,
+    )
+  }
+
+  const nullScoreAttempt = await client.query(
     `insert into public.attempts (
        user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
        prompt_difficulty, rubric_version, status, finished_at, score, section_scores
-     ) values ($1, $2, $3, 'Malformed structured snapshot', $4, 'library', 'beginner',
-       'v2', 'done', '2026-08-28T10:05:00Z', 90, $5::jsonb)
+     ) values ($1, $2, $3, 'Structured snapshot without attempt score', $4, 'library',
+       'beginner', 'v2', 'done', '2026-08-28T10:20:00Z', null, $5::jsonb)
      returning id`,
     [
       USERS.other,
       target.prompt_id,
       target.id,
       target.mode,
-      JSON.stringify(structuredScorePayload(target.mode, 90, { extraCategory: true })),
+      JSON.stringify(structuredScorePayload(target.mode, 90)),
     ],
   )
-  const malformedProgress = await client.query(
+  const nullScoreProgress = await client.query(
     'select count(*)::integer as count from public.lesson_progress where best_attempt_id = $1',
-    [malformedAttempt.rows[0].id],
+    [nullScoreAttempt.rows[0].id],
   )
-  assert(malformedProgress.rows[0]?.count === 0, `${label}: malformed payload raised progress`)
+  assert(
+    nullScoreProgress.rows[0]?.count === 0,
+    `${label}: scored payload without attempt score raised progress`,
+  )
 
   await client.query('delete from public.attempts where id = $1', [attempts[3].id])
   const afterDelete = await client.query(
@@ -1678,6 +1783,8 @@ async function runPrePhase5Upgrade(migrations) {
         'practice', null, 'done', '2026-08-27T23:30:00Z', '2026-08-27T23:30:00Z'),
        ($1, 'Provider incomplete', 'Valid response two', 30000, null, $3::jsonb,
         'practice', 'v2', 'done', '2026-08-28T00:30:00Z', '2026-08-28T00:30:00Z'),
+       ($1, 'Same day scored response', 'Valid response three', 30000, 84, $4::jsonb,
+        'practice', 'v2', 'done', '2026-08-28T12:30:00Z', '2026-08-28T12:30:00Z'),
        ($1, 'Failed response', 'Not activity', 30000, null, null,
         'practice', 'v2', 'failed', '2026-08-29T00:30:00Z', '2026-08-29T00:30:00Z')
      returning id`,
@@ -1685,8 +1792,26 @@ async function runPrePhase5Upgrade(migrations) {
       USERS.owner,
       JSON.stringify(legacyActivityPayload(64)),
       JSON.stringify(activityV2Payload('practice', null, 'grammar')),
+      JSON.stringify(activityV2Payload('practice', 84)),
     ],
   )
+  const attemptIds = attempts.rows.map((row) => row.id)
+  for (const [index, payload] of malformedV2Payloads('practice', 90).entries()) {
+    const malformed = await client.query(
+      `insert into public.attempts (
+         user_id, prompt_text, transcript, duration_ms, score, section_scores,
+         practice_mode, rubric_version, status, finished_at, created_at
+       ) values ($1, 'Malformed historical response', 'Malformed result', 30000, 90,
+         $2::jsonb, 'practice', 'v2', 'done', $3::timestamptz, $3::timestamptz)
+       returning id`,
+      [
+        USERS.owner,
+        JSON.stringify(payload),
+        `2026-09-${String(index + 1).padStart(2, '0')}T00:30:00Z`,
+      ],
+    )
+    attemptIds.push(malformed.rows[0].id)
+  }
 
   await applyAll(phase5)
   const backfilled = await client.query(
@@ -1703,9 +1828,7 @@ async function runPrePhase5Upgrade(migrations) {
       ]),
     'pre-Phase-5: conservative UTC activity backfill changed',
   )
-  await client.query('delete from public.attempts where id = any($1::uuid[])', [
-    attempts.rows.map((row) => row.id),
-  ])
+  await client.query('delete from public.attempts where id = any($1::uuid[])', [attemptIds])
   const afterDelete = await client.query(
     'select count(*)::integer as count from public.practice_activity_days where user_id = $1',
     [USERS.owner],

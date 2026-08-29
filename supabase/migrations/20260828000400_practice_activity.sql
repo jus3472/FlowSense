@@ -53,11 +53,6 @@ language plpgsql
 set search_path = ''
 as $$
 declare
-  item record;
-  category_count integer := 0;
-  scored_count integer := 0;
-  earned_sum numeric := 0;
-  maximum_sum numeric := 0;
   expected_keys text[];
 begin
   if attempt_status <> 'done'
@@ -72,67 +67,12 @@ begin
     'version', 'rubric_version', 'mode', 'total_earned_points',
     'total_max_points', 'categories'
   ] then
-    if attempt_section_scores ->> 'version' <> 'v2.score.1'
-      or attempt_section_scores ->> 'rubric_version' <> 'v2'
-      or attempt_section_scores ->> 'mode' is distinct from attempt_mode
-      or attempt_mode not in ('practice', 'interview', 'presentation', 'conversation')
-      or jsonb_typeof(attempt_section_scores -> 'total_max_points') <> 'number'
-      or (attempt_section_scores ->> 'total_max_points')::numeric <> 100
-      or jsonb_typeof(attempt_section_scores -> 'categories') <> 'object'
-      or jsonb_typeof(attempt_section_scores -> 'warnings') <> 'array' then
-      return false;
-    end if;
-
-    for item in
-      select key, value from jsonb_each(attempt_section_scores -> 'categories')
-    loop
-      category_count := category_count + 1;
-      if item.key not in ('fluency', 'clarity', 'vocabulary', 'grammar', 'structure', 'delivery')
-        or jsonb_typeof(item.value) <> 'object'
-        or item.value ->> 'category' <> item.key
-        or jsonb_typeof(item.value -> 'max_points') <> 'number'
-        or jsonb_typeof(item.value -> 'evidence') <> 'array'
-        or jsonb_typeof(item.value -> 'deductions') <> 'array'
-        or jsonb_typeof(item.value -> 'warnings') <> 'array'
-        or not (item.value ? 'measurements') then
-        return false;
-      end if;
-
-      maximum_sum := maximum_sum + (item.value ->> 'max_points')::numeric;
-      if item.value ->> 'status' = 'scored' then
-        if item.value ->> 'availability' <> 'available'
-          or jsonb_typeof(item.value -> 'component') <> 'number'
-          or jsonb_typeof(item.value -> 'earned_points') <> 'number' then
-          return false;
-        end if;
-        scored_count := scored_count + 1;
-        earned_sum := earned_sum + (item.value ->> 'earned_points')::numeric;
-      elsif item.value ->> 'status' = 'not_checked' then
-        if item.value ->> 'availability' <> 'available'
-          or jsonb_typeof(item.value -> 'component') <> 'null'
-          or jsonb_typeof(item.value -> 'earned_points') <> 'null' then
-          return false;
-        end if;
-      elsif item.value ->> 'status' = 'unavailable' then
-        if item.value ->> 'availability' <> 'unavailable'
-          or jsonb_typeof(item.value -> 'component') <> 'null'
-          or jsonb_typeof(item.value -> 'earned_points') <> 'null' then
-          return false;
-        end if;
-      else
-        return false;
-      end if;
-    end loop;
-
-    if category_count <> 6 or maximum_sum <> 100 then return false; end if;
-    if scored_count = 6 then
-      return jsonb_typeof(attempt_section_scores -> 'total_earned_points') = 'number'
-        and attempt_score between 0 and 100
-        and (attempt_section_scores ->> 'total_earned_points')::numeric = attempt_score
-        and earned_sum = attempt_score;
-    end if;
-    return jsonb_typeof(attempt_section_scores -> 'total_earned_points') = 'null'
-      and attempt_score is null;
+    return public.is_valid_v2_score_payload_for_attempt(
+      attempt_section_scores,
+      attempt_mode,
+      attempt_score,
+      false
+    );
   end if;
 
   if attempt_score is null or attempt_score not between 0 and 100

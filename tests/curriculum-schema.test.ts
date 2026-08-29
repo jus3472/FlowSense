@@ -8,6 +8,7 @@ const backfill = readFileSync(
   'supabase/migrations/20260828000300_path_preferences_backfill.sql',
   'utf8',
 )
+const activity = readFileSync('supabase/migrations/20260828000400_practice_activity.sql', 'utf8')
 
 const NAMESPACE = 'c8f6a2e4-2d9b-5a1c-8e73-1f4b6d9a2057'
 
@@ -189,8 +190,17 @@ describe('curriculum schema and stable seed', () => {
     expect(schema).toContain('create or replace function public.replace_profile_path_preferences')
     expect(schema).toContain('path_count < 1 or path_count > 4')
     expect(schema).toContain('create or replace function public.raise_lesson_progress_from_attempt')
-    expect(schema).toContain('total_category_count <> 6')
-    expect(schema).toContain("new.section_scores ->> 'version' is distinct from 'v2.score.1'")
+    expect(schema).toContain(
+      'create or replace function public.is_valid_v2_score_payload_for_attempt',
+    )
+    expect(schema).toContain("payload ->> 'version' is distinct from 'v2.score.1'")
+    expect(schema).toContain("(item.value ->> 'max_points')::numeric <> expected_max")
+    expect(schema).toContain('earned <> round(component * expected_max)')
+    expect(schema).toContain('category_count <> 6')
+    expect(schema).toContain('new.section_scores,')
+    expect(activity).toContain('public.is_valid_v2_score_payload_for_attempt(')
+    expect(activity).toContain('attempt_score,')
+    expect(activity).toContain('false')
     expect(schema).toMatch(
       /update of status, score, section_scores, practice_mode, prompt_id, lesson_id, rubric_version/,
     )
