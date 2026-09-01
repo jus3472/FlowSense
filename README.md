@@ -25,6 +25,7 @@ capture data, and scoring results, and must not be rewritten by later rubric cha
 - [PROJECT.md](PROJECT.md) covers product context, architecture, scoring, data, and operational
   risks.
 - [AGENTS.md](AGENTS.md) contains instructions for coding agents working in this repository.
+- [docs/RELEASE.md](docs/RELEASE.md) is the staged Production release and rollback runbook.
 
 ## Run locally
 
