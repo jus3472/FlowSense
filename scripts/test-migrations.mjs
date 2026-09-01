@@ -12,6 +12,7 @@ const USERS = {
   owner: '20000000-0000-4000-8000-000000000002',
   other: '30000000-0000-4000-8000-000000000003',
   signedUpAfterCurriculum: '40000000-0000-4000-8000-000000000008',
+  hardeningSignup: '90000000-0000-4000-8000-000000000009',
 }
 const UPLOAD_ATTEMPTS = {
   owner: '50000000-0000-4000-8000-000000000005',
@@ -183,6 +184,210 @@ async function setAuthenticatedUser(userId) {
 async function resetRole() {
   await client.query('reset role')
   await client.query("select set_config('request.jwt.claim.sub', '', false)")
+}
+
+const HARDENED_TABLE_PRIVILEGES = {
+  practice_paths: {
+    anon: ['SELECT'],
+    authenticated: ['SELECT'],
+    service_role: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'],
+  },
+  practice_chapters: {
+    anon: ['SELECT'],
+    authenticated: ['SELECT'],
+    service_role: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'],
+  },
+  practice_lessons: {
+    anon: ['SELECT'],
+    authenticated: ['SELECT'],
+    service_role: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'],
+  },
+  profile_path_preferences: {
+    anon: [],
+    authenticated: ['SELECT'],
+    service_role: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'],
+  },
+  lesson_progress: {
+    anon: [],
+    authenticated: ['SELECT'],
+    service_role: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'],
+  },
+  practice_activity_days: {
+    anon: [],
+    authenticated: ['SELECT'],
+    service_role: ['INSERT', 'SELECT'],
+  },
+}
+
+const TABLE_PRIVILEGES = [
+  'DELETE',
+  'INSERT',
+  'REFERENCES',
+  'SELECT',
+  'TRIGGER',
+  'TRUNCATE',
+  'UPDATE',
+]
+
+async function assertGrantHardening(label) {
+  const tables = Object.keys(HARDENED_TABLE_PRIVILEGES)
+  const roles = ['anon', 'authenticated', 'service_role']
+  const effective = await client.query(
+    `select target.table_name, target.role_name, target.privilege,
+       has_table_privilege(
+         target.role_name,
+         format('%I.%I', 'public', target.table_name),
+         target.privilege
+       ) as granted
+     from unnest($1::text[]) as tables(table_name)
+     cross join unnest($2::text[]) as roles(role_name)
+     cross join unnest($3::text[]) as privileges(privilege)
+     cross join lateral (
+       select tables.table_name, roles.role_name, privileges.privilege
+     ) as target
+     order by target.table_name, target.role_name, target.privilege`,
+    [tables, roles, TABLE_PRIVILEGES],
+  )
+  for (const table of tables) {
+    for (const role of roles) {
+      const actual = effective.rows
+        .filter((row) => row.table_name === table && row.role_name === role && row.granted)
+        .map((row) => row.privilege)
+      assert(
+        JSON.stringify(actual) === JSON.stringify(HARDENED_TABLE_PRIVILEGES[table][role]),
+        `${label}: ${table} ${role} privileges changed: ${JSON.stringify(actual)}`,
+      )
+    }
+  }
+
+  const rls = await client.query(
+    `select c.relname as table_name, c.relrowsecurity, pg_get_userbyid(c.relowner) as owner
+     from pg_class as c
+     join pg_namespace as n on n.oid = c.relnamespace
+     where n.nspname = 'public' and c.relname = any($1::text[])
+     order by c.relname`,
+    [tables],
+  )
+  assert(
+    rls.rowCount === tables.length && rls.rows.every((row) => row.relrowsecurity === true),
+    `${label}: hardened table RLS changed`,
+  )
+  assert(
+    rls.rows.every((row) => typeof row.owner === 'string' && row.owner.length > 0),
+    `${label}: hardened table ownership is missing`,
+  )
+
+  const browserFunctions = new Set(['replace_profile_path_preferences', 'is_valid_iana_timezone'])
+  const functionNames = [
+    'handle_new_user',
+    'replace_profile_path_preferences',
+    'raise_lesson_progress_from_attempt',
+    'is_valid_v2_score_payload_for_attempt',
+    'enforce_lesson_progress_integrity',
+    'enforce_practice_path_identity',
+    'enforce_practice_chapter_identity',
+    'enforce_practice_lesson_identity',
+    'is_valid_iana_timezone',
+  ]
+  const functionAccess = await client.query(
+    `select p.proname as function_name, target.role_name,
+       has_function_privilege(target.role_name, p.oid, 'EXECUTE') as can_execute
+     from pg_proc as p
+     join pg_namespace as n on n.oid = p.pronamespace
+     cross join unnest($1::text[]) as target(role_name)
+     where n.nspname = 'public' and p.proname = any($2::text[])
+     order by p.proname, target.role_name`,
+    [roles, functionNames],
+  )
+  for (const functionName of functionNames) {
+    for (const role of roles) {
+      const actual = functionAccess.rows.find(
+        (row) => row.function_name === functionName && row.role_name === role,
+      )?.can_execute
+      const expected =
+        role === 'service_role' || (role === 'authenticated' && browserFunctions.has(functionName))
+      assert(actual === expected, `${label}: ${functionName} ${role} EXECUTE changed`)
+    }
+  }
+
+  await client.query('set role anon')
+  try {
+    const curriculum = await client.query(`select
+      (select count(*)::integer from public.practice_paths) as paths,
+      (select count(*)::integer from public.practice_chapters) as chapters,
+      (select count(*)::integer from public.practice_lessons) as lessons`)
+    assert(
+      curriculum.rows[0]?.paths === 4 &&
+        curriculum.rows[0]?.chapters === 12 &&
+        curriculum.rows[0]?.lessons === 120,
+      `${label}: anonymous curriculum read failed`,
+    )
+    await expectPgError(
+      () =>
+        client.query("update public.practice_paths set title = title where slug = 'interviews'"),
+      '42501',
+      `${label}: anonymous curriculum update`,
+    )
+  } finally {
+    await resetRole()
+  }
+
+  await setAuthenticatedUser(USERS.owner)
+  try {
+    await expectPgError(
+      () =>
+        client.query("update public.practice_paths set title = title where slug = 'interviews'"),
+      '42501',
+      `${label}: authenticated curriculum update`,
+    )
+  } finally {
+    await resetRole()
+  }
+
+  await seedAuthUser(USERS.hardeningSignup, 'Hardening Signup')
+  const signupRows = await client.query(
+    `select
+       (select count(*)::integer from public.profiles where id = $1) as profiles,
+       (select count(*)::integer from public.profile_path_preferences where user_id = $1) as preferences`,
+    [USERS.hardeningSignup],
+  )
+  assert(
+    signupRows.rows[0]?.profiles === 1 && signupRows.rows[0]?.preferences === 1,
+    `${label}: hardened signup trigger failed`,
+  )
+
+  const progress = await client.query(
+    'select user_id, lesson_id from public.lesson_progress order by updated_at limit 1',
+  )
+  assert(progress.rowCount === 1, `${label}: progress service-write fixture is missing`)
+  await client.query('set role service_role')
+  try {
+    const curriculumUpdate = await client.query(
+      "update public.practice_paths set title = title where slug = 'interviews' returning id",
+    )
+    assert(curriculumUpdate.rowCount === 1, `${label}: service curriculum update failed`)
+    const preferenceUpdate = await client.query(
+      `update public.profile_path_preferences set updated_at = updated_at
+       where user_id = $1 returning user_id`,
+      [USERS.hardeningSignup],
+    )
+    assert(preferenceUpdate.rowCount === 1, `${label}: service preference update failed`)
+    const progressUpdate = await client.query(
+      `update public.lesson_progress set best_score = best_score
+       where user_id = $1 and lesson_id = $2 returning user_id`,
+      [progress.rows[0].user_id, progress.rows[0].lesson_id],
+    )
+    assert(progressUpdate.rowCount === 1, `${label}: service progress update failed`)
+    const activityInsert = await client.query(
+      `insert into public.practice_activity_days (user_id, local_date, timezone)
+       values ($1, '2031-01-01', 'UTC') returning user_id`,
+      [USERS.hardeningSignup],
+    )
+    assert(activityInsert.rowCount === 1, `${label}: service activity insert failed`)
+  } finally {
+    await resetRole()
+  }
+  await client.query('delete from auth.users where id = $1', [USERS.hardeningSignup])
 }
 
 async function assertAttemptSecurity(label) {
@@ -1381,6 +1586,43 @@ async function reapplyCurriculumData(migrations, label) {
   await assertCurriculumCoverage(`${label} reapplied`)
 }
 
+async function reproduceProductionDefaultTablePrivileges() {
+  await client.query(`
+    grant all privileges on table
+      public.practice_paths,
+      public.practice_chapters,
+      public.practice_lessons,
+      public.profile_path_preferences,
+      public.lesson_progress,
+      public.practice_activity_days
+    to anon, authenticated, service_role;
+
+    revoke insert, update, delete on table
+      public.profile_path_preferences,
+      public.lesson_progress,
+      public.practice_activity_days
+    from public, anon, authenticated;
+  `)
+}
+
+async function assertProductionGrantMismatchFixture(label) {
+  const mismatch = await client.query(`select
+    has_table_privilege('anon', 'public.practice_paths', 'TRUNCATE')
+      as anonymous_curriculum_truncate,
+    has_table_privilege('authenticated', 'public.practice_paths', 'UPDATE')
+      as authenticated_curriculum_update,
+    has_table_privilege('anon', 'public.profile_path_preferences', 'SELECT')
+      as anonymous_preference_select,
+    has_table_privilege('service_role', 'public.practice_activity_days', 'DELETE')
+      as service_activity_delete,
+    has_function_privilege('anon', 'public.handle_new_user()', 'EXECUTE')
+      as anonymous_signup_trigger_execute`)
+  assert(
+    Object.values(mismatch.rows[0] ?? {}).every((value) => value === true),
+    `${label}: Production grant mismatch fixture did not reproduce`,
+  )
+}
+
 async function runFresh(migrations) {
   await bootstrapSupabaseSurface()
   await seedAuthUser(USERS.missingProfile, 'Backfilled Fresh')
@@ -1399,6 +1641,7 @@ async function runFresh(migrations) {
   await assertCurriculumSecurity('fresh')
   await assertActivitySecurity('fresh')
   await reapplyCurriculumData(migrations, 'fresh')
+  await assertGrantHardening('fresh')
   console.log('pass fresh migration chain')
 }
 
@@ -1559,6 +1802,7 @@ async function runUpgrade(migrations) {
   await assertCurriculumCoverage('upgrade')
   await assertCurriculumSecurity('upgrade')
   await assertActivitySecurity('upgrade')
+  await assertGrantHardening('upgrade')
   console.log('pass original-four upgrade chain')
 }
 
@@ -1566,7 +1810,8 @@ async function runPreCurriculumUpgrade(migrations) {
   await bootstrapSupabaseSurface()
   const preCurriculum = migrations.slice(0, 9)
   const curriculum = migrations.slice(9, 12)
-  const phase5 = migrations.slice(12)
+  const phase5 = migrations.slice(12, 13)
+  const hardening = migrations.slice(13)
   assert(
     preCurriculum.at(-1)?.name === 'note_feedback_write_boundary',
     'pre-curriculum boundary must include all nine production migrations',
@@ -1579,6 +1824,11 @@ async function runPreCurriculumUpgrade(migrations) {
   assert(
     JSON.stringify(phase5.map(({ name }) => name)) === JSON.stringify(['practice_activity']),
     'expected exactly one Phase 5 activity migration',
+  )
+  assert(
+    JSON.stringify(hardening.map(({ name }) => name)) ===
+      JSON.stringify(['curriculum_grant_hardening']),
+    'expected exactly one curriculum grant-hardening migration',
   )
 
   await applyAll(preCurriculum)
@@ -1755,13 +2005,16 @@ async function runPreCurriculumUpgrade(migrations) {
   await reapplyCurriculumData(migrations, 'pre-curriculum')
   await applyAll(phase5)
   await assertActivitySecurity('pre-curriculum')
+  await applyAll(hardening)
+  await assertGrantHardening('pre-curriculum')
   console.log('pass nine-migration pre-curriculum upgrade chain')
 }
 
 async function runPrePhase5Upgrade(migrations) {
   await bootstrapSupabaseSurface()
   const prePhase5 = migrations.slice(0, 12)
-  const phase5 = migrations.slice(12)
+  const phase5 = migrations.slice(12, 13)
+  const hardening = migrations.slice(13)
   assert(
     prePhase5.at(-1)?.name === 'path_preferences_backfill',
     'pre-Phase-5 boundary must include the curriculum preference backfill',
@@ -1769,6 +2022,11 @@ async function runPrePhase5Upgrade(migrations) {
   assert(
     JSON.stringify(phase5.map(({ name }) => name)) === JSON.stringify(['practice_activity']),
     'pre-Phase-5 upgrade must add only practice activity',
+  )
+  assert(
+    JSON.stringify(hardening.map(({ name }) => name)) ===
+      JSON.stringify(['curriculum_grant_hardening']),
+    'pre-Phase-5 upgrade must end with curriculum grant hardening',
   )
 
   await applyAll(prePhase5)
@@ -1835,20 +2093,56 @@ async function runPrePhase5Upgrade(migrations) {
   )
   assert(afterDelete.rows[0]?.count === 2, 'pre-Phase-5: attempt deletion erased activity')
   await assertActivitySecurity('pre-Phase-5')
+  await applyAll(hardening)
+  await assertCurriculumSecurity('pre-Phase-5')
+  await assertGrantHardening('pre-Phase-5')
   console.log('pass exact pre-Phase-5 upgrade chain')
+}
+
+async function runGrantHardeningUpgrade(migrations) {
+  await bootstrapSupabaseSurface()
+  const currentProduction = migrations.slice(0, 13)
+  const hardening = migrations.slice(13)
+  assert(
+    currentProduction.at(-1)?.name === 'practice_activity',
+    'grant-hardening upgrade must start from the exact 13-migration state',
+  )
+  assert(
+    JSON.stringify(hardening.map(({ name }) => name)) ===
+      JSON.stringify(['curriculum_grant_hardening']),
+    'grant-hardening upgrade must apply only the new security migration',
+  )
+
+  await seedAuthUser(USERS.missingProfile, 'Hardening Upgrade General')
+  await seedAuthUser(USERS.owner, 'Hardening Upgrade Owner')
+  await seedAuthUser(USERS.other, 'Hardening Upgrade Other')
+  await applyAll(currentProduction)
+  await reproduceProductionDefaultTablePrivileges()
+  await assertProductionGrantMismatchFixture('grant-hardening upgrade')
+
+  await applyAll(hardening)
+  await assertCurriculumCoverage('grant-hardening upgrade')
+  await assertCurriculumSecurity('grant-hardening upgrade')
+  await assertActivitySecurity('grant-hardening upgrade')
+  await assertGrantHardening('grant-hardening upgrade')
+
+  await applyAll(hardening)
+  await assertGrantHardening('grant-hardening reapplied')
+  console.log('pass exact 13-migration Production grant-hardening upgrade')
 }
 
 try {
   await client.connect()
   const migrations = loadMigrations()
   assert(
-    migrations.length === 13,
-    'Expected nine production, three curriculum, and one Phase 5 migration.',
+    migrations.length === 14,
+    'Expected nine production, three curriculum, one Phase 5, and one hardening migration.',
   )
   await runFresh(migrations)
   await runUpgrade(migrations)
   await runPreCurriculumUpgrade(migrations)
   await runPrePhase5Upgrade(migrations)
+  await runGrantHardeningUpgrade(migrations)
   console.log('Migration integration harness passed.')
 } catch (error) {
   console.error(`Migration integration harness failed: ${error.message}`)
