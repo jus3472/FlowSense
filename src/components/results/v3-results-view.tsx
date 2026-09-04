@@ -15,7 +15,11 @@ import {
   v3SectionViews,
   v3TranscriptSegments,
 } from '@/lib/results/v3'
-import { V3_METRIC_LABELS, type StoredV3ScorePayload } from '@/lib/scoring/v3/contracts'
+import {
+  V3_LEGACY_SCORE_PAYLOAD_VERSION,
+  V3_METRIC_LABELS,
+  type StoredV3ScorePayload,
+} from '@/lib/scoring/v3/contracts'
 
 interface V3ResultsViewProps {
   attemptId: string
@@ -129,10 +133,12 @@ export function V3ResultsView({
           {payload.recommendation ? (
             <div className="flex flex-col gap-2">
               <p className="text-foreground text-base">{payload.recommendation.text}</p>
-              <p className="text-muted text-xs">
-                Based on {V3_METRIC_LABELS[payload.recommendation.strongest_metric]} and{' '}
-                {V3_METRIC_LABELS[payload.recommendation.weakest_metric]}.
-              </p>
+              {payload.version === V3_LEGACY_SCORE_PAYLOAD_VERSION ? (
+                <p className="text-muted text-xs">
+                  Based on {V3_METRIC_LABELS[payload.recommendation.strongest_metric]} and{' '}
+                  {V3_METRIC_LABELS[payload.recommendation.weakest_metric]}.
+                </p>
+              ) : null}
             </div>
           ) : (
             <p className="text-muted text-sm">

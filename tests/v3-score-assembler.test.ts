@@ -171,7 +171,7 @@ describe('v3 score assembler', () => {
     expect(score.total_earned_points).toBeNull()
   })
 
-  it('composes its recommendation only from visible strongest and weakest explanations', () => {
+  it('composes its recommendation only from the strongest and weakest visible metrics', () => {
     const baseContent = content(0.7)
     const contentResult: V3ContentEvaluation = {
       ...baseContent,
@@ -194,8 +194,14 @@ describe('v3 score assembler', () => {
     expect(score.recommendation).toEqual({
       strongest_metric: 'answered_prompt',
       weakest_metric: 'energy',
-      text: 'You answer every part of the prompt. Your pitch changes very little across the response.',
+      text: 'You did well at fully addressing what the prompt asked. To improve, add more natural vocal variation so your voice sounds less flat.',
     })
+    expect(score.sections.what_you_said.metrics.answered_prompt.explanation).toBe(
+      'You answer every part of the prompt.',
+    )
+    expect(score.sections.how_you_sounded.metrics.energy.explanation).toBe(
+      'Your pitch changes very little across the response.',
+    )
     const allMetrics = {
       ...score.sections.what_you_said.metrics,
       ...score.sections.how_you_sounded.metrics,
@@ -258,5 +264,27 @@ describe('v3 score assembler', () => {
     expect(isV3ScorePayload(legacy)).toBe(true)
     expect(isV3ScorePayload({ ...current, version: 'v3.score.1' })).toBe(false)
     expect(isV3ScorePayload({ ...legacy, version: 'v3.score.2' })).toBe(false)
+  })
+
+  it('accepts the prior recommendation copy on stored current-version snapshots', () => {
+    const score = assembleV3Score({ mode: 'practice', content: content(), sounded: sounded() })
+    if (!score.recommendation) throw new Error('Expected a complete recommendation.')
+    const metrics = {
+      ...score.sections.what_you_said.metrics,
+      ...score.sections.how_you_sounded.metrics,
+    }
+    const strongest = metrics[score.recommendation.strongest_metric]
+    const weakest = metrics[score.recommendation.weakest_metric]
+    const priorText =
+      strongest.metric === weakest.metric
+        ? strongest.explanation
+        : `${strongest.explanation} ${weakest.explanation}`
+
+    expect(
+      isV3ScorePayload({
+        ...score,
+        recommendation: { ...score.recommendation, text: priorText },
+      }),
+    ).toBe(true)
   })
 })

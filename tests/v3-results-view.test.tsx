@@ -78,6 +78,8 @@ describe('V3ResultsView', () => {
     expect(screen.queryByText('Your prompt')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Overall score' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Recommendation' })).not.toBeInTheDocument()
+    expect(screen.getByText(/^You did well at .+ To improve/)).toBeInTheDocument()
+    expect(screen.queryByText(/^Based on /)).not.toBeInTheDocument()
     for (const metric of V3_METRIC_IDS) {
       const label = V3_METRIC_LABELS[metric]
       expect(screen.getByRole('heading', { name: label })).toBeInTheDocument()
@@ -94,6 +96,7 @@ describe('V3ResultsView', () => {
     render(<V3ResultsView {...props} payload={legacyV3Snapshot()} />)
 
     expect(screen.getByRole('heading', { name: 'Time to First Word' })).toBeInTheDocument()
+    expect(screen.getByText(/^Based on /)).toBeInTheDocument()
   })
 
   it('shows partial score states without a fabricated overall or recommendation', () => {

@@ -146,10 +146,15 @@ function notCheckedContentMetric(
   }
 }
 
-function composeRecommendation<Metric extends StoredV3MetricId>(
+interface RankedMetric<Metric extends StoredV3MetricId> {
+  id: Metric
+  result: V3PersistedMetricScore
+}
+
+function rankedRecommendationMetrics<Metric extends StoredV3MetricId>(
   metricIds: readonly Metric[],
   metrics: Readonly<Record<Metric, V3PersistedMetricScore>>,
-): V3Recommendation<Metric> | null {
+): { strongest: RankedMetric<Metric>; weakest: RankedMetric<Metric> } | null {
   const scored = metricIds
     .map((id) => ({ id, result: metrics[id] }))
     .filter(
@@ -168,21 +173,63 @@ function composeRecommendation<Metric extends StoredV3MetricId>(
     .reduce((selected, candidate) =>
       (candidate.result.component ?? 2) < (selected.result.component ?? 2) ? candidate : selected,
     )
+  return { strongest, weakest }
+}
+
+function composeDetailedRecommendation<Metric extends StoredV3MetricId>(
+  metricIds: readonly Metric[],
+  metrics: Readonly<Record<Metric, V3PersistedMetricScore>>,
+): V3Recommendation<Metric> | null {
+  const ranked = rankedRecommendationMetrics(metricIds, metrics)
+  if (!ranked) return null
   return {
-    strongest_metric: strongest.id,
-    weakest_metric: weakest.id,
+    strongest_metric: ranked.strongest.id,
+    weakest_metric: ranked.weakest.id,
     text:
-      strongest.id === weakest.id
-        ? (strongest.result.explanation ?? '')
-        : `${strongest.result.explanation} ${weakest.result.explanation}`,
+      ranked.strongest.id === ranked.weakest.id
+        ? (ranked.strongest.result.explanation ?? '')
+        : `${ranked.strongest.result.explanation} ${ranked.weakest.result.explanation}`,
   }
 }
 
-/** Uses only explanations already visible on the highest and lowest scored metrics. */
+const POSITIVE_COACHING: Readonly<Record<V3MetricId, string>> = Object.freeze({
+  answered_prompt: 'You did well at fully addressing what the prompt asked.',
+  specificity: 'You did well at supporting your answer with concrete details.',
+  structure: 'You did well at organizing your ideas clearly.',
+  conciseness: 'You did well at keeping your response focused.',
+  word_choice: 'You did well at choosing precise words.',
+  grammar: 'You did well at using spoken grammar that kept your meaning clear.',
+  pace: 'You did well at using a pace that made your ideas easy to follow.',
+  paused_time: 'You did well at keeping hesitation from interrupting your response.',
+  articulation: 'You did well at making your words easy to understand.',
+  energy: 'You did well at using natural vocal variation.',
+})
+
+const IMPROVEMENT_COACHING: Readonly<Record<V3MetricId, string>> = Object.freeze({
+  answered_prompt: 'address every part of the prompt more directly.',
+  specificity: 'support your answer with more concrete details.',
+  structure: 'organize your ideas in a clearer sequence.',
+  conciseness: 'cut unnecessary wording and repetition.',
+  word_choice: 'choose more precise words where your meaning is vague.',
+  grammar: 'clean up spoken grammar that makes your meaning less clear.',
+  pace: 'adjust your pace so your ideas are easier to follow.',
+  paused_time: 'reduce long hesitations so your response flows more smoothly.',
+  articulation: 'focus on making each word easier to understand.',
+  energy: 'add more natural vocal variation so your voice sounds less flat.',
+})
+
+/** Uses only the strongest and weakest visible metrics, without raw measurements. */
 export function composeV3Recommendation(
   metrics: Readonly<Record<V3MetricId, V3PersistedMetricScore>>,
 ): V3Recommendation | null {
-  return composeRecommendation(V3_METRIC_IDS, metrics)
+  const ranked = rankedRecommendationMetrics(V3_METRIC_IDS, metrics)
+  if (!ranked) return null
+  const mild = (ranked.weakest.result.component ?? 0) >= 0.8
+  return {
+    strongest_metric: ranked.strongest.id,
+    weakest_metric: ranked.weakest.id,
+    text: `${POSITIVE_COACHING[ranked.strongest.id]} To improve${mild ? ' even further' : ''}, ${IMPROVEMENT_COACHING[ranked.weakest.id]}`,
+  }
 }
 
 /** Converts ten normalized metric evaluations into the current immutable v3 50/50 payload. */
@@ -486,15 +533,20 @@ export function isV3ScorePayload(value: unknown): value is StoredV3ScorePayload 
     LegacyV3MetricId,
     V3PersistedMetricScore
   >
+  const currentMetrics = metrics as Record<V3MetricId, V3PersistedMetricScore>
   const expectedRecommendation = legacy
-    ? composeRecommendation(LEGACY_V3_METRIC_IDS, metrics)
-    : composeRecommendation(V3_METRIC_IDS, metrics as Record<V3MetricId, V3PersistedMetricScore>)
+    ? composeDetailedRecommendation(LEGACY_V3_METRIC_IDS, metrics)
+    : composeV3Recommendation(currentMetrics)
+  const priorCurrentRecommendation = legacy
+    ? null
+    : composeDetailedRecommendation(V3_METRIC_IDS, currentMetrics)
   return (
     isRecord(value.recommendation) &&
     exactKeys(value.recommendation, ['strongest_metric', 'weakest_metric', 'text']) &&
     value.recommendation.strongest_metric === expectedRecommendation?.strongest_metric &&
     value.recommendation.weakest_metric === expectedRecommendation?.weakest_metric &&
-    value.recommendation.text === expectedRecommendation?.text
+    (value.recommendation.text === expectedRecommendation?.text ||
+      value.recommendation.text === priorCurrentRecommendation?.text)
   )
 }
 

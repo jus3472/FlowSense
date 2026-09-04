@@ -22,7 +22,7 @@ intelligibility or phoneme accuracy, never whether someone sounds native.
 
 Two rules govern product and implementation work:
 
-1. The app measures, it does not judge. Detection should be concrete and explainable. Do not add quality ratings, praise, scolding, benchmarks, or comparisons to other users.
+1. The app measures, it does not judge. Detection should be concrete and explainable. Do not add quality ratings, generic praise, scolding, benchmarks, or comparisons to other users. A positive statement grounded in the strongest scored metric is allowed in the recommendation.
 2. Nothing is counted twice. A spoken span can cost points under exactly one check or metric. When a language-model rule is repeatedly violated, enforce it in code instead of strengthening the prompt again.
 
 ## Application Architecture
@@ -144,7 +144,7 @@ Amber transcript marks mean exactly one thing: the marked speech cost points. Wh
 
 The active visual system is token-based in `src/app/globals.css`: a restrained water-toned light and dark palette, white or dark surfaces, cyan accent, warm amber highlight, Inter body text, Sora display text, and JetBrains Mono for measurements. Content uses a centered 600px column with generous vertical spacing. Components use semantic Tailwind tokens only. The tests reject component hex values, Tailwind color scales, invalid spacing, insufficient contrast, and nonliteral score-bar behavior.
 
-User-facing copy is brief, second person, and present tense. It contains no em dashes, exclamation marks, praise, scolding, or prohibited product terminology.
+User-facing copy is brief, second person, and present tense. It contains no em dashes, exclamation marks, generic praise, scolding, or prohibited product terminology. Recommendation positives must remain grounded in the strongest scored metric.
 
 ## Operations
 
