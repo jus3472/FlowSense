@@ -3,7 +3,7 @@ import {
   isSpeakingActivity,
   type SpeakingActivityInput,
 } from '@/lib/activity/speaking'
-import { legacySectionSnapshot, v2Snapshot } from './helpers/result-snapshots'
+import { legacySectionSnapshot, v2Snapshot, v3Snapshot } from './helpers/result-snapshots'
 import { describe, expect, it } from 'vitest'
 
 function activity(overrides: Partial<SpeakingActivityInput> = {}): SpeakingActivityInput {
@@ -19,6 +19,22 @@ function activity(overrides: Partial<SpeakingActivityInput> = {}): SpeakingActiv
 }
 
 describe('speaking activity classification', () => {
+  it('accepts exact scored and provider-neutral v3 results', () => {
+    const scored = v3Snapshot({ component: 0.6 })
+    const neutral = v3Snapshot({ unavailableMetric: 'articulation' })
+
+    expect(
+      classifySpeakingActivity(
+        activity({ score: scored.total_earned_points, sectionScores: scored }),
+      ),
+    ).toEqual({ kind: 'scored', score: scored.total_earned_points, resultKind: 'v3' })
+    expect(classifySpeakingActivity(activity({ score: null, sectionScores: neutral }))).toEqual({
+      kind: 'neutral',
+      score: null,
+      resultKind: 'v3',
+    })
+  })
+
   it('accepts a structurally valid matching numeric v2 result below passing', () => {
     const sectionScores = v2Snapshot({ component: 0.4 })
     const result = classifySpeakingActivity(
@@ -79,6 +95,37 @@ describe('speaking activity classification', () => {
     expect(classifySpeakingActivity(activity({ score: 0, sectionScores: neutral }))).toEqual({
       kind: 'invalid',
       reason: 'score_mismatch',
+    })
+  })
+
+  it('rejects v3 scalar mismatches and structurally modified snapshots', () => {
+    const scored = v3Snapshot({ component: 0.8 })
+    const neutral = v3Snapshot({ notCheckedMetric: 'grammar' })
+    const modified = {
+      ...scored,
+      sections: {
+        ...scored.sections,
+        how_you_sounded: {
+          ...scored.sections.how_you_sounded,
+          metrics: {
+            ...scored.sections.how_you_sounded.metrics,
+            energy: { ...scored.sections.how_you_sounded.metrics.energy, max_points: 99 },
+          },
+        },
+      },
+    }
+
+    expect(classifySpeakingActivity(activity({ score: 79, sectionScores: scored }))).toEqual({
+      kind: 'invalid',
+      reason: 'score_mismatch',
+    })
+    expect(classifySpeakingActivity(activity({ score: 0, sectionScores: neutral }))).toEqual({
+      kind: 'invalid',
+      reason: 'score_mismatch',
+    })
+    expect(classifySpeakingActivity(activity({ sectionScores: modified }))).toEqual({
+      kind: 'invalid',
+      reason: 'malformed_result',
     })
   })
 

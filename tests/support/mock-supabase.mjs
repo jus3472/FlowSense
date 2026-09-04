@@ -96,6 +96,76 @@ const WEIGHTS = {
   presentation: [16, 20, 14, 10, 20, 20],
   conversation: [24, 22, 12, 12, 14, 16],
 }
+const V3_WEIGHTS = {
+  practice: {
+    what_you_said: {
+      answered_prompt: 10,
+      specificity: 9,
+      structure: 9,
+      conciseness: 8,
+      word_choice: 7,
+      grammar: 7,
+    },
+    how_you_sounded: {
+      pace: 12,
+      time_to_first_word: 5,
+      paused_time: 10,
+      articulation: 13,
+      energy: 10,
+    },
+  },
+  interview: {
+    what_you_said: {
+      answered_prompt: 12,
+      specificity: 11,
+      structure: 10,
+      conciseness: 6,
+      word_choice: 6,
+      grammar: 5,
+    },
+    how_you_sounded: {
+      pace: 10,
+      time_to_first_word: 6,
+      paused_time: 9,
+      articulation: 15,
+      energy: 10,
+    },
+  },
+  presentation: {
+    what_you_said: {
+      answered_prompt: 9,
+      specificity: 9,
+      structure: 12,
+      conciseness: 7,
+      word_choice: 7,
+      grammar: 6,
+    },
+    how_you_sounded: {
+      pace: 12,
+      time_to_first_word: 3,
+      paused_time: 9,
+      articulation: 11,
+      energy: 15,
+    },
+  },
+  conversation: {
+    what_you_said: {
+      answered_prompt: 9,
+      specificity: 8,
+      structure: 7,
+      conciseness: 10,
+      word_choice: 8,
+      grammar: 8,
+    },
+    how_you_sounded: {
+      pace: 11,
+      time_to_first_word: 4,
+      paused_time: 10,
+      articulation: 15,
+      energy: 10,
+    },
+  },
+}
 
 let state
 
@@ -415,6 +485,178 @@ function scorePayload(attempt, failure = false, forcedScore = null) {
   }
 }
 
+function v3ScorePayload(attempt, failure = false, forcedScore = null) {
+  const weights = V3_WEIGHTS[attempt.practice_mode] ?? V3_WEIGHTS.practice
+  const entries = [
+    ...Object.entries(weights.what_you_said),
+    ...Object.entries(weights.how_you_sounded),
+  ]
+  const forcedEarned =
+    forcedScore === null
+      ? null
+      : allocateScore(
+          entries.map(([, maximum]) => maximum),
+          forcedScore,
+        )
+  const values = Object.fromEntries(
+    entries.map(([metric, maximum], index) => {
+      const notChecked = failure && weights.what_you_said[metric] !== undefined
+      const earned =
+        forcedEarned === null
+          ? Math.max(0, maximum - (state.attempts.length > 1 ? 1 : 2))
+          : forcedEarned[index]
+      const explanation = `You have measured ${metric} evidence.`
+      return [
+        metric,
+        {
+          metric,
+          status: notChecked ? 'not_checked' : 'scored',
+          component: notChecked ? null : earned / maximum,
+          earned_points: notChecked ? null : earned,
+          max_points: maximum,
+          explanation: notChecked ? null : explanation,
+          measurements: notChecked ? null : {},
+          evidence: [],
+          details: [],
+          warnings: notChecked ? ['Provider check was unavailable.'] : [],
+        },
+      ]
+    }),
+  )
+  const section = (sectionName, sectionWeights) => {
+    const metrics = Object.fromEntries(
+      Object.keys(sectionWeights).map((metric) => [metric, values[metric]]),
+    )
+    const metricValues = Object.values(metrics)
+    const status = metricValues.every((metric) => metric.status === 'scored')
+      ? 'scored'
+      : metricValues.some((metric) => metric.status === 'unavailable')
+        ? 'unavailable'
+        : 'not_checked'
+    return {
+      section: sectionName,
+      status,
+      earned_points:
+        status === 'scored'
+          ? metricValues.reduce((total, metric) => total + metric.earned_points, 0)
+          : null,
+      max_points: 50,
+      metrics,
+    }
+  }
+  const whatYouSaid = section('what_you_said', weights.what_you_said)
+  const howYouSounded = section('how_you_sounded', weights.how_you_sounded)
+  const complete = whatYouSaid.status === 'scored' && howYouSounded.status === 'scored'
+  const ordered = entries.map(([metric]) => values[metric])
+  const strongest = ordered.reduce((selected, candidate) =>
+    candidate.component > selected.component ? candidate : selected,
+  )
+  const weakest = [...ordered]
+    .reverse()
+    .reduce((selected, candidate) =>
+      candidate.component < selected.component ? candidate : selected,
+    )
+  return {
+    version: 'v3.score.1',
+    rubric_version: 'v3',
+    mode: attempt.practice_mode,
+    total_earned_points: complete ? whatYouSaid.earned_points + howYouSounded.earned_points : null,
+    total_max_points: 100,
+    sections: { what_you_said: whatYouSaid, how_you_sounded: howYouSounded },
+    recommendation: complete
+      ? {
+          strongest_metric: strongest.metric,
+          weakest_metric: weakest.metric,
+          text:
+            strongest.metric === weakest.metric
+              ? strongest.explanation
+              : `${strongest.explanation} ${weakest.explanation}`,
+        }
+      : null,
+    warnings: failure ? ['Some provider checks were unavailable.'] : [],
+  }
+}
+
+function exactKeys(value, expected) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === expected.length &&
+    expected.every((key) => Object.hasOwn(value, key))
+  )
+}
+
+function validV3ScorePayload(attempt, snapshot) {
+  const weights = V3_WEIGHTS[attempt.practice_mode]
+  if (
+    !weights ||
+    !exactKeys(snapshot, [
+      'version',
+      'rubric_version',
+      'mode',
+      'total_earned_points',
+      'total_max_points',
+      'sections',
+      'recommendation',
+      'warnings',
+    ]) ||
+    snapshot.version !== 'v3.score.1' ||
+    snapshot.rubric_version !== 'v3' ||
+    snapshot.mode !== attempt.practice_mode ||
+    snapshot.total_max_points !== 100 ||
+    snapshot.total_earned_points !== attempt.score ||
+    !exactKeys(snapshot.sections, ['what_you_said', 'how_you_sounded'])
+  ) {
+    return false
+  }
+  let total = 0
+  for (const [sectionName, sectionWeights] of Object.entries(weights)) {
+    const section = snapshot.sections[sectionName]
+    if (
+      !exactKeys(section, ['section', 'status', 'earned_points', 'max_points', 'metrics']) ||
+      section.section !== sectionName ||
+      section.status !== 'scored' ||
+      section.max_points !== 50 ||
+      !exactKeys(section.metrics, Object.keys(sectionWeights))
+    ) {
+      return false
+    }
+    let sectionTotal = 0
+    for (const [metric, maximum] of Object.entries(sectionWeights)) {
+      const value = section.metrics[metric]
+      if (
+        !exactKeys(value, [
+          'metric',
+          'status',
+          'component',
+          'earned_points',
+          'max_points',
+          'explanation',
+          'measurements',
+          'evidence',
+          'details',
+          'warnings',
+        ]) ||
+        value.metric !== metric ||
+        value.status !== 'scored' ||
+        value.max_points !== maximum ||
+        typeof value.component !== 'number' ||
+        value.component < 0 ||
+        value.component > 1 ||
+        !Number.isInteger(value.earned_points) ||
+        value.earned_points !== Math.round(value.component * maximum)
+      ) {
+        return false
+      }
+      sectionTotal += value.earned_points
+    }
+    if (section.earned_points !== sectionTotal) return false
+    total += sectionTotal
+  }
+  return total === attempt.score
+}
+
 function raiseLessonProgress(attempt) {
   const snapshot = attempt.section_scores
   if (
@@ -422,13 +664,7 @@ function raiseLessonProgress(attempt) {
     attempt.status !== 'done' ||
     typeof attempt.score !== 'number' ||
     attempt.score < 0 ||
-    attempt.score > 100 ||
-    attempt.rubric_version !== 'v2' ||
-    snapshot?.version !== 'v2.score.1' ||
-    snapshot?.rubric_version !== 'v2' ||
-    snapshot?.mode !== attempt.practice_mode ||
-    snapshot?.total_earned_points !== attempt.score ||
-    snapshot?.total_max_points !== 100
+    attempt.score > 100
   ) {
     return
   }
@@ -447,29 +683,40 @@ function raiseLessonProgress(attempt) {
   ) {
     return
   }
-  const categories = Object.entries(snapshot.categories ?? {})
-  const validNames = new Set([
-    'fluency',
-    'clarity',
-    'vocabulary',
-    'grammar',
-    'structure',
-    'delivery',
-  ])
-  if (
-    categories.length !== 6 ||
-    categories.some(
-      ([name, category]) =>
-        !validNames.has(name) ||
-        category?.category !== name ||
-        category?.availability !== 'available' ||
-        category?.status !== 'scored' ||
-        typeof category?.earned_points !== 'number' ||
-        typeof category?.max_points !== 'number',
-    ) ||
-    categories.reduce((sum, [, category]) => sum + category.earned_points, 0) !== attempt.score ||
-    categories.reduce((sum, [, category]) => sum + category.max_points, 0) !== 100
-  ) {
+  if (attempt.rubric_version === 'v3') {
+    if (!validV3ScorePayload(attempt, snapshot)) return
+  } else if (attempt.rubric_version === 'v2') {
+    const categories = Object.entries(snapshot?.categories ?? {})
+    const validNames = new Set([
+      'fluency',
+      'clarity',
+      'vocabulary',
+      'grammar',
+      'structure',
+      'delivery',
+    ])
+    if (
+      snapshot?.version !== 'v2.score.1' ||
+      snapshot?.rubric_version !== 'v2' ||
+      snapshot?.mode !== attempt.practice_mode ||
+      snapshot?.total_earned_points !== attempt.score ||
+      snapshot?.total_max_points !== 100 ||
+      categories.length !== 6 ||
+      categories.some(
+        ([name, category]) =>
+          !validNames.has(name) ||
+          category?.category !== name ||
+          category?.availability !== 'available' ||
+          category?.status !== 'scored' ||
+          typeof category?.earned_points !== 'number' ||
+          typeof category?.max_points !== 'number',
+      ) ||
+      categories.reduce((sum, [, category]) => sum + category.earned_points, 0) !== attempt.score ||
+      categories.reduce((sum, [, category]) => sum + category.max_points, 0) !== 100
+    ) {
+      return
+    }
+  } else {
     return
   }
 
@@ -569,13 +816,19 @@ const server = createServer(async (req, res) => {
     const failure = input.failure === true
     const forcedScore =
       Number.isInteger(input.score) && input.score >= 0 && input.score <= 100 ? input.score : null
-    const snapshot = scorePayload(attempt, failure, forcedScore)
+    // New attempts use v3 by default. Tests can still request v2 explicitly for
+    // historical/cohort compatibility coverage.
+    const useV3 = input.scoreVersion !== 'v2.score.1' && input.rubricVersion !== 'v2'
+    const snapshot = useV3
+      ? v3ScorePayload(attempt, failure, forcedScore)
+      : scorePayload(attempt, failure, forcedScore)
+    attempt.rubric_version = useV3 ? 'v3' : 'v2'
     attempt.score = failure ? null : snapshot.total_earned_points
     attempt.section_scores = snapshot
     attempt.content_result = null
     attempt.metrics = {
       ...attempt.metrics,
-      v2: {
+      [useV3 ? 'v3' : 'v2']: {
         score: snapshot,
         content: { status: failure ? 'not_checked' : 'checked' },
         scored_at: timestamp(),

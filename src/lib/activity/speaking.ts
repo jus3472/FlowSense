@@ -1,5 +1,6 @@
 import { parseCurriculumScore } from '@/lib/curriculum/thresholds'
 import { decodeStoredSectionSnapshot } from '@/lib/results/snapshot'
+import { isV3ScorePayload } from '@/lib/scoring/v3/assemble'
 
 export interface SpeakingActivityInput {
   status: unknown
@@ -19,9 +20,13 @@ export type SpeakingActivityInvalidReason =
   | 'score_mismatch'
 
 export type SpeakingActivityClassification =
-  | { kind: 'scored'; score: number; resultKind: 'v2' | 'legacy' }
-  | { kind: 'neutral'; score: null; resultKind: 'v2' }
+  | { kind: 'scored'; score: number; resultKind: 'v3' | 'v2' | 'legacy' }
+  | { kind: 'neutral'; score: null; resultKind: 'v3' | 'v2' }
   | { kind: 'invalid'; reason: SpeakingActivityInvalidReason }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 /**
  * Classifies one stored response for future activity ledgers. Activity is
@@ -40,6 +45,22 @@ export function classifySpeakingActivity(
   }
   if (typeof input.transcript !== 'string' || input.transcript.trim().length === 0) {
     return { kind: 'invalid', reason: 'empty_transcript' }
+  }
+
+  if (isV3ScorePayload(input.sectionScores)) {
+    const total = input.sectionScores.total_earned_points
+    if (total === null) {
+      return input.score === null
+        ? { kind: 'neutral', score: null, resultKind: 'v3' }
+        : { kind: 'invalid', reason: 'score_mismatch' }
+    }
+    const score = parseCurriculumScore(input.score)
+    return score !== null && score === total
+      ? { kind: 'scored', score, resultKind: 'v3' }
+      : { kind: 'invalid', reason: 'score_mismatch' }
+  }
+  if (isRecord(input.sectionScores) && input.sectionScores.version === 'v3.score.1') {
+    return { kind: 'invalid', reason: 'malformed_result' }
   }
 
   const snapshot = decodeStoredSectionSnapshot(input.sectionScores)
