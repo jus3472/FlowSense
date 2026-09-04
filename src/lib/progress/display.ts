@@ -49,3 +49,34 @@ export function selectCategory(
   }
   return first?.category ?? null
 }
+
+export function selectProgressDimension<Dimension extends string>(
+  dimensions: readonly Dimension[],
+  series: Readonly<Record<Dimension, ProgressSeries>>,
+  descending: boolean,
+): Dimension | null {
+  const comparable = dimensions.map((dimension) => ({ dimension, series: series[dimension] }))
+  const referencePopulation = comparable[0]?.series.points.map((point) => point.attemptId) ?? []
+  if (
+    comparable.some(
+      ({ series: candidate }) =>
+        candidate.state !== 'ready' ||
+        candidate.averageValue === null ||
+        !Number.isFinite(candidate.averageValue) ||
+        candidate.valueCount !== candidate.points.length ||
+        candidate.points.length !== referencePopulation.length ||
+        candidate.points.some((point, index) => point.attemptId !== referencePopulation[index]),
+    )
+  ) {
+    return null
+  }
+  const ranked = comparable.sort((left, right) => {
+    const delta = (right.series.averageValue ?? 0) - (left.series.averageValue ?? 0)
+    return descending ? delta : -delta
+  })
+  const first = ranked[0]
+  const second = ranked[1]
+  return first && (!second || first.series.averageValue !== second.series.averageValue)
+    ? first.dimension
+    : null
+}

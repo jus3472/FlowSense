@@ -4,6 +4,7 @@ import { notFound, redirect } from 'next/navigation'
 import { AudioPlayer } from '@/components/record/audio-player'
 import { ResultsView } from '@/components/results/results-view'
 import { V2ResultsView } from '@/components/results/v2-results-view'
+import { V3ResultsView } from '@/components/results/v3-results-view'
 import { RetryButton } from '@/components/system/retry-button'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -21,7 +22,11 @@ import { loadStructuredLessonResultForUser } from '@/lib/curriculum/result-serve
 import { isUuid } from '@/lib/practice/session'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { readAttemptResult } from '@/lib/results/attempt-result'
-import { compareRetryResults, loadRetryAncestorChain } from '@/lib/results/retry-comparison'
+import {
+  compareRetryResults,
+  compareV3RetryResults,
+  loadRetryAncestorChain,
+} from '@/lib/results/retry-comparison'
 import { validLegacyDisputes } from '@/lib/scoring/disputes'
 import { createClient } from '@/lib/supabase/server'
 import type { AttemptRow } from '@/lib/types/database'
@@ -226,6 +231,106 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         </ButtonLink>
       </div>,
       audioUnavailable,
+    )
+  }
+
+  if (result.kind === 'v3') {
+    let comparison = null
+    let previousAttemptId: string | null = null
+    if (attempt.retry_of_attempt_id) {
+      let chain: readonly RetryAttempt[] | null = null
+      try {
+        chain = await loadRetryAncestorChain<RetryAttempt>(attempt.id, async (ancestorId) => {
+          if (ancestorId === attempt.id) {
+            return {
+              id: attempt.id,
+              prompt_text: attempt.prompt_text,
+              transcript: attempt.transcript,
+              duration_ms: attempt.duration_ms,
+              created_at: attempt.created_at,
+              score: attempt.score,
+              section_scores: attempt.section_scores,
+              metrics: attempt.metrics,
+              content_result: attempt.content_result,
+              retry_of_attempt_id: attempt.retry_of_attempt_id,
+              retryOfAttemptId: attempt.retry_of_attempt_id,
+            }
+          }
+          const response: { data: RetryAttemptRow | null; error: unknown } = await supabase
+            .from('attempts')
+            .select(
+              'id, prompt_text, transcript, duration_ms, created_at, score, section_scores, metrics, content_result, retry_of_attempt_id',
+            )
+            .eq('id', ancestorId)
+            .eq('user_id', user.id)
+            .maybeSingle()
+          if (response.error) throw response.error
+          return response.data
+            ? { ...response.data, retryOfAttemptId: response.data.retry_of_attempt_id }
+            : null
+        })
+      } catch (error) {
+        logAttemptDiagnostic('load_retry_ancestor', 'retry_ancestor_read_failed', attempt.id, error)
+      }
+      const parent = chain?.[0] ?? null
+      if (parent) {
+        previousAttemptId = parent.id
+        const parentResult = readAttemptResult({
+          id: parent.id,
+          promptText: parent.prompt_text,
+          transcript: parent.transcript,
+          durationMs: parent.duration_ms,
+          createdAt: parent.created_at,
+          audioUrl: null,
+          score: parent.score,
+          sectionScores: parent.section_scores,
+          metrics: parent.metrics,
+          contentResult: parent.content_result,
+        })
+        comparison = compareV3RetryResults(
+          result.payload,
+          parentResult.kind === 'v3' ? parentResult.payload : null,
+        )
+      }
+    }
+
+    const additionalContext =
+      typeof attempt.metrics === 'object' &&
+      attempt.metrics !== null &&
+      !Array.isArray(attempt.metrics) &&
+      typeof (attempt.metrics as { practice?: { additional_context?: unknown } }).practice
+        ?.additional_context === 'string'
+        ? (attempt.metrics as { practice: { additional_context: string } }).practice
+            .additional_context
+        : null
+    const curriculumResult = attempt.lesson_id
+      ? await loadStructuredLessonResultForUser(supabase, user.id, {
+          lessonId: attempt.lesson_id,
+          attemptId: attempt.id,
+          promptId: attempt.prompt_id,
+          practiceMode: attempt.practice_mode,
+          rubricVersion: attempt.rubric_version,
+          currentScore: attempt.score,
+          snapshotMode: result.payload.mode,
+          snapshotRubricVersion: result.payload.rubric_version,
+          snapshotScore: result.payload.total_earned_points,
+        })
+      : null
+
+    return (
+      <V3ResultsView
+        attemptId={attempt.id}
+        promptText={attempt.prompt_text}
+        additionalContext={additionalContext}
+        transcript={attempt.transcript ?? ''}
+        durationMs={durationMs}
+        audioUrl={audioUrl}
+        audioUnavailable={audioUnavailable}
+        payload={result.payload}
+        comparison={comparison}
+        previousAttemptId={previousAttemptId}
+        curriculumResult={curriculumResult?.status === 'ready' ? curriculumResult.data : null}
+      />
     )
   }
 

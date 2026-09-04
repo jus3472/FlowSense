@@ -6,6 +6,7 @@ import {
   type MetricResult,
 } from '@/lib/scoring/mechanical'
 import type { V2ScorePayload } from '@/lib/scoring/v2/assemble'
+import type { V3ScorePayload } from '@/lib/scoring/v3/contracts'
 import { decodeStoredSectionSnapshot, type LegacySectionSnapshot } from '@/lib/results/snapshot'
 import type { AttemptMetrics } from '@/lib/types/metrics'
 import type { AttemptView } from '@/lib/results/types'
@@ -26,6 +27,7 @@ export interface StoredAttemptResultInput {
 export type ReadAttemptResult =
   | { kind: 'legacy'; attempt: AttemptView }
   | { kind: 'v2'; payload: V2ScorePayload }
+  | { kind: 'v3'; payload: V3ScorePayload }
   | { kind: 'incomplete' }
   | {
       kind: 'unsupported_version'
@@ -235,6 +237,7 @@ function legacyAttempt(
 export function readAttemptResult(input: StoredAttemptResultInput): ReadAttemptResult {
   const snapshot = decodeStoredSectionSnapshot(input.sectionScores)
   if (snapshot.kind === 'v2') return { kind: 'v2', payload: snapshot.payload }
+  if (snapshot.kind === 'v3') return { kind: 'v3', payload: snapshot.payload }
   if (snapshot.kind === 'unsupported_version') return snapshot
   if (snapshot.kind === 'malformed') return { kind: 'malformed' }
 

@@ -48,6 +48,7 @@ export interface ProgressAggregation {
     incomplete: number
     malformed: number
     unsupportedVersion: number
+    otherSupported: number
     excludedMode: number
     excludedInvalid: number
     excludedIncompatible: number
@@ -174,6 +175,7 @@ export function aggregateV2Progress(
   let incomplete = 0
   let malformed = 0
   let unsupportedVersion = 0
+  let otherSupported = 0
   let excludedMode = 0
   const accepted: AcceptedAttempt[] = []
   for (const item of input) {
@@ -197,6 +199,10 @@ export function aggregateV2Progress(
     }
     if (snapshot.kind === 'malformed') {
       malformed += 1
+      continue
+    }
+    if (snapshot.kind === 'v3') {
+      otherSupported += 1
       continue
     }
 
@@ -223,7 +229,8 @@ export function aggregateV2Progress(
   const selectedAttempts = selected
     ? accepted.filter((attempt) => exactCohort(attempt.cohort, selected))
     : []
-  const excludedIncompatible = selected ? accepted.length - selectedAttempts.length : 0
+  const excludedIncompatible =
+    (selected ? accepted.length - selectedAttempts.length : 0) + otherSupported
   const recentStart = now - RECENT_PROGRESS_WINDOW_DAYS * 24 * 60 * 60 * 1000
   const longerStart = now - LONGER_HISTORY_WINDOW_DAYS * 24 * 60 * 60 * 1000
 
@@ -237,6 +244,7 @@ export function aggregateV2Progress(
       incomplete,
       malformed,
       unsupportedVersion,
+      otherSupported,
       excludedMode,
       excludedInvalid: incomplete + malformed + unsupportedVersion,
       excludedIncompatible,

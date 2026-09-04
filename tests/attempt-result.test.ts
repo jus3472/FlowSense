@@ -2,6 +2,7 @@ import { readAttemptResult } from '@/lib/results/attempt-result'
 import { DELIVERY_POINTS } from '@/lib/scoring/mechanical'
 import { V2_SCORE_PAYLOAD_VERSION } from '@/lib/scoring/v2/assemble'
 import { describe, expect, it } from 'vitest'
+import { v3Snapshot } from './helpers/result-snapshots'
 
 const checks = {
   answered: { passed: true, severity: null, quote: null, observation: null, suggestion: null },
@@ -155,6 +156,22 @@ describe('attempt result reader', () => {
     }
   })
 
+  it('returns complete and partial v3 payloads without reading legacy renderer data', () => {
+    const complete = v3Snapshot()
+    const completeResult = readAttemptResult(
+      legacyInput({ score: null, sectionScores: complete, metrics: null, contentResult: null }),
+    )
+    expect(completeResult.kind).toBe('v3')
+    if (completeResult.kind === 'v3') expect(completeResult.payload).toBe(complete)
+
+    const partial = v3Snapshot({ unavailableMetric: 'energy' })
+    const partialResult = readAttemptResult(
+      legacyInput({ score: null, sectionScores: partial, metrics: null, contentResult: null }),
+    )
+    expect(partialResult.kind).toBe('v3')
+    if (partialResult.kind === 'v3') expect(partialResult.payload.total_earned_points).toBeNull()
+  })
+
   it('lets a genuine legacy payload win over v2 row metadata', () => {
     expect(readAttemptResult(legacyInput({ rubricVersion: 'v2' })).kind).toBe('legacy')
   })
@@ -167,8 +184,9 @@ describe('attempt result reader', () => {
 
   it('fails an unknown future payload version safely', () => {
     expect(
-      readAttemptResult(legacyInput({ sectionScores: { ...v2Payload(), version: 'v3.score.1' } }))
-        .kind,
+      readAttemptResult(
+        legacyInput({ sectionScores: { ...v2Payload(), version: 'future.score.1' } }),
+      ).kind,
     ).toBe('unsupported_version')
   })
 

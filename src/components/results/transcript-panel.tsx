@@ -13,11 +13,18 @@ import type { Segment } from '@/lib/results/highlights'
  * lines wraps like the text around it instead of reflowing as one block. They
  * carry a tabindex and a button role, so they stay keyboard reachable.
  */
-export function TranscriptPanel({ segments }: { segments: readonly Segment[] }) {
+export function TranscriptPanel({
+  segments,
+  heading,
+}: {
+  segments: readonly Segment[]
+  heading?: string
+}) {
   const [open, setOpen] = useState<number | null>(null)
 
   return (
     <section className="flex flex-col gap-3">
+      {heading ? <h2 className="text-foreground text-xl font-semibold">{heading}</h2> : null}
       <div className="bg-surface rounded-card p-8">
         <p className="text-foreground text-lg leading-loose">
           {segments.map((segment, index) => {

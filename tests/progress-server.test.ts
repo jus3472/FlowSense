@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PROGRESS_COMPLETED_ATTEMPT_LIMIT, getProgressDashboardData } from '@/lib/progress/server'
-import { v2Snapshot } from './helpers/result-snapshots'
+import { v2Snapshot, v3Snapshot } from './helpers/result-snapshots'
 
 const mocks = vi.hoisted(() => ({ createClient: vi.fn() }))
 
@@ -159,6 +159,25 @@ describe('progress server query window', () => {
       data: {
         coverage: { truncated: false },
         progress: { counts: { input: 0, selectedCohort: 0 } },
+      },
+    })
+  })
+
+  it('returns separate v3 and earlier v2 aggregations from one bounded query', async () => {
+    const current = v3Snapshot()
+    useQuery([
+      row('v3', { section_scores: current, created_at: '2026-08-25T12:00:00.000Z' }),
+      row('v2', { created_at: '2026-08-24T12:00:00.000Z' }),
+    ])
+
+    const result = await getProgressDashboardData('user-1', {
+      now: new Date('2026-08-26T12:00:00.000Z'),
+    })
+    expect(result).toMatchObject({
+      status: 'ready',
+      data: {
+        progress: { counts: { selectedCohort: 1, otherSupported: 1 } },
+        v3Progress: { counts: { selectedCohort: 1, earlierV2: 1 } },
       },
     })
   })
