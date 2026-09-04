@@ -32,10 +32,9 @@ function ModeHeader({ mode }: { mode: string }) {
   return (
     <div className="flex flex-col gap-2">
       <Link href="/practice" className="text-accent text-sm hover:underline">
-        Practice
+        Tracks
       </Link>
       <h1 className="prompt-display text-foreground text-2xl">{modeTitle(mode)}</h1>
-      <p className="text-muted text-base">Choose a prompt, or start with one selected for you.</p>
     </div>
   )
 }

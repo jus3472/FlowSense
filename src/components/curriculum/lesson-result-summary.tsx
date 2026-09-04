@@ -35,11 +35,8 @@ export function LessonResultSummary({ result }: { result: StructuredLessonResult
         >
           {result.path.title}
         </Link>
-        <p className="text-muted text-sm">
+        <h1 className="prompt-display text-foreground text-2xl">
           {result.chapter.title} · Lesson {result.lesson.position} of 10
-        </p>
-        <h1 className="prompt-display text-foreground text-2xl break-words">
-          {result.lesson.title}
         </h1>
       </header>
 

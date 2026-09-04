@@ -8,8 +8,8 @@ const STEPS = [
     body: 'Speak for up to 60 seconds. The result measures this response.',
   },
   {
-    title: 'Review the result',
-    body: 'See Fluency, Clarity, Vocabulary, Grammar, Structure, and Delivery with concrete evidence when it is available.',
+    title: 'See what shaped your result',
+    body: 'Review what you said, how you sounded, and the evidence behind each measurement.',
   },
   {
     title: 'Try Again',

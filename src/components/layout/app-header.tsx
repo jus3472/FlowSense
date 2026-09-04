@@ -1,25 +1,27 @@
 import Link from 'next/link'
-import { HistoryNavLink } from '@/components/layout/history-nav-link'
 import { OverflowMenu } from '@/components/layout/overflow-menu'
+import { PrimaryNavigation } from '@/components/layout/primary-navigation'
 import { Wordmark } from '@/components/layout/wordmark'
+import { StreakDisplay } from '@/components/home/streak-display'
+import type { PracticeActivitySummary } from '@/lib/activity/server'
 
-export function AppHeader() {
+export function AppHeader({ activity }: { activity: PracticeActivitySummary | null }) {
   return (
     <header className="bg-background">
-      <div className="max-w-column mx-auto flex min-h-14 w-full items-center justify-between gap-4 px-6 py-2">
-        <Link href="/home" className="rounded-input flex min-h-11 items-center">
+      <div className="max-w-column mx-auto grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-2 px-6 py-2 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto]">
+        <Link
+          href="/home"
+          className="rounded-input col-start-1 row-start-1 flex min-h-11 items-center"
+        >
           <Wordmark />
         </Link>
-        <nav aria-label="Main" className="flex items-center gap-2">
-          <Link
-            href="/practice"
-            className="text-foreground hover:bg-surface-sunken flex min-h-11 items-center rounded-full px-4 text-sm font-medium transition duration-150 ease-out"
-          >
-            Practice
-          </Link>
-          <HistoryNavLink />
+        <PrimaryNavigation />
+        <div className="col-start-2 row-start-1 sm:col-start-3">
+          {activity ? <StreakDisplay summary={activity} /> : null}
+        </div>
+        <div className="col-start-3 row-start-1 sm:col-start-4">
           <OverflowMenu />
-        </nav>
+        </div>
       </div>
     </header>
   )

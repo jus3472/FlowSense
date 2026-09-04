@@ -26,20 +26,13 @@ function renderLandingPage(): string {
 }
 
 describe('public marketing contract', () => {
-  it('shows the six stable response categories in an explicitly static sample', () => {
+  it('shows the current two response sections in an explicitly static sample', () => {
     renderLandingPage()
 
     expect(screen.getByText('Sample Interview result')).toBeInTheDocument()
-    const categories = within(screen.getByRole('list', { name: 'Sample result categories' }))
-    for (const category of [
-      'Fluency',
-      'Clarity',
-      'Vocabulary',
-      'Grammar',
-      'Structure',
-      'Delivery',
-    ]) {
-      expect(categories.getByText(category)).toBeInTheDocument()
+    const sections = within(screen.getByRole('list', { name: 'Sample result sections' }))
+    for (const section of ['What You Said', 'How You Sounded']) {
+      expect(sections.getByText(section)).toBeInTheDocument()
     }
   })
 
@@ -58,9 +51,13 @@ describe('public marketing contract', () => {
   it('keeps every claim response-level and removes retired or prohibited framing', () => {
     const copy = renderLandingPage()
 
-    expect(copy).toContain('Practice one response at a time')
+    expect(
+      screen.getByRole('heading', { name: 'Speak more clearly, one response at a time.' }),
+    ).toBeInTheDocument()
     expect(copy).toContain('The result measures this response')
-    expect(copy).not.toMatch(/What you said|How you sounded|50\s*\/\s*50/i)
+    expect(copy).toContain('Review what you said, how you sounded')
+    expect(copy).not.toMatch(/Fluency, Clarity|six categories/i)
+    expect(copy).not.toMatch(/50\s*\/\s*50/i)
     expect(copy).not.toMatch(/never (?:comments on|checks|evaluates).*(?:grammar|words)/i)
     expect(copy).not.toMatch(/\b(?:accent|confidence|personality|phoneme|native speaker)\b/i)
     expect(copy).not.toMatch(/guarantee|always makes|never makes/i)

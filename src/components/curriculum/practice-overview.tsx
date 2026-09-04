@@ -4,7 +4,7 @@ import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import type { CurriculumLessonProgress, CurriculumPathProgress } from '@/lib/curriculum/contracts'
 import type { CurriculumOverviewData } from '@/lib/curriculum/overview'
-import { curriculumLessonHref, curriculumPathHref } from '@/lib/curriculum/routes'
+import { curriculumLessonRecordHref, curriculumPathHref } from '@/lib/curriculum/routes'
 import { PRACTICE_MODE_OPTIONS, practiceBrowseHref } from '@/lib/practice/navigation'
 
 function currentLesson(progress: CurriculumPathProgress): CurriculumLessonProgress | null {
@@ -14,13 +14,18 @@ function currentLesson(progress: CurriculumPathProgress): CurriculumLessonProgre
 
 function pathAction(progress: CurriculumPathProgress): {
   label: 'Start' | 'Continue' | 'Try Again' | 'View Path'
-  href: ReturnType<typeof curriculumPathHref> | ReturnType<typeof curriculumLessonHref>
+  href: ReturnType<typeof curriculumPathHref> | ReturnType<typeof curriculumLessonRecordHref>
 } {
   const action = progress.summary.nextAction
   if (action.kind === 'complete') {
     return { label: 'View Path', href: curriculumPathHref(progress.path.slug) }
   }
-  const href = curriculumLessonHref(progress.path.slug, action.lesson.slug)
+  const lesson = currentLesson(progress)
+  const href = curriculumLessonRecordHref(
+    progress.path.slug,
+    action.lesson.slug,
+    action.kind === 'retry' ? lesson?.bestAttemptId : null,
+  )
   if (action.kind === 'retry') return { label: 'Try Again', href }
   return {
     label: progress.summary.attemptedLessons === 0 ? 'Start' : 'Continue',
@@ -35,23 +40,14 @@ function PathCard({ item }: { item: CurriculumOverviewData['paths'][number] }) {
     (chapterProgress) => chapterProgress.chapter.id === lesson?.lesson.chapterId,
   )
   const action = pathAction(progress)
-  const status =
-    selection === 'primary'
-      ? 'Primary path'
-      : selection === 'selected'
-        ? 'Selected path'
-        : 'Available'
 
   return (
     <Card
       className={`flex min-w-0 flex-col gap-6 ${selection === 'primary' ? 'shadow-float' : ''}`}
     >
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-        <h3 className="text-foreground min-w-0 text-lg font-semibold">{progress.path.title}</h3>
-        <span className="bg-accent-soft text-foreground rounded-full px-3 py-1 text-xs font-medium">
-          {status}
-        </span>
-      </div>
+      <h2 className="text-foreground min-w-0 text-lg font-semibold break-words">
+        {progress.path.title}
+      </h2>
 
       {progress.summary.pathComplete ? (
         <p className="text-positive text-sm font-medium">Path complete</p>
@@ -77,10 +73,12 @@ function PathCard({ item }: { item: CurriculumOverviewData['paths'][number] }) {
 
       {lesson ? (
         <div className="border-border flex min-w-0 flex-col gap-2 border-t pt-4">
-          <p className="text-muted text-xs font-medium">Current lesson</p>
+          <p className="text-muted text-xs font-medium">
+            {lesson.checkpoint ? 'Current checkpoint' : 'Current lesson'}
+          </p>
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-            <p className="text-foreground min-w-0 text-base font-medium break-words">
-              {lesson.lesson.title}
+            <p className="numeric text-foreground min-w-0 text-base font-medium">
+              Lesson {lesson.lesson.position} of {chapter?.totalLessons ?? 10}
             </p>
             <CurriculumStars stars={lesson.stars} />
           </div>
@@ -105,23 +103,20 @@ function PathCard({ item }: { item: CurriculumOverviewData['paths'][number] }) {
   )
 }
 
-const FREE_PRACTICE_LABELS = {
-  practice: 'General Free Practice',
-  interview: 'Interview Free Practice',
-  presentation: 'Presentation Free Practice',
-  conversation: 'Conversation Free Practice',
+const PRACTICE_LABELS = {
+  practice: 'General Practice',
+  interview: 'Interview Practice',
+  presentation: 'Presentation Practice',
+  conversation: 'Conversation Practice',
 } as const
 
 export function PracticeOverview({ overview }: { overview: CurriculumOverviewData }) {
   return (
     <div className="flex flex-col gap-12">
       <section aria-labelledby="your-paths-heading" className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <h2 id="your-paths-heading" className="text-foreground text-xl font-semibold">
-            Your paths
-          </h2>
-          <p className="text-muted text-sm">Follow each lesson in order and pass with 70.</p>
-        </div>
+        <h1 id="your-paths-heading" className="text-foreground text-xl font-semibold">
+          Tracks
+        </h1>
         <div className="flex min-w-0 flex-col gap-4">
           {overview.paths.map((item) => (
             <PathCard key={item.progress.path.id} item={item} />
@@ -129,12 +124,12 @@ export function PracticeOverview({ overview }: { overview: CurriculumOverviewDat
         </div>
       </section>
 
-      <section aria-labelledby="free-practice-heading" className="flex flex-col gap-4">
+      <section aria-labelledby="practice-heading" className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
-          <h2 id="free-practice-heading" className="text-foreground text-lg font-semibold">
-            Free Practice
+          <h2 id="practice-heading" className="text-foreground text-lg font-semibold">
+            Practice
           </h2>
-          <p className="text-muted text-sm">Practice with standalone prompts outside the path.</p>
+          <p className="text-muted text-sm">Use a standalone prompt outside a track.</p>
         </div>
         <div className="grid min-w-0 gap-3 sm:grid-cols-2">
           {PRACTICE_MODE_OPTIONS.map((option) => (
@@ -143,7 +138,7 @@ export function PracticeOverview({ overview }: { overview: CurriculumOverviewDat
               href={practiceBrowseHref(option.mode)}
               className="rounded-card bg-surface-sunken text-foreground hover:bg-accent-soft min-h-11 p-4 text-sm font-medium transition duration-150 ease-out"
             >
-              {FREE_PRACTICE_LABELS[option.mode]}
+              {PRACTICE_LABELS[option.mode]}
             </Link>
           ))}
         </div>
@@ -154,7 +149,7 @@ export function PracticeOverview({ overview }: { overview: CurriculumOverviewDat
           <h2 id="custom-prompt-heading" className="text-foreground text-lg font-semibold">
             Custom Prompt
           </h2>
-          <p className="text-muted text-sm">Practice something specific you need to say.</p>
+          <p className="text-muted text-sm">Practice with your own custom prompt</p>
         </div>
         <ButtonLink href="/practice/custom" variant="secondary" fullWidth>
           Enter a custom prompt

@@ -1,15 +1,49 @@
-import { Card } from '@/components/ui/card'
 import type { PracticeActivitySummary } from '@/lib/activity/server'
 
 export function StreakDisplay({ summary }: { summary: PracticeActivitySummary }) {
+  const todayLabel = summary.todayActive
+    ? "Today's practice complete"
+    : "Today's practice not complete"
+  const label = `${summary.current} day streak. ${todayLabel}.`
+
   return (
-    <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
-      <p className="numeric text-foreground text-base font-medium">{summary.current} day streak</p>
-      <p className={summary.todayActive ? 'text-positive text-sm' : 'text-muted text-sm'}>
-        {summary.dailyGoal === 'complete'
-          ? "Today's practice complete"
-          : 'Complete 1 response today'}
-      </p>
-    </Card>
+    <div
+      role="img"
+      aria-label={label}
+      title={label}
+      data-today-active={summary.todayActive ? 'true' : 'false'}
+      className={`flex min-h-11 items-center gap-1.5 rounded-full px-2.5 ${
+        summary.todayActive ? 'bg-accent-soft text-accent' : 'text-muted'
+      }`}
+    >
+      <span className="relative flex size-5 items-center justify-center" aria-hidden="true">
+        <svg
+          viewBox="0 0 24 24"
+          className="size-5"
+          fill={summary.todayActive ? 'currentColor' : 'none'}
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M12.2 2.8c.4 3.2-1.4 4.6-3 6.2-1.3 1.3-2.2 2.8-2.2 4.9a5 5 0 0 0 10 0c0-3.2-1.8-6.1-4.8-11.1Z" />
+          <path d="M12 11.1c.1 1.4-1.5 2.2-1.5 3.7a1.7 1.7 0 0 0 3.4 0c0-1.2-.6-2.4-1.9-3.7Z" />
+        </svg>
+        {summary.todayActive ? (
+          <svg
+            viewBox="0 0 12 12"
+            className="bg-surface text-positive absolute -right-1 -bottom-1 size-3 rounded-full"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="m2.5 6 2.2 2.1 4.8-4.6" />
+          </svg>
+        ) : null}
+      </span>
+      <span className="numeric text-sm font-semibold">{summary.current}</span>
+    </div>
   )
 }

@@ -1,6 +1,5 @@
 'use client'
 
-import type { Route } from 'next'
 import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { logOut } from '@/actions/auth'
@@ -130,10 +129,6 @@ export function OverflowMenu() {
           <Link href="/settings" role="menuitem" data-menuitem className={ITEM_CLASS}>
             Settings
           </Link>
-          <Link href={'/progress' as Route} role="menuitem" data-menuitem className={ITEM_CLASS}>
-            Progress
-          </Link>
-
           <form action={logOut}>
             <button type="submit" role="menuitem" data-menuitem className={ITEM_CLASS}>
               Log out

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { render, screen } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import PracticePage from '@/app/(app)/practice/page'
 
@@ -27,6 +28,14 @@ beforeEach(() => {
 })
 
 describe('Practice overview page states', () => {
+  it('uses Tracks metadata and removes the redundant structured-area introduction', () => {
+    const page = readFileSync('src/app/(app)/practice/page.tsx', 'utf8')
+
+    expect(page).toContain("title: 'Tracks'")
+    expect(page).not.toContain('Continue a path or choose a standalone prompt.')
+    expect(page).not.toContain('>Practice</h1>')
+  })
+
   it.each([
     {
       reason: 'query',

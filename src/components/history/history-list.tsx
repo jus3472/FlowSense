@@ -278,7 +278,7 @@ export function HistoryList({
                     ) : null}
                     <p className="text-foreground min-w-0 text-sm font-medium break-words">
                       {entry.lesson
-                        ? `${entry.lesson.chapterLevel[0]?.toUpperCase()}${entry.lesson.chapterLevel.slice(1)} · ${entry.lesson.lessonTitle}`
+                        ? `${entry.lesson.chapterLevel[0]?.toUpperCase()}${entry.lesson.chapterLevel.slice(1)} · Lesson ${entry.lesson.lessonPosition}`
                         : entry.promptText}
                     </p>
                     {historyContext(entry).length > 0 ? (

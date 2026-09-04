@@ -18,6 +18,7 @@ describe('login entry intent', () => {
     const form = document.querySelector('form')
     expect(form).not.toBeNull()
     expect(within(form!).getByRole('button', { name: 'Log in' })).toHaveAttribute('type', 'submit')
+    expect(screen.queryByText('Pick up where you left off.')).not.toBeInTheDocument()
   })
 
   it('keeps the signup form as the default account-creation entry', async () => {
@@ -26,5 +27,6 @@ describe('login entry intent', () => {
     expect(screen.getByRole('heading', { name: 'Create your account' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Sign up', pressed: true })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Create account' })).toHaveAttribute('type', 'submit')
+    expect(screen.queryByText('Two short steps, then your first prompt.')).not.toBeInTheDocument()
   })
 })

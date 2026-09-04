@@ -6,7 +6,7 @@ import { ErrorState } from '@/components/ui/error-state'
 import { loadAuthenticatedCurriculumOverview } from '@/lib/curriculum/server'
 
 export const metadata: Metadata = {
-  title: 'Practice',
+  title: 'Tracks',
 }
 
 export default async function PracticePage() {
@@ -19,12 +19,7 @@ export default async function PracticePage() {
       : 'The connection to your practice paths failed. Try loading them again.'
 
   return (
-    <div className="flex flex-col gap-8 pt-4 pb-12">
-      <div className="flex flex-col gap-2">
-        <h1 className="prompt-display text-foreground text-2xl">Practice</h1>
-        <p className="text-muted text-base">Continue a path or choose a standalone prompt.</p>
-      </div>
-
+    <div className="flex flex-col pt-4 pb-12">
       {outcome.status === 'failure' ? (
         <ErrorState title="Your practice paths did not load" description={failureDescription}>
           <RetryButton />

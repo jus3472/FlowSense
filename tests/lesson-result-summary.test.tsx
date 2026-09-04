@@ -44,7 +44,7 @@ function result(overrides: Partial<StructuredLessonResultModel> = {}): Structure
     pathComplete: false,
     primaryAction: {
       label: 'Continue',
-      href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-07-next' as Route,
+      href: '/practice/paths/general-speaking/lessons/general-speaking-beginner-07-next/record' as Route,
     },
     secondaryAction: {
       label: 'Retry for 3 stars',
@@ -59,8 +59,9 @@ describe('LessonResultSummary', () => {
     render(<LessonResultSummary result={result()} />)
 
     expect(
-      screen.getByRole('heading', { name: 'Handling a setback', level: 1 }),
+      screen.getByRole('heading', { name: 'Beginner · Lesson 6 of 10', level: 1 }),
     ).toBeInTheDocument()
+    expect(screen.queryByText('Handling a setback')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Lesson complete' })).toBeInTheDocument()
     expect(screen.getAllByText('84')).toHaveLength(2)
     expect(screen.getAllByLabelText('2 of 3 stars')).toHaveLength(2)
@@ -69,7 +70,7 @@ describe('LessonResultSummary', () => {
     expect(screen.getByText('Lesson 7 is available.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Continue' })).toHaveAttribute(
       'href',
-      '/practice/paths/general-speaking/lessons/general-speaking-beginner-07-next',
+      '/practice/paths/general-speaking/lessons/general-speaking-beginner-07-next/record',
     )
     expect(screen.getByRole('link', { name: 'Retry for 3 stars' })).toHaveAttribute(
       'href',

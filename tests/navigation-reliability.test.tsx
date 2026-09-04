@@ -82,16 +82,13 @@ describe('attempt navigation', () => {
     expect(screen.getByText('Last response unavailable')).toBeInTheDocument()
   })
 
-  it('keeps Home selection owned, lifecycle-complete, and free of removed result routes', () => {
+  it('keeps Home focused on curriculum and free of the removed latest-result query', () => {
     const home = readFileSync('src/app/(app)/home/page.tsx', 'utf8')
-    const homeServer = readFileSync('src/lib/home/server.ts', 'utf8')
-    const lastScore = readFileSync('src/components/home/last-score.tsx', 'utf8')
-    expect(homeServer).toContain(".eq('user_id', userId)")
-    expect(home).toContain('loadHomeResponseData(supabase, user.id)')
+    expect(home).not.toContain('loadHomeResponseData')
+    expect(home).not.toContain('Latest response')
     expect(home).not.toContain("from('attempts')")
     expect(home).not.toContain(".or('score.not.is.null,section_scores.not.is.null')")
-    expect(lastScore).toContain('attemptHref(attemptId)')
-    expect(`${home}\n${lastScore}`).not.toMatch(/(?:href=|redirect\()["'`]\/results/)
+    expect(home).not.toMatch(/(?:href=|redirect\()["'`]\/results/)
   })
 
   it('keeps History query failures distinct from the successful empty state', () => {

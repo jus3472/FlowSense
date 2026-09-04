@@ -17,10 +17,10 @@ function currentLesson(progress: CurriculumPathProgress): CurriculumLessonProgre
 function chapterState(
   chapter: CurriculumChapterSummary,
   currentChapterId: string | null,
-): 'Complete' | 'Current' | 'Available' | 'Locked' {
+): 'Complete' | 'Current' | 'Locked' | null {
   if (chapter.chapterComplete) return 'Complete'
   if (!chapter.chapterUnlocked) return 'Locked'
-  return chapter.chapter.id === currentChapterId ? 'Current' : 'Available'
+  return chapter.chapter.id === currentChapterId ? 'Current' : null
 }
 
 function ChapterProgress({
@@ -35,9 +35,11 @@ function ChapterProgress({
     <li className="border-border flex min-w-0 flex-col gap-2 border-t pt-3 first:border-t-0 first:pt-0">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <span className="text-foreground font-medium break-words">{chapter.chapter.title}</span>
-        <span className="bg-surface-sunken text-muted rounded-full px-3 py-1 text-xs font-medium">
-          {state}
-        </span>
+        {state ? (
+          <span className="bg-surface-sunken text-muted rounded-full px-3 py-1 text-xs font-medium">
+            {state}
+          </span>
+        ) : null}
       </div>
       <div className="text-muted flex flex-wrap gap-x-6 gap-y-1 text-xs">
         <span className="numeric">
@@ -57,17 +59,10 @@ function SelectedPathProgress({ item }: { item: CurriculumOverviewPath }) {
   const lesson = currentLesson(progress)
   const action = progress.summary.nextAction
   const currentChapterId = progress.summary.currentChapter?.id ?? null
-  const pathLabel = item.selection === 'primary' ? 'Primary path' : 'Selected path'
-
   return (
     <Card className="flex min-w-0 flex-col gap-6">
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-muted text-xs font-medium">{pathLabel}</p>
-          <h3 className="text-foreground text-lg font-semibold break-words">
-            {progress.path.title}
-          </h3>
-        </div>
+        <h3 className="text-foreground text-lg font-semibold break-words">{progress.path.title}</h3>
         {progress.summary.pathComplete ? (
           <span className="bg-surface-sunken text-positive rounded-full px-3 py-1 text-xs font-medium">
             Complete
@@ -103,9 +98,9 @@ function SelectedPathProgress({ item }: { item: CurriculumOverviewPath }) {
           </p>
           <Link
             href={curriculumLessonHref(progress.path.slug, lesson.lesson.slug)}
-            className="text-accent min-h-11 py-2 font-medium break-words"
+            className="numeric text-accent min-h-11 py-2 font-medium"
           >
-            {lesson.lesson.title}
+            Lesson {lesson.lesson.position} of 10
           </Link>
           {action.kind === 'retry' && lesson.bestScore !== null ? (
             <p className="numeric text-muted text-sm">

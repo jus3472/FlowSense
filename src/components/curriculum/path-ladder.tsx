@@ -7,7 +7,7 @@ import type {
   CurriculumPathProgress,
   PathSlug,
 } from '@/lib/curriculum/contracts'
-import { curriculumLessonHref } from '@/lib/curriculum/routes'
+import { curriculumLessonHref, curriculumLessonRecordHref } from '@/lib/curriculum/routes'
 import { PASSING_SCORE } from '@/lib/curriculum/thresholds'
 import { cn } from '@/lib/utils'
 
@@ -90,9 +90,8 @@ function LessonCard({
     >
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="numeric text-muted text-xs">Lesson {lesson.lesson.position} of 10</p>
-          <h3 className="text-foreground text-base font-medium break-words">
-            {lesson.lesson.title}
+          <h3 className="numeric text-foreground text-base font-medium">
+            Lesson {lesson.lesson.position} of 10
           </h3>
         </div>
         {current || lesson.checkpoint ? (
@@ -132,7 +131,15 @@ function LessonCard({
 
   return (
     <Link
-      href={curriculumLessonHref(pathSlug, lesson.lesson.slug)}
+      href={
+        lesson.state === 'passed'
+          ? curriculumLessonHref(pathSlug, lesson.lesson.slug)
+          : curriculumLessonRecordHref(
+              pathSlug,
+              lesson.lesson.slug,
+              lesson.state === 'retry_required' ? lesson.bestAttemptId : null,
+            )
+      }
       className="rounded-card block min-h-11 min-w-0"
       aria-current={current ? 'step' : undefined}
     >

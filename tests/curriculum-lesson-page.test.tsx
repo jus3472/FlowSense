@@ -126,15 +126,17 @@ describe('available curriculum lesson page', () => {
       'href',
       '/practice/paths/interviews',
     )
-    expect(screen.getByText('Beginner · Lesson 4 of 10')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Give a simple example' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Beginner · Lesson 4 of 10' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Give a simple example')).not.toBeInTheDocument()
     expect(
       screen.getByText('Practice supporting an answer with one specific example.'),
     ).toBeInTheDocument()
     expect(screen.getByText('Tell me about a time you solved a small problem.')).toBeInTheDocument()
     expect(screen.getByText('Target: about 1 minute')).toBeInTheDocument()
     expect(screen.getByText('Pass: 70')).toBeInTheDocument()
-    expect(screen.getByText('Available')).toBeInTheDocument()
+    expect(screen.getByText('Ready to start')).toBeInTheDocument()
 
     expect(screen.getByRole('link', { name: 'Start Lesson' })).toHaveAttribute(
       'href',
@@ -283,9 +285,12 @@ describe('lesson page boundary and mobile layout', () => {
 
     expect(screen.getByRole('article')).toHaveClass('min-w-0')
     expect(
-      screen.getByRole('heading', {
-        name: 'A long lesson title that wraps instead of making the page wider than the screen',
-      }),
+      screen.queryByText(
+        'A long lesson title that wraps instead of making the page wider than the screen',
+      ),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByText('A long skill description that remains readable on a narrow screen.'),
     ).toHaveClass('break-words')
     expect(screen.getByText('Tell me about a time you solved a small problem.')).toHaveClass(
       'break-words',

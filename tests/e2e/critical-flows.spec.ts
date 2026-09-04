@@ -150,13 +150,11 @@ async function processingMocks(
 }
 
 async function recordOne(page: Page) {
-  await page.getByRole('button', { name: "I'm ready" }).click()
-  await expect(page.getByText('Recording', { exact: true })).toBeVisible({ timeout: 10_000 })
+  const stop = page.getByRole('button', { name: 'Stop' })
+  await expect(stop).toBeVisible({ timeout: 10_000 })
   // This is an intentional capture duration, not a wait for UI state.
   await page.waitForTimeout(MIN_PROCESSABLE_RECORDING_MS + 150)
-  await page.getByRole('button', { name: 'Stop' }).click()
-  await expect(page.getByRole('status').filter({ hasText: 'Transcribing' })).toBeVisible()
-  await expect(page.getByRole('status').filter({ hasText: 'Scoring' })).toBeVisible()
+  await stop.click()
   await expect(page).toHaveURL(/\/attempts\//, { timeout: 15_000 })
 }
 
@@ -184,7 +182,7 @@ test('new user chooses an ordered primary and secondary path during onboarding',
     page.getByRole('heading', { name: 'What do you want to get better at?' }),
   ).toBeVisible()
   await expect(page.getByRole('radio', { name: 'General Speaking' })).toBeChecked()
-  await page.getByRole('group', { name: 'Primary path' }).getByText('Interviews').click()
+  await page.getByRole('group', { name: 'Starting track' }).getByText('Interviews').click()
   await page.getByRole('group', { name: 'Additional paths' }).getByText('Presentations').click()
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
   await expect(page).toHaveURL(/\/home$/)
@@ -223,7 +221,6 @@ test('microphone denial gives a recoverable state', async ({ page }) => {
   })
   await logIn(page)
   await page.goto('/record?prompt=10000000-0000-4000-8000-000000000001')
-  await page.getByRole('button', { name: "I'm ready" }).click()
   await expect(page.getByRole('heading', { name: 'Microphone access is blocked' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Back to home' })).toBeVisible()
 })
@@ -231,16 +228,26 @@ test('microphone denial gives a recoverable state', async ({ page }) => {
 test('selects library and custom prompts through real screens', async ({ page }) => {
   await logIn(page)
   await page.goto('/practice')
-  await page.getByRole('link', { name: 'Interview Free Practice', exact: true }).click()
+  await page.getByRole('link', { name: 'Interview Practice', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Interviews' })).toBeVisible()
   await page.getByRole('link', { name: 'Choose this prompt' }).first().click()
-  await expect(page.getByRole('button', { name: "I'm ready" })).toBeVisible()
+  await expect(page).toHaveURL(/\/record\?prompt=/)
+  await expect(page.getByText('Tell me about a time you solved a difficult problem.')).toBeVisible()
+  await expect(page.getByText('One prompt, 60 seconds')).toHaveCount(0)
   await page.goto('/practice/custom')
   await page.getByLabel('Prompt or question').fill('Explain a choice you made today.')
   await page.getByLabel('Practice mode').selectOption('conversation')
   await page.getByLabel(/Additional context/).fill('Keep the answer private and concise.')
   await page.getByRole('button', { name: 'Continue to record' }).click()
-  await expect(page.getByRole('button', { name: "I'm ready" })).toBeVisible()
+  await expect(page).toHaveURL(/\/record\?custom=1/)
+  await expect(page.getByText('Explain a choice you made today.')).toBeVisible()
+  await expect(page.getByText('One prompt, 60 seconds')).toHaveCount(0)
+
+  await page.goto('/practice')
+  await page.getByRole('link', { name: 'Start' }).first().click()
+  await expect(page).toHaveURL(/\/practice\/paths\/.*\/record$/)
+  await expect(page.getByText('Give a clear response for beginner lesson 1.')).toBeVisible()
+  await expect(page.getByText('One prompt, 60 seconds')).toHaveCount(0)
 })
 
 test('history and progress start empty after an isolated reset', async ({ page }) => {
@@ -384,10 +391,9 @@ test('records once, shows processing and v3 results, retries, compares, filters,
   await page.getByRole('link', { name: 'FlowSense' }).click()
   await expect(page).toHaveURL(/\/home$/)
   await expect(page.locator(`a[href="/attempts/${retryAttempt.id}"]`)).toHaveCount(0)
-  await expect(page.locator(`a[href="/attempts/${firstAttempt.id}"]`)).toBeVisible()
+  await expect(page.locator(`a[href="/attempts/${firstAttempt.id}"]`)).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'More options' }).click()
-  await page.getByRole('menuitem', { name: 'Progress' }).click()
+  await page.getByRole('link', { name: 'Progress' }).click()
   await expect(page.getByRole('heading', { name: 'Recent retries' })).toHaveCount(0)
   await page.getByRole('link', { name: 'History' }).click()
   await expect(page.locator(`a[href="/attempts/${retryAttempt.id}"]`)).toHaveCount(0)
@@ -453,12 +459,11 @@ test('structured lessons retry thresholds without reducing durable progress', as
   expect(failedState.practiceActivityDays).toHaveLength(1)
 
   await page.goto('/home')
-  await expect(page.getByText('1 day streak', { exact: true })).toBeVisible()
-  await expect(page.getByText("Today's practice complete", { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('img', { name: "1 day streak. Today's practice complete." }),
+  ).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Continue Interviews' })).toBeVisible()
   await expect(page.getByText('Best: 64 · Need 70 to continue', { exact: true })).toBeVisible()
-  await page.getByRole('link', { name: 'Try Again' }).click()
-  await expect(page).toHaveURL(new RegExp(`${firstLesson}$`))
   await page.getByRole('link', { name: 'Try Again' }).click()
   await expect(page).toHaveURL(/\/record\?retry=/)
 
@@ -466,7 +471,7 @@ test('structured lessons retry thresholds without reducing durable progress', as
   await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
   await expect(page.getByText('Best: 74')).toBeVisible()
   await expect(page.getByText('Lesson 2 is available.')).toHaveCount(0)
-  await expect(page.getByText('Beginner lesson 1', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Beginner lesson 1', exact: true })).toHaveCount(0)
   await expect(page.getByText('Your prompt', { exact: true })).toHaveCount(0)
   await expect(page.getByText('What You Said', { exact: true })).toHaveCount(1)
   await expect(page.getByText('How You Sounded', { exact: true })).toHaveCount(1)
@@ -486,17 +491,17 @@ test('structured lessons retry thresholds without reducing durable progress', as
 
   await page.goto('/home')
   await expect(page.getByText('1 / 30 lessons passed', { exact: true })).toBeVisible()
-  await expect(page.getByText('Beginner lesson 2', { exact: true })).toBeVisible()
+  await expect(page.getByText('Beginner · Lesson 2 of 10', { exact: true })).toBeVisible()
+  await expect(page.getByText('Beginner lesson 2', { exact: true })).toHaveCount(0)
   await page.getByRole('link', { name: 'Continue' }).click()
-  await expect(page).toHaveURL(/interviews-beginner-02-skill-2$/)
-  await expect(page.getByRole('heading', { name: 'Beginner lesson 2' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Start Lesson' })).toBeVisible()
+  await expect(page).toHaveURL(/interviews-beginner-02-skill-2\/record$/)
+  await expect(page.getByText('Give a clear response for beginner lesson 2.')).toBeVisible()
 
   await page.goto('/progress')
   await expect(page.getByRole('heading', { name: 'Path progress' })).toBeVisible()
   await expect(page.getByText('1 / 30', { exact: true }).first()).toBeVisible()
   await page.goto('/history')
-  await expect(page.getByText('Beginner · Beginner lesson 1', { exact: true })).toHaveCount(2)
+  await expect(page.getByText('Beginner · Lesson 1', { exact: true })).toHaveCount(2)
   await expect(page.getByText('Passed', { exact: true })).toHaveCount(1)
   await expect(page.getByText('Not passed', { exact: true })).toHaveCount(1)
 
@@ -536,7 +541,7 @@ test('structured lessons retry thresholds without reducing durable progress', as
   expect(upgradedRetryState.practiceActivityDays).toHaveLength(1)
 
   await page.goto('/history')
-  await expect(page.getByText('Beginner · Beginner lesson 1', { exact: true })).toHaveCount(5)
+  await expect(page.getByText('Beginner · Lesson 1', { exact: true })).toHaveCount(5)
   await expect(page.getByText('Passed', { exact: true })).toHaveCount(4)
   await expect(page.getByText('Not passed', { exact: true })).toHaveCount(1)
 
@@ -555,8 +560,11 @@ test('structured lessons retry thresholds without reducing durable progress', as
     best_attempt_id: null,
   })
   await page.goto('/home')
-  await expect(page.getByText('1 day streak', { exact: true })).toBeVisible()
-  await expect(page.getByText('Beginner lesson 2', { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('img', { name: "1 day streak. Today's practice complete." }),
+  ).toBeVisible()
+  await expect(page.getByText('Beginner · Lesson 2 of 10', { exact: true })).toBeVisible()
+  await expect(page.getByText('Beginner lesson 2', { exact: true })).toHaveCount(0)
   await expect(page.getByText('3 / 90 stars', { exact: true })).toBeVisible()
 
   await reset(request, true, { pathSlug: 'interviews', passedLessons: 9 })
@@ -576,8 +584,8 @@ test('structured lessons retry thresholds without reducing durable progress', as
   await recordOne(page)
   await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
   await page.getByRole('link', { name: 'Continue' }).click()
-  await expect(page).toHaveURL(/interviews-intermediate-01-skill-1$/)
-  await expect(page.getByRole('heading', { name: 'Intermediate lesson 1' })).toBeVisible()
+  await expect(page).toHaveURL(/interviews-intermediate-01-skill-1\/record$/)
+  await expect(page.getByText('Give a clear response for intermediate lesson 1.')).toBeVisible()
 
   const passedCheckpointState = await currentState(request)
   const attempt73 = attemptAt(passedCheckpointState, 1)
@@ -617,8 +625,8 @@ test('later checkpoints unlock the next chapter and finish the path', async ({
   await recordOne(page)
   await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
   await page.getByRole('link', { name: 'Continue' }).click()
-  await expect(page).toHaveURL(/interviews-advanced-01-skill-1$/)
-  await expect(page.getByRole('heading', { name: 'Advanced lesson 1' })).toBeVisible()
+  await expect(page).toHaveURL(/interviews-advanced-01-skill-1\/record$/)
+  await expect(page.getByText('Give a clear response for advanced lesson 1.')).toBeVisible()
 
   await reset(request, true, { pathSlug: 'interviews', passedLessons: 29 })
   await page.goto('/practice/paths/interviews/lessons/interviews-advanced-10-skill-10')
@@ -676,8 +684,9 @@ test('structured provider-neutral retry counts activity without changing progres
   expect(neutralState.practiceActivityDays).toHaveLength(1)
 
   await page.goto('/home')
-  await expect(page.getByText('1 day streak', { exact: true })).toBeVisible()
-  await expect(page.getByText("Today's practice complete", { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('img', { name: "1 day streak. Today's practice complete." }),
+  ).toBeVisible()
   await expect(page.getByText('Best: 64 · Need 70 to continue', { exact: true })).toBeVisible()
   await page.goto('/practice/paths/interviews/lessons/interviews-beginner-02-skill-2')
   await expect(page.getByRole('heading', { name: 'Lesson locked' })).toBeVisible()
@@ -693,7 +702,7 @@ test('existing user can change Home priority without losing prior path progress'
   await expect(page.getByText('1 / 30 lessons passed', { exact: true })).toBeVisible()
 
   await page.goto('/settings')
-  await page.getByRole('group', { name: 'Primary path' }).getByText('Presentations').click()
+  await page.getByRole('group', { name: 'Starting track' }).getByText('Presentations').click()
   await page.getByRole('group', { name: 'Additional paths' }).getByText('Interviews').click()
   await page.getByRole('button', { name: 'Save changes' }).click()
   await expect(page.getByRole('status')).toHaveText('Saved.')
@@ -716,11 +725,15 @@ test('existing user can change Home priority without losing prior path progress'
   expect(state.lessonProgress[0]?.best_score).toBe(74)
 })
 
-test('@mobile mobile navigation exposes practice, history, and account menu', async ({ page }) => {
+test('@mobile mobile navigation exposes all primary destinations and account menu', async ({
+  page,
+}) => {
   await logIn(page)
   await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Practice', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Tracks', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'History' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Progress' })).toBeVisible()
   await page.getByRole('button', { name: 'More options' }).click()
   await expect(page.getByRole('menuitem', { name: 'Settings' })).toBeVisible()
 })
@@ -728,16 +741,17 @@ test('@mobile mobile navigation exposes practice, history, and account menu', as
 test('@mobile structured Practice stays readable through the lesson boundary', async ({ page }) => {
   await logIn(page)
   await page.goto('/practice')
-  await expect(page.getByRole('heading', { name: 'Your paths' })).toBeVisible()
-  await expect(page.getByText('Primary path')).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Interview Free Practice' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Tracks' })).toBeVisible()
+  await expect(page.getByText('Primary path')).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'Interview Practice' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Enter a custom prompt' })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
 
-  await page.getByRole('link', { name: 'Start' }).first().click()
-  await expect(page.getByRole('heading', { name: 'Beginner lesson 1' })).toBeVisible()
+  await page.goto('/practice/paths/interviews/lessons/interviews-beginner-01-skill-1')
+  await expect(page.getByRole('heading', { name: 'Beginner · Lesson 1 of 10' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Beginner lesson 1', exact: true })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Start Lesson' })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,

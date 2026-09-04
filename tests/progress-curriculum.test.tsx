@@ -116,9 +116,10 @@ describe('curriculum progress display', () => {
   it('shows a new primary path without inventing achievement', () => {
     render(<CurriculumProgress overview={overview()} />)
 
-    expect(screen.getByText('Primary path')).toBeInTheDocument()
+    expect(screen.queryByText('Primary path')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'General Speaking' })).toBeInTheDocument()
-    expect(screen.getByText('Beginner lesson 1')).toBeInTheDocument()
+    expect(screen.getByText('Lesson 1 of 10')).toBeInTheDocument()
+    expect(screen.queryByText('Beginner lesson 1')).not.toBeInTheDocument()
     expect(screen.getByText('Pass with 70 to continue.')).toBeInTheDocument()
     expect(screen.getAllByText('0 / 30')[0]).toBeInTheDocument()
     expect(
@@ -134,7 +135,7 @@ describe('curriculum progress display', () => {
     expect(screen.getByText('5 / 30')).toBeInTheDocument()
     expect(screen.getByText('11 / 90')).toBeInTheDocument()
     expect(screen.getByText('2 / 30')).toBeInTheDocument()
-    expect(screen.getByText('Beginner lesson 6')).toBeInTheDocument()
+    expect(screen.getByText('Lesson 6 of 10')).toBeInTheDocument()
     expect(screen.getByText('Best 64 · Need 70')).toBeInTheDocument()
   })
 
@@ -146,7 +147,7 @@ describe('curriculum progress display', () => {
     )
 
     expect(screen.getByText('Current checkpoint')).toBeInTheDocument()
-    expect(screen.getByText('Beginner lesson 10')).toBeInTheDocument()
+    expect(screen.getByText('Lesson 10 of 10')).toBeInTheDocument()
     expect(screen.getByText('Best 69 · Need 70')).toBeInTheDocument()
     const chapters = screen.getByRole('list', { name: 'General Speaking chapter progress' })
     expect(within(chapters).getByText('Beginner').parentElement).toHaveTextContent('Current')
@@ -206,8 +207,8 @@ describe('curriculum progress display', () => {
     expect(text.indexOf('Presentations')).toBeLessThan(text.indexOf('General Speaking'))
     expect(text.indexOf('General Speaking')).toBeLessThan(text.indexOf('Other paths'))
     expect(text.indexOf('Other paths')).toBeLessThan(text.indexOf('Interviews'))
-    expect(screen.getByText('Primary path').parentElement).toHaveTextContent('Presentations')
-    expect(screen.getByText('Selected path').parentElement).toHaveTextContent('General Speaking')
+    expect(screen.queryByText('Primary path')).not.toBeInTheDocument()
+    expect(screen.queryByText('Selected path')).not.toBeInTheDocument()
     expect(screen.getAllByText('Not selected')).toHaveLength(2)
   })
 

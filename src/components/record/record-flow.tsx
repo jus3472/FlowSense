@@ -13,7 +13,6 @@ import {
 } from '@/components/media/microphone-unavailable'
 import { CountdownStep } from '@/components/record/countdown-step'
 import { ProcessingStep } from '@/components/record/processing-step'
-import { ReadyStep } from '@/components/record/ready-step'
 import { RecordingStep } from '@/components/record/recording-step'
 import { useActiveRecordingExitGuard } from '@/components/record/use-active-recording-exit-guard'
 import { Button, ButtonLink } from '@/components/ui/button'
@@ -51,6 +50,7 @@ import {
   type AttemptRecording,
 } from '@/lib/recording/recorder'
 import {
+  isResolvedMediaSupport,
   mediaSupportSnapshot,
   serverMediaSupportSnapshot,
   subscribeToMediaSupport,
@@ -63,7 +63,6 @@ interface RecordFlowProps {
 }
 
 type Phase =
-  | { name: 'ready' }
   | { name: 'requesting' }
   | { name: 'blocked' }
   | { name: 'unavailable'; reason: UnavailableReason }
@@ -81,7 +80,7 @@ export function RecordFlow({ session }: RecordFlowProps) {
     serverMediaSupportSnapshot,
   )
 
-  const [phase, setPhase] = useState<Phase>({ name: 'ready' })
+  const [phase, setPhase] = useState<Phase>({ name: 'requesting' })
   const [processing, setProcessing] = useState<ProcessingState>(INITIAL_PROCESSING_STATE)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [recording, setRecording] = useState<AttemptRecording | null>(null)
@@ -283,6 +282,9 @@ export function RecordFlow({ session }: RecordFlowProps) {
 
   const start = useCallback(async () => {
     if (!mountedRef.current || requestingMicrophoneRef.current) return
+    // The server snapshot is only a hydration placeholder. Wait for the browser
+    // to report a real format before acquiring a stream and constructing a recorder.
+    if (!isResolvedMediaSupport(support)) return
     if (!support.ok) {
       setPhase({ name: 'unavailable', reason: support.reason })
       return
@@ -337,6 +339,11 @@ export function RecordFlow({ session }: RecordFlowProps) {
     setPhase({ name: 'countdown' })
   }, [releaseStream, support])
 
+  useEffect(() => {
+    const startTimer = window.setTimeout(() => void start(), 0)
+    return () => window.clearTimeout(startTimer)
+  }, [start])
+
   const retry = useCallback(() => {
     if (recording) void runPipeline(recording)
   }, [recording, runPipeline])
@@ -385,7 +392,7 @@ export function RecordFlow({ session }: RecordFlowProps) {
         </p>
         <p className="text-muted text-base">Start again when you are ready.</p>
         <div className="flex flex-col gap-3">
-          <Button size="lg" fullWidth onClick={() => setPhase({ name: 'ready' })}>
+          <Button size="lg" fullWidth onClick={() => void start()}>
             Start over
           </Button>
           {backHome}
@@ -427,5 +434,9 @@ export function RecordFlow({ session }: RecordFlowProps) {
     )
   }
 
-  return <ReadyStep onStart={() => void start()} requesting={phase.name === 'requesting'} />
+  return (
+    <div role="status" aria-live="polite" className="flex min-h-[68vh] items-center justify-center">
+      <p className="text-muted text-sm">Preparing your microphone</p>
+    </div>
+  )
 }

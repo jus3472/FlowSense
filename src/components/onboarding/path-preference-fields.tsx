@@ -33,16 +33,14 @@ export function PathPreferenceFields({
   const toggleSecondary = (slug: PathSlug) => {
     if (slug === primary) return
     setSecondaries((current) =>
-      current.includes(slug)
-        ? current.filter((selected) => selected !== slug)
-        : [...current, slug],
+      current.includes(slug) ? current.filter((selected) => selected !== slug) : [...current, slug],
     )
   }
 
   return (
     <div className="flex flex-col gap-8">
       <fieldset className="flex flex-col gap-4">
-        <legend className="text-foreground text-sm font-medium">Primary path</legend>
+        <legend className="text-foreground text-sm font-medium">Starting track</legend>
         <p className="text-muted text-sm">This path appears first on Home.</p>
         <div className="grid gap-3 sm:grid-cols-2">
           {paths.map((path) => {
@@ -51,7 +49,7 @@ export function PathPreferenceFields({
               <label
                 key={path.id}
                 className={cn(
-                  'flex min-h-14 cursor-pointer items-center rounded-card bg-surface-sunken px-4 py-3 text-sm font-medium transition duration-150 ease-out',
+                  'rounded-card bg-surface-sunken flex min-h-14 cursor-pointer items-center px-4 py-3 text-sm font-medium transition duration-150 ease-out',
                   selected && 'bg-accent-soft ring-accent ring-2 ring-inset',
                 )}
               >
@@ -82,7 +80,7 @@ export function PathPreferenceFields({
               <label
                 key={path.id}
                 className={cn(
-                  'flex min-h-11 items-center justify-between rounded-input bg-surface-sunken px-4 py-3 text-sm',
+                  'rounded-input bg-surface-sunken flex min-h-11 items-center justify-between px-4 py-3 text-sm',
                   isPrimary ? 'cursor-default opacity-60' : 'cursor-pointer',
                   selected && 'bg-accent-soft ring-accent ring-2 ring-inset',
                 )}

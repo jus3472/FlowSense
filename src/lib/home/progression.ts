@@ -5,7 +5,7 @@ import type {
   CurriculumPathProgress,
 } from '@/lib/curriculum/contracts'
 import type { CurriculumOverviewData, CurriculumOverviewPath } from '@/lib/curriculum/overview'
-import { curriculumLessonHref, curriculumPathHref } from '@/lib/curriculum/routes'
+import { curriculumLessonRecordHref, curriculumPathHref } from '@/lib/curriculum/routes'
 
 export interface HomePathAction {
   label: 'Continue' | 'Try Again' | 'View Path'
@@ -87,7 +87,11 @@ function primaryAction(progress: CurriculumPathProgress): HomePathAction {
   }
   return {
     label: action.kind === 'retry' ? 'Try Again' : 'Continue',
-    href: curriculumLessonHref(progress.path.slug, action.lesson.slug),
+    href: curriculumLessonRecordHref(
+      progress.path.slug,
+      action.lesson.slug,
+      action.kind === 'retry' ? findCurrentLesson(progress)?.bestAttemptId : null,
+    ),
   }
 }
 

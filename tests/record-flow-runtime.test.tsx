@@ -51,6 +51,7 @@ vi.mock('@/lib/recording/audio-sampler', () => ({
 vi.mock('@/lib/recording/support', () => {
   const supported = { ok: true as const, mimeType: 'audio/webm;codecs=opus' }
   return {
+    isResolvedMediaSupport: () => true,
     mediaSupportSnapshot: () => supported,
     serverMediaSupportSnapshot: () => supported,
     subscribeToMediaSupport: () => () => undefined,
@@ -130,7 +131,6 @@ function streamWithTrack() {
 }
 
 async function reachCountdown() {
-  fireEvent.click(screen.getByRole('button', { name: "I'm ready" }))
   await screen.findByRole('button', { name: 'Finish countdown' })
 }
 
@@ -196,8 +196,7 @@ describe('RecordFlow runtime guards', () => {
     runtime.getUserMedia.mockReturnValue(new Promise<MediaStream>(() => undefined))
     render(<RecordFlow session={session} />)
 
-    fireEvent.click(screen.getByRole('button', { name: "I'm ready" }))
-    expect(screen.getByRole('button', { name: 'Waiting for your browser' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Preparing your microphone')
 
     await act(async () => vi.advanceTimersByTime(MICROPHONE_ACQUISITION_TIMEOUT_MS))
 
@@ -213,8 +212,6 @@ describe('RecordFlow runtime guards', () => {
     runtime.getUserMedia.mockRejectedValue(new DOMException('Denied', 'NotAllowedError'))
     render(<RecordFlow session={session} />)
 
-    fireEvent.click(screen.getByRole('button', { name: "I'm ready" }))
-
     expect(
       await screen.findByRole('heading', { name: 'Microphone access is blocked' }),
     ).toBeVisible()
@@ -229,7 +226,6 @@ describe('RecordFlow runtime guards', () => {
       .mockResolvedValueOnce(stream)
     render(<RecordFlow session={session} />)
 
-    fireEvent.click(screen.getByRole('button', { name: "I'm ready" }))
     await act(async () => vi.advanceTimersByTime(MICROPHONE_ACQUISITION_TIMEOUT_MS))
     fireEvent.click(await screen.findByRole('button', { name: 'Try again' }))
 
@@ -251,7 +247,6 @@ describe('RecordFlow runtime guards', () => {
       .mockResolvedValueOnce(retry.stream)
     render(<RecordFlow session={session} />)
 
-    fireEvent.click(screen.getByRole('button', { name: "I'm ready" }))
     await act(async () => vi.advanceTimersByTime(MICROPHONE_ACQUISITION_TIMEOUT_MS))
     fireEvent.click(await screen.findByRole('button', { name: 'Try again' }))
     await screen.findByRole('button', { name: 'Finish countdown' })
@@ -269,7 +264,6 @@ describe('RecordFlow runtime guards', () => {
     FakeMediaRecorder.constructionError = new Error('Recorder setup failed.')
     render(<RecordFlow session={session} />)
 
-    fireEvent.click(screen.getByRole('button', { name: "I'm ready" }))
     fireEvent.click(await screen.findByRole('button', { name: 'Finish countdown' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Recorder setup failed.')
@@ -288,11 +282,6 @@ describe('RecordFlow runtime guards', () => {
       </StrictMode>,
     )
 
-    const start = screen.getByRole('button', { name: "I'm ready" })
-    act(() => {
-      start.click()
-      start.click()
-    })
     await screen.findByRole('button', { name: 'Finish countdown' })
     fireEvent.click(screen.getByRole('button', { name: 'Finish countdown' }))
 
@@ -311,8 +300,8 @@ describe('RecordFlow runtime guards', () => {
       }),
     )
     const view = render(<RecordFlow session={session} />)
+    await waitFor(() => expect(runtime.getUserMedia).toHaveBeenCalledOnce())
 
-    fireEvent.click(screen.getByRole('button', { name: "I'm ready" }))
     view.unmount()
     await act(async () => resolveStream?.(stream))
 

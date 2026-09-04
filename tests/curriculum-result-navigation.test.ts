@@ -102,7 +102,7 @@ describe('structured result navigation', () => {
 
     expect(navigation.progression).toEqual({
       kind: 'continue',
-      href: '/practice/paths/interviews/lessons/interviews-beginner-02-skill-2',
+      href: '/practice/paths/interviews/lessons/interviews-beginner-02-skill-2/record',
       lesson: linkAt(path, 1),
     })
   })
@@ -160,7 +160,7 @@ describe('structured result navigation', () => {
       }).progression,
     ).toMatchObject({
       kind: 'continue',
-      href: '/practice/paths/interviews/lessons/interviews-intermediate-01-skill-1',
+      href: '/practice/paths/interviews/lessons/interviews-intermediate-01-skill-1/record',
       lesson: { level: 'intermediate', position: 1 },
     })
     expect(
@@ -172,7 +172,7 @@ describe('structured result navigation', () => {
       }).progression,
     ).toMatchObject({
       kind: 'continue',
-      href: '/practice/paths/interviews/lessons/interviews-advanced-01-skill-1',
+      href: '/practice/paths/interviews/lessons/interviews-advanced-01-skill-1/record',
       lesson: { level: 'advanced', position: 1 },
     })
   })

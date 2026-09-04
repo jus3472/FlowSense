@@ -19,7 +19,7 @@ const PATH_NAMES: Record<AllowedLessonData['session']['mode'], string> = {
 }
 
 const STATE_LABELS = {
-  available: 'Available',
+  available: 'Ready to start',
   retry_required: 'Retry required',
   passed: 'Passed',
 } as const
@@ -58,11 +58,8 @@ export function CurriculumLessonDetail({ data }: { data: AllowedLessonData }) {
           {pathName}
         </Link>
         <div className="flex min-w-0 flex-col gap-2">
-          <p className="text-muted text-sm">
+          <h1 className="prompt-display text-foreground text-2xl">
             {chapterName} · Lesson {lesson.lesson.position} of 10
-          </p>
-          <h1 className="prompt-display text-foreground text-2xl break-words">
-            {lesson.lesson.title}
           </h1>
           <p className="text-muted text-base break-words">{lesson.lesson.skillFocus}</p>
         </div>

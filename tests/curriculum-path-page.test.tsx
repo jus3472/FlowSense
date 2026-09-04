@@ -124,7 +124,7 @@ beforeEach(() => {
 })
 
 describe('curriculum path ladder', () => {
-  it('renders a fresh path with exact totals and locked future lesson titles', () => {
+  it('renders a fresh path with exact totals and locked future lesson numbers', () => {
     renderLadder()
 
     expect(screen.getByRole('heading', { level: 1, name: 'General Speaking' })).toBeInTheDocument()
@@ -134,13 +134,23 @@ describe('curriculum path ladder', () => {
     if (!currentChapter) throw new Error('Missing current chapter summary.')
     expect(within(currentChapter).getByText('0 / 10 passed')).toBeInTheDocument()
 
-    const current = screen.getByRole('link', { name: /Beginner lesson 1/ })
+    const current = screen.getByRole('link', { current: 'step' })
     expect(current).toHaveAttribute('aria-current', 'step')
+    expect(current).toHaveAttribute(
+      'href',
+      '/practice/paths/general-speaking/lessons/general-speaking-beginner-01-skill-1/record',
+    )
     expect(within(current).getByText('Current lesson')).toBeInTheDocument()
     expect(within(current).getByText('Not attempted')).toBeInTheDocument()
     expect(within(current).getByText('Start')).toBeInTheDocument()
 
-    const lockedLesson = screen.getByRole('heading', { name: 'Intermediate lesson 1' })
+    const intermediate = screen.getByRole('heading', { level: 2, name: 'Intermediate' })
+    const intermediateSection = intermediate.closest('section')
+    if (!intermediateSection) throw new Error('Missing Intermediate section.')
+    const lockedLesson = within(intermediateSection).getAllByRole('heading', {
+      name: 'Lesson 1 of 10',
+    })[0]
+    if (!lockedLesson) throw new Error('Missing locked lesson.')
     expect(lockedLesson.closest('a')).toBeNull()
     expect(lockedLesson.closest('[aria-disabled="true"]')).toHaveTextContent(
       'Pass the previous lesson to unlock this one.',
@@ -159,8 +169,12 @@ describe('curriculum path ladder', () => {
     expect(screen.getByRole('img', { name: '1 of 3 stars' })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: '2 of 3 stars' })).toBeInTheDocument()
 
-    const retry = screen.getByRole('link', { name: /Beginner lesson 3/ })
+    const retry = screen.getByRole('link', { current: 'step' })
     expect(retry).toHaveAttribute('aria-current', 'step')
+    expect(retry).toHaveAttribute(
+      'href',
+      '/practice/paths/general-speaking/lessons/general-speaking-beginner-03-skill-3/record?retry=attempt-3',
+    )
     expect(within(retry).getByRole('img', { name: '0 of 3 stars' })).toBeInTheDocument()
     expect(within(retry).getByText('Best 64')).toBeInTheDocument()
     expect(within(retry).getByText('Need 70')).toBeInTheDocument()
@@ -170,7 +184,7 @@ describe('curriculum path ladder', () => {
   it('keeps neutral speaking activity available without calling it unattempted', () => {
     renderLadder(buildProgress([], {}, true))
 
-    const current = screen.getByRole('link', { name: /Beginner lesson 1/ })
+    const current = screen.getByRole('link', { current: 'step' })
     expect(within(current).getByText('No score yet')).toBeInTheDocument()
     expect(within(current).getByText('Start')).toBeInTheDocument()
     expect(within(current).queryByText('Not attempted')).not.toBeInTheDocument()
@@ -187,7 +201,7 @@ describe('curriculum path ladder', () => {
       screen.getByText('This checkpoint unlocks Intermediate when you pass with 70.'),
     ).toBeInTheDocument()
 
-    const intermediate = screen.getByRole('link', { name: /Intermediate lesson 1/ })
+    const intermediate = screen.getByRole('link', { current: 'step' })
     expect(intermediate).toHaveAttribute('aria-current', 'step')
     expect(within(intermediate).getByText('Start')).toBeInTheDocument()
     expect(
@@ -203,7 +217,7 @@ describe('curriculum path ladder', () => {
 
     expect(screen.getByText('20 / 30 passed')).toBeInTheDocument()
     expect(screen.getByText('40 / 90 stars')).toBeInTheDocument()
-    const advanced = screen.getByRole('link', { name: /Advanced lesson 1/ })
+    const advanced = screen.getByRole('link', { current: 'step' })
     expect(advanced).toHaveAttribute('aria-current', 'step')
     expect(within(advanced).getByText('Start')).toBeInTheDocument()
     expect(
@@ -229,7 +243,7 @@ describe('curriculum path ladder', () => {
     const { container } = renderLadder()
 
     expect(container.firstElementChild).toHaveClass('min-w-0')
-    expect(screen.getAllByRole('heading', { level: 3 })[0]).toHaveClass('break-words')
+    expect(screen.getAllByRole('heading', { level: 3 })[0]).toHaveClass('numeric')
     expect(source).toContain('flex-wrap')
     expect(source).not.toMatch(/\bw-\[(?:\d+px|\d+rem)\]/)
     expect(source).not.toContain('whitespace-nowrap')

@@ -4,6 +4,11 @@ export type UnsupportedReason = 'no-capture' | 'no-recorder' | 'no-format'
 
 export type MediaSupport = { ok: true; mimeType: string } | { ok: false; reason: UnsupportedReason }
 
+/** False only for the optimistic server snapshot used before browser hydration. */
+export function isResolvedMediaSupport(support: MediaSupport): boolean {
+  return !support.ok || support.mimeType.length > 0
+}
+
 /**
  * Checked before the record flow renders anything, so an unsupported browser
  * gets a named explanation instead of a button that quietly does nothing.
@@ -36,7 +41,7 @@ export function mediaSupportSnapshot(): MediaSupport {
   return cachedSupport
 }
 
-/** The server cannot know, so it renders the ready screen and hydration corrects it. */
+/** The server cannot know, so hydration replaces this optimistic capability snapshot if needed. */
 export function serverMediaSupportSnapshot(): MediaSupport {
   return SERVER_SUPPORT
 }

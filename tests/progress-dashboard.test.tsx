@@ -248,10 +248,12 @@ describe('progress dashboard helpers', () => {
     ).toEqual(['retry'])
   })
 
-  it('keeps Progress discoverable from the compact account menu', () => {
+  it('keeps Progress in primary navigation and removes it from the account menu', () => {
+    const navigation = readFileSync('src/components/layout/primary-navigation.tsx', 'utf8')
     const menu = readFileSync('src/components/layout/overflow-menu.tsx', 'utf8')
-    expect(menu).toContain("'/progress' as Route")
-    expect(menu).toMatch(/role="menuitem"[\s\S]*?>\s*Progress\s*<\/Link>/)
+    expect(navigation).toContain("href: '/progress'")
+    expect(navigation).toContain("label: 'Progress'")
+    expect(menu).not.toMatch(/role="menuitem"[\s\S]*?>\s*Progress\s*<\/Link>/)
   })
 
   it('renders zero-attempt and legacy-only accounts as valid empty states', () => {

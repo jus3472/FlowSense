@@ -8,7 +8,6 @@ export function HomePrimaryPath({ primary }: { primary: HomeCurriculumModel['pri
     <section aria-labelledby="primary-path-heading">
       <Card className="shadow-float flex min-w-0 flex-col gap-6">
         <div className="flex min-w-0 flex-col gap-2">
-          <p className="section-label text-muted">Primary path</p>
           <h1
             id="primary-path-heading"
             className="prompt-display text-foreground text-xl break-words"
@@ -25,7 +24,6 @@ export function HomePrimaryPath({ primary }: { primary: HomeCurriculumModel['pri
               <p className="text-positive text-sm font-medium">{primary.transitionLabel}</p>
             ) : null}
             <p className="text-muted text-sm">{primary.chapterLabel}</p>
-            <p className="text-foreground text-lg font-medium break-words">{primary.lessonTitle}</p>
             <p className="numeric text-muted text-sm">{primary.lessonStatus}</p>
           </div>
         )}
@@ -69,30 +67,6 @@ export function HomeSecondaryPaths({ paths }: { paths: HomeCurriculumModel['seco
             <span className="text-accent shrink-0 text-sm font-medium">View</span>
           </Link>
         ))}
-      </div>
-    </section>
-  )
-}
-
-export function HomeOtherPractice() {
-  return (
-    <section aria-labelledby="other-practice-heading" className="flex flex-col gap-4">
-      <h2 id="other-practice-heading" className="text-foreground text-lg font-semibold">
-        Practice something else
-      </h2>
-      <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-        <Link
-          href="/practice/practice"
-          className="rounded-card bg-surface-sunken text-foreground hover:bg-accent-soft flex min-h-11 items-center p-4 text-sm font-medium transition duration-150 ease-out"
-        >
-          Free Practice
-        </Link>
-        <Link
-          href="/practice/custom"
-          className="rounded-card bg-surface-sunken text-foreground hover:bg-accent-soft flex min-h-11 items-center p-4 text-sm font-medium transition duration-150 ease-out"
-        >
-          Custom Prompt
-        </Link>
       </div>
     </section>
   )

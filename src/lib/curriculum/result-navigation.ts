@@ -1,10 +1,6 @@
 import type { Route } from 'next'
 import type { CurriculumLessonLink } from '@/lib/curriculum/contracts'
-import {
-  curriculumLessonHref,
-  curriculumLessonRecordHref,
-  curriculumPathHref,
-} from '@/lib/curriculum/routes'
+import { curriculumLessonRecordHref, curriculumPathHref } from '@/lib/curriculum/routes'
 
 export const STRUCTURED_RESULT_STATES = ['not_passed', 'passed', 'neutral'] as const
 export type StructuredResultState = (typeof STRUCTURED_RESULT_STATES)[number]
@@ -65,7 +61,7 @@ export function buildStructuredResultNavigation({
       retry,
       progression: {
         kind: 'continue',
-        href: curriculumLessonHref(nextLesson.pathSlug, nextLesson.slug),
+        href: curriculumLessonRecordHref(nextLesson.pathSlug, nextLesson.slug),
         lesson: nextLesson,
       },
     }

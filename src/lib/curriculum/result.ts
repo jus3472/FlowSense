@@ -6,11 +6,7 @@ import type {
   PathSlug,
   Stars,
 } from '@/lib/curriculum/contracts'
-import {
-  curriculumLessonHref,
-  curriculumLessonRecordHref,
-  curriculumPathHref,
-} from '@/lib/curriculum/routes'
+import { curriculumLessonRecordHref, curriculumPathHref } from '@/lib/curriculum/routes'
 import { isPassingScore, parseCurriculumScore, starsForScore } from '@/lib/curriculum/thresholds'
 
 export type StructuredLessonResultState = 'not_passed' | 'passed' | 'neutral'
@@ -96,7 +92,7 @@ function passedActions(
     return {
       primaryAction: {
         label: 'Continue',
-        href: curriculumLessonHref(path.path.slug, lesson.nextLesson.slug),
+        href: curriculumLessonRecordHref(path.path.slug, lesson.nextLesson.slug),
       },
       secondaryAction: practiceAgain,
     }

@@ -137,6 +137,7 @@ describe('structured lesson result thresholds', () => {
       primaryAction: { label: 'Continue' },
     })
     expect(result.primaryAction.href).toContain('/lessons/general-speaking-beginner-02-')
+    expect(result.primaryAction.href).toMatch(/\/record$/)
   })
 
   it('uses the canonical retry label after the current attempt earns three stars', () => {
@@ -278,6 +279,7 @@ describe('structured lesson result navigation', () => {
       primaryAction: { label: 'Continue' },
     })
     expect(continued.primaryAction.href).toContain('/lessons/general-speaking-intermediate-01-')
+    expect(continued.primaryAction.href).toMatch(/\/record$/)
   })
 
   it('ends the final checkpoint at View Path without inventing another lesson', () => {

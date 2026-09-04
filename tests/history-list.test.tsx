@@ -310,11 +310,12 @@ describe('HistoryList', () => {
     )
 
     expect(screen.getAllByText('Interviews')).toHaveLength(2)
-    expect(screen.getByText('Beginner · Handling conflict')).toBeInTheDocument()
+    expect(screen.getByText('Beginner · Lesson 10')).toBeInTheDocument()
+    expect(screen.queryByText('Handling conflict')).not.toBeInTheDocument()
     expect(screen.getByText('Checkpoint · Retry')).toBeInTheDocument()
     expect(screen.getByLabelText('1 stars')).toHaveTextContent('★☆☆')
     expect(screen.getByText('Passed')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Handling conflict/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /Lesson 10/ })).toHaveAttribute(
       'href',
       '/attempts/attempt-1',
     )

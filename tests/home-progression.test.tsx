@@ -3,11 +3,7 @@
 import { render, screen, within } from '@testing-library/react'
 import type { AnchorHTMLAttributes, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import {
-  HomeOtherPractice,
-  HomePrimaryPath,
-  HomeSecondaryPaths,
-} from '@/components/home/path-progress'
+import { HomePrimaryPath, HomeSecondaryPaths } from '@/components/home/path-progress'
 import { StreakDisplay } from '@/components/home/streak-display'
 import {
   PATH_MODES,
@@ -94,7 +90,11 @@ function progress(
   if (options.retryScore !== undefined) {
     const current = lessons[passed]
     if (!current) throw new Error('Test progress has no current lesson.')
-    stored.push({ lessonId: current.id, bestScore: options.retryScore, bestAttemptId: null })
+    stored.push({
+      lessonId: current.id,
+      bestScore: options.retryScore,
+      bestAttemptId: `attempt-${slug}-${passed + 1}`,
+    })
   }
   const neutralLesson = options.neutral ? lessons[passed] : undefined
   if (options.neutral && !neutralLesson) throw new Error('Test progress has no neutral lesson.')
@@ -151,7 +151,7 @@ describe('Home curriculum progression', () => {
       lessonStatus: 'Not attempted',
       action: {
         label: 'Continue',
-        href: '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1',
+        href: '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record',
       },
       passedLessons: 0,
       earnedStars: 0,
@@ -243,16 +243,17 @@ describe('Home curriculum progression', () => {
     render(<HomePrimaryPath primary={model.primary} />)
 
     expect(screen.getByRole('heading', { name: 'Continue Interviews' })).toBeInTheDocument()
+    expect(screen.queryByText('Interviews lesson 6')).not.toBeInTheDocument()
     expect(screen.getByText('5 / 30 lessons passed')).toBeInTheDocument()
     expect(screen.getByText('15 / 90 stars')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Try Again' })).toHaveAttribute(
       'href',
-      '/practice/paths/interviews/lessons/interviews-beginner-06-skill-6',
+      '/practice/paths/interviews/lessons/interviews-beginner-06-skill-6/record?retry=attempt-interviews-6',
     )
   })
 })
 
-describe('Home daily practice and alternatives', () => {
+describe('compact header streak presentation', () => {
   it('shows an active streak and complete daily goal, including provider-neutral activity', () => {
     render(
       <StreakDisplay
@@ -266,8 +267,12 @@ describe('Home daily practice and alternatives', () => {
       />,
     )
 
-    expect(screen.getByText('12 day streak')).toBeInTheDocument()
-    expect(screen.getByText("Today's practice complete")).toBeInTheDocument()
+    const status = screen.getByRole('img', {
+      name: "12 day streak. Today's practice complete.",
+    })
+    expect(status).toHaveTextContent('12')
+    expect(status).toHaveAttribute('data-today-active', 'true')
+    expect(status.querySelectorAll('svg')).toHaveLength(2)
   })
 
   it('keeps yesterday anchored while today remains incomplete', () => {
@@ -283,20 +288,11 @@ describe('Home daily practice and alternatives', () => {
       />,
     )
 
-    expect(screen.getByText('4 day streak')).toBeInTheDocument()
-    expect(screen.getByText('Complete 1 response today')).toBeInTheDocument()
-  })
-
-  it('keeps Free Practice and Custom Prompt secondary but directly accessible', () => {
-    render(<HomeOtherPractice />)
-
-    expect(screen.getByRole('link', { name: 'Free Practice' })).toHaveAttribute(
-      'href',
-      '/practice/practice',
-    )
-    expect(screen.getByRole('link', { name: 'Custom Prompt' })).toHaveAttribute(
-      'href',
-      '/practice/custom',
-    )
+    const status = screen.getByRole('img', {
+      name: "4 day streak. Today's practice not complete.",
+    })
+    expect(status).toHaveTextContent('4')
+    expect(status).toHaveAttribute('data-today-active', 'false')
+    expect(status.querySelectorAll('svg')).toHaveLength(1)
   })
 })

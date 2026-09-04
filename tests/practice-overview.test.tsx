@@ -85,7 +85,11 @@ function progress(
   if (options.retryScore !== undefined) {
     const current = lessons[options.passed ?? 0]
     if (!current) throw new Error('Test progress has no current lesson.')
-    stored.push({ lessonId: current.id, bestScore: options.retryScore, bestAttemptId: null })
+    stored.push({
+      lessonId: current.id,
+      bestScore: options.retryScore,
+      bestAttemptId: `attempt-${slug}-${(options.passed ?? 0) + 1}`,
+    })
   }
   const neutralLesson = options.neutral ? lessons[options.passed ?? 0] : undefined
   if (options.neutral && !neutralLesson) throw new Error('Test progress has no neutral lesson.')
@@ -336,31 +340,35 @@ describe('curriculum overview server boundary', () => {
 })
 
 describe('Practice overview', () => {
-  it('shows path order, status, progress, current lessons, and state-specific actions', () => {
+  it('shows track order, progress, lesson numbers, and state-specific direct actions', () => {
     render(<PracticeOverview overview={overview()} />)
 
+    const tracks = screen.getByRole('region', { name: 'Tracks' })
     expect(
-      screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent),
+      within(tracks)
+        .getAllByRole('heading', { level: 2 })
+        .map((heading) => heading.textContent),
     ).toEqual(['Interviews', 'Conversations', 'General Speaking', 'Presentations'])
-    expect(screen.getByText('Primary path')).toBeInTheDocument()
-    expect(screen.getByText('Selected path')).toBeInTheDocument()
-    expect(screen.getAllByText('Available')).toHaveLength(2)
-    expect(screen.getByText('Interviews lesson 1')).toBeInTheDocument()
+    expect(screen.queryByText('Primary path')).not.toBeInTheDocument()
+    expect(screen.queryByText('Selected path')).not.toBeInTheDocument()
+    expect(screen.queryByText('Available')).not.toBeInTheDocument()
+    expect(screen.queryByText('Interviews lesson 1')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Lesson 1 of 10')).not.toHaveLength(0)
     expect(screen.getByText('Interviews beginner')).toBeInTheDocument()
     expect(screen.getByText('Best 64 · Need 70')).toBeInTheDocument()
     expect(screen.getAllByRole('img', { name: '0 of 3 stars' })).toHaveLength(3)
 
     expect(screen.getByRole('link', { name: 'Try Again' })).toHaveAttribute(
       'href',
-      '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1',
+      '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record?retry=attempt-interviews-1',
     )
     expect(screen.getByRole('link', { name: 'Continue' })).toHaveAttribute(
       'href',
-      '/practice/paths/conversations/lessons/conversations-beginner-03-skill-3',
+      '/practice/paths/conversations/lessons/conversations-beginner-03-skill-3/record',
     )
     expect(screen.getByRole('link', { name: 'Start' })).toHaveAttribute(
       'href',
-      '/practice/paths/general-speaking/lessons/general-speaking-beginner-01-skill-1',
+      '/practice/paths/general-speaking/lessons/general-speaking-beginner-01-skill-1/record',
     )
     expect(screen.getByRole('link', { name: 'View Path' })).toHaveAttribute(
       'href',
@@ -385,22 +393,27 @@ describe('Practice overview', () => {
     expect(screen.queryByText('Your last response was not scored.')).not.toBeInTheDocument()
   })
 
-  it('keeps all Free Practice libraries and Custom Prompt reachable below paths', () => {
+  it('keeps all Practice libraries and Custom Prompt reachable below tracks', () => {
     render(<PracticeOverview overview={overview()} />)
-    const freePractice = screen.getByRole('region', { name: 'Free Practice' })
+    const practice = screen.getByRole('region', { name: 'Practice' })
 
-    expect(
-      within(freePractice).getByRole('link', { name: 'General Free Practice' }),
-    ).toHaveAttribute('href', '/practice/practice')
-    expect(
-      within(freePractice).getByRole('link', { name: 'Interview Free Practice' }),
-    ).toHaveAttribute('href', '/practice/interview')
-    expect(
-      within(freePractice).getByRole('link', { name: 'Presentation Free Practice' }),
-    ).toHaveAttribute('href', '/practice/presentation')
-    expect(
-      within(freePractice).getByRole('link', { name: 'Conversation Free Practice' }),
-    ).toHaveAttribute('href', '/practice/conversation')
+    expect(within(practice).getByRole('link', { name: 'General Practice' })).toHaveAttribute(
+      'href',
+      '/practice/practice',
+    )
+    expect(within(practice).getByRole('link', { name: 'Interview Practice' })).toHaveAttribute(
+      'href',
+      '/practice/interview',
+    )
+    expect(within(practice).getByRole('link', { name: 'Presentation Practice' })).toHaveAttribute(
+      'href',
+      '/practice/presentation',
+    )
+    expect(within(practice).getByRole('link', { name: 'Conversation Practice' })).toHaveAttribute(
+      'href',
+      '/practice/conversation',
+    )
+    expect(screen.getByText('Practice with your own custom prompt')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Enter a custom prompt' })).toHaveAttribute(
       'href',
       '/practice/custom',

@@ -16,7 +16,7 @@ const SAMPLE_TRANSCRIPT: Segment[] = [
 
 const SAMPLE_SCORE = 74
 
-const SAMPLE_CATEGORIES = ['Fluency', 'Clarity', 'Vocabulary', 'Grammar', 'Structure', 'Delivery']
+const SAMPLE_SECTIONS = ['What You Said', 'How You Sounded']
 
 export function ResultMock() {
   return (
@@ -44,17 +44,14 @@ export function ResultMock() {
           </div>
 
           <div className="flex flex-col gap-3">
-            <p className="text-muted text-sm">Response categories</p>
-            <ul
-              aria-label="Sample result categories"
-              className="grid grid-cols-2 gap-3 sm:grid-cols-3"
-            >
-              {SAMPLE_CATEGORIES.map((category) => (
+            <p className="text-muted text-sm">Response sections</p>
+            <ul aria-label="Sample result sections" className="grid grid-cols-2 gap-3">
+              {SAMPLE_SECTIONS.map((section) => (
                 <li
-                  key={category}
+                  key={section}
                   className="rounded-input bg-surface-sunken text-foreground px-3 py-2 text-sm"
                 >
-                  {category}
+                  {section}
                 </li>
               ))}
             </ul>

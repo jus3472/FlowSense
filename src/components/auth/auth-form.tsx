@@ -10,16 +10,14 @@ import { validateEmail, validatePassword, type AuthMode } from '@/lib/validation
 
 type FieldErrors = { email?: string; password?: string }
 
-const COPY: Record<AuthMode, { heading: string; body: string; submit: string; pending: string }> = {
+const COPY: Record<AuthMode, { heading: string; submit: string; pending: string }> = {
   signup: {
     heading: 'Create your account',
-    body: 'Two short steps, then your first prompt.',
     submit: 'Create account',
     pending: 'Creating account',
   },
   login: {
     heading: 'Log in',
-    body: 'Pick up where you left off.',
     submit: 'Log in',
     pending: 'Logging in',
   },
@@ -92,10 +90,7 @@ export function AuthForm({ initialMode = 'signup' }: { initialMode?: AuthMode })
         ))}
       </div>
 
-      <div className="flex flex-col gap-3">
-        <h1 className="prompt-display text-foreground text-xl">{copy.heading}</h1>
-        <p className="text-muted text-base">{copy.body}</p>
-      </div>
+      <h1 className="prompt-display text-foreground text-xl">{copy.heading}</h1>
 
       <form action={formAction} onSubmit={onSubmit} noValidate className="flex flex-col gap-6">
         <input type="hidden" name="mode" value={mode} />
