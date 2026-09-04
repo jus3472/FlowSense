@@ -36,13 +36,12 @@ describe('public marketing contract', () => {
     }
   })
 
-  it('covers every practice mode, library and custom prompts, and the retry loop', () => {
+  it('covers every track, custom prompts, and the retry loop', () => {
     const copy = renderLandingPage()
 
-    for (const mode of ['General Practice', 'Interviews', 'Presentations', 'Conversations']) {
-      expect(copy).toContain(mode)
+    for (const track of ['General Speaking', 'Interviews', 'Presentations', 'Conversations']) {
+      expect(copy).toContain(track)
     }
-    expect(copy).toMatch(/library prompt/i)
     expect(copy).toMatch(/custom prompt/i)
     expect(screen.getByRole('heading', { name: 'Try Again' })).toBeInTheDocument()
     expect(copy).toContain('Record the same prompt again')

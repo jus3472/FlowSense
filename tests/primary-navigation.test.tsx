@@ -26,28 +26,20 @@ vi.mock('next/link', () => ({
 }))
 
 describe('PrimaryNavigation', () => {
-  it('exposes the five coherent destinations with stable routes', () => {
+  it('exposes the four coherent destinations with stable routes', () => {
     navigation.pathname = '/home'
     render(<PrimaryNavigation />)
 
     expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/home')
     expect(screen.getByRole('link', { name: 'Tracks' })).toHaveAttribute('href', '/practice')
-    expect(screen.getByRole('link', { name: 'Practice' })).toHaveAttribute(
-      'href',
-      '/practice/practice',
-    )
     expect(screen.getByRole('link', { name: 'History' })).toHaveAttribute('href', '/history')
     expect(screen.getByRole('link', { name: 'Progress' })).toHaveAttribute('href', '/progress')
+    expect(screen.queryByRole('link', { name: 'Practice' })).not.toBeInTheDocument()
   })
 
   it.each([
     ['/practice', 'Tracks'],
     ['/practice/paths/interviews', 'Tracks'],
-    ['/practice/practice', 'Practice'],
-    ['/practice/interview', 'Practice'],
-    ['/practice/presentation', 'Practice'],
-    ['/practice/conversation', 'Practice'],
-    ['/practice/custom', 'Practice'],
     ['/history', 'History'],
     ['/progress', 'Progress'],
   ])('marks %s as %s with an accessible active state', (pathname, label) => {
@@ -55,6 +47,19 @@ describe('PrimaryNavigation', () => {
     render(<PrimaryNavigation />)
 
     expect(screen.getByRole('link', { name: label })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it.each([
+    '/practice/practice',
+    '/practice/interview',
+    '/practice/presentation',
+    '/practice/conversation',
+    '/practice/custom',
+  ])('does not add a replacement primary destination for %s', (pathname) => {
+    navigation.pathname = pathname
+    render(<PrimaryNavigation />)
+
+    expect(screen.queryByRole('link', { current: 'page' })).not.toBeInTheDocument()
   })
 
   it('uses a compact full-width mobile row and desktop inline layout', () => {

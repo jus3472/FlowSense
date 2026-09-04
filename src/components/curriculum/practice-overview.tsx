@@ -1,11 +1,9 @@
-import Link from 'next/link'
 import { CurriculumStars } from '@/components/curriculum/stars'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import type { CurriculumLessonProgress, CurriculumPathProgress } from '@/lib/curriculum/contracts'
 import type { CurriculumOverviewData } from '@/lib/curriculum/overview'
 import { curriculumLessonRecordHref, curriculumPathHref } from '@/lib/curriculum/routes'
-import { PRACTICE_MODE_OPTIONS, practiceBrowseHref } from '@/lib/practice/navigation'
 
 function currentLesson(progress: CurriculumPathProgress): CurriculumLessonProgress | null {
   const lessonId = progress.summary.currentLesson?.id
@@ -103,13 +101,6 @@ function PathCard({ item }: { item: CurriculumOverviewData['paths'][number] }) {
   )
 }
 
-const PRACTICE_LABELS = {
-  practice: 'General Practice',
-  interview: 'Interview Practice',
-  presentation: 'Presentation Practice',
-  conversation: 'Conversation Practice',
-} as const
-
 export function PracticeOverview({ overview }: { overview: CurriculumOverviewData }) {
   return (
     <div className="flex flex-col gap-12">
@@ -120,26 +111,6 @@ export function PracticeOverview({ overview }: { overview: CurriculumOverviewDat
         <div className="flex min-w-0 flex-col gap-4">
           {overview.paths.map((item) => (
             <PathCard key={item.progress.path.id} item={item} />
-          ))}
-        </div>
-      </section>
-
-      <section aria-labelledby="practice-heading" className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <h2 id="practice-heading" className="text-foreground text-lg font-semibold">
-            Practice
-          </h2>
-          <p className="text-muted text-sm">Use a standalone prompt outside a track.</p>
-        </div>
-        <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-          {PRACTICE_MODE_OPTIONS.map((option) => (
-            <Link
-              key={option.mode}
-              href={practiceBrowseHref(option.mode)}
-              className="rounded-card bg-surface-sunken text-foreground hover:bg-accent-soft min-h-11 p-4 text-sm font-medium transition duration-150 ease-out"
-            >
-              {PRACTICE_LABELS[option.mode]}
-            </Link>
           ))}
         </div>
       </section>

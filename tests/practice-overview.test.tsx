@@ -393,26 +393,18 @@ describe('Practice overview', () => {
     expect(screen.queryByText('Your last response was not scored.')).not.toBeInTheDocument()
   })
 
-  it('keeps all Practice libraries and Custom Prompt reachable below tracks', () => {
+  it('removes standalone Practice discovery while keeping Custom Prompt below tracks', () => {
     render(<PracticeOverview overview={overview()} />)
-    const practice = screen.getByRole('region', { name: 'Practice' })
 
-    expect(within(practice).getByRole('link', { name: 'General Practice' })).toHaveAttribute(
-      'href',
-      '/practice/practice',
-    )
-    expect(within(practice).getByRole('link', { name: 'Interview Practice' })).toHaveAttribute(
-      'href',
-      '/practice/interview',
-    )
-    expect(within(practice).getByRole('link', { name: 'Presentation Practice' })).toHaveAttribute(
-      'href',
-      '/practice/presentation',
-    )
-    expect(within(practice).getByRole('link', { name: 'Conversation Practice' })).toHaveAttribute(
-      'href',
-      '/practice/conversation',
-    )
+    expect(screen.queryByRole('region', { name: 'Practice' })).not.toBeInTheDocument()
+    for (const label of [
+      'General Practice',
+      'Interview Practice',
+      'Presentation Practice',
+      'Conversation Practice',
+    ]) {
+      expect(screen.queryByRole('link', { name: label })).not.toBeInTheDocument()
+    }
     expect(screen.getByText('Practice with your own custom prompt')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Enter a custom prompt' })).toHaveAttribute(
       'href',
@@ -427,8 +419,8 @@ describe('Practice overview', () => {
 
     expect(component).toContain('min-w-0 flex-wrap')
     expect(component).toContain('break-words')
-    expect(component).toContain('min-h-11')
-    expect(component).toContain('bg-surface-sunken')
+    expect(component).toContain('text-foreground')
+    expect(component).toContain('text-muted')
     expect(component).not.toMatch(/(?:bg|text|border)-(?:red|blue|green|yellow|gray)-/)
     expect(page).toContain('<RetryButton />')
     expect(page).toContain("redirect('/login')")

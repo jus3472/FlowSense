@@ -1,7 +1,7 @@
 const STEPS = [
   {
-    title: 'Choose your practice',
-    body: 'Pick General Practice, Interviews, Presentations, or Conversations. Start with a library prompt or write a custom prompt.',
+    title: 'Choose a track',
+    body: 'Choose General Speaking, Interviews, Presentations, or Conversations, or write a custom prompt.',
   },
   {
     title: 'Answer out loud',

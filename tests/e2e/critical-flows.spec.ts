@@ -227,8 +227,7 @@ test('microphone denial gives a recoverable state', async ({ page }) => {
 
 test('selects library and custom prompts through real screens', async ({ page }) => {
   await logIn(page)
-  await page.goto('/practice')
-  await page.getByRole('link', { name: 'Interview Practice', exact: true }).click()
+  await page.goto('/practice/interview')
   await expect(page.getByRole('heading', { name: 'Interviews' })).toBeVisible()
   await page.getByRole('link', { name: 'Choose this prompt' }).first().click()
   await expect(page).toHaveURL(/\/record\?prompt=/)
@@ -248,6 +247,58 @@ test('selects library and custom prompts through real screens', async ({ page })
   await expect(page).toHaveURL(/\/practice\/paths\/.*\/record$/)
   await expect(page.getByText('Give a clear response for beginner lesson 1.')).toBeVisible()
   await expect(page.getByText('One prompt, 60 seconds')).toHaveCount(0)
+})
+
+test('keeps direct standalone practice routes valid without rediscovering them', async ({
+  page,
+}) => {
+  await logIn(page)
+
+  for (const [route, heading] of [
+    ['/practice/practice', 'General Practice'],
+    ['/practice/interview', 'Interviews'],
+    ['/practice/presentation', 'Presentations'],
+    ['/practice/conversation', 'Conversations'],
+  ] as const) {
+    await page.goto(route)
+    await expect(page.getByRole('heading', { name: heading })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Tracks' }).first()).toBeVisible()
+  }
+})
+
+test('keeps the full brand and final navigation within desktop and narrow viewports', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await logIn(page)
+
+  const assertHeader = async () => {
+    const brand = page.getByRole('link', { name: 'FlowSense' })
+    await expect(brand).toHaveText('FlowSense')
+    await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link')).toHaveText([
+      'Home',
+      'Tracks',
+      'History',
+      'Progress',
+    ])
+    expect(
+      await brand.evaluate((element) => {
+        const bounds = element.getBoundingClientRect()
+        return (
+          element.scrollWidth <= element.clientWidth &&
+          bounds.left >= 0 &&
+          bounds.right <= window.innerWidth
+        )
+      }),
+    ).toBe(true)
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+  }
+
+  await assertHeader()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await assertHeader()
 })
 
 test('history and progress start empty after an isolated reset', async ({ page }) => {
@@ -730,20 +781,21 @@ test('@mobile mobile navigation exposes all primary destinations and account men
 }) => {
   await logIn(page)
   await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Practice', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Home', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Tracks', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'History' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Progress' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Practice', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: 'More options' }).click()
   await expect(page.getByRole('menuitem', { name: 'Settings' })).toBeVisible()
 })
 
-test('@mobile structured Practice stays readable through the lesson boundary', async ({ page }) => {
+test('@mobile Tracks stays readable through the lesson boundary', async ({ page }) => {
   await logIn(page)
   await page.goto('/practice')
   await expect(page.getByRole('heading', { name: 'Tracks' })).toBeVisible()
   await expect(page.getByText('Primary path')).toHaveCount(0)
-  await expect(page.getByRole('link', { name: 'Interview Practice' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Interview Practice' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Enter a custom prompt' })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,

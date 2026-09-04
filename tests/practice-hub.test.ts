@@ -8,12 +8,13 @@ const overview = readFileSync('src/components/curriculum/practice-overview.tsx',
 const recordFlow = readFileSync('src/components/record/record-flow.tsx', 'utf8')
 
 describe('practice hub routes', () => {
-  it('keeps Home focused while Tracks exposes Practice and Custom Prompt', () => {
+  it('keeps Home focused while Tracks exposes only tracks and Custom Prompt', () => {
     expect(home).toContain('HomePrimaryPath')
     expect(home).not.toContain('HomeOtherPractice')
     expect(home).not.toContain('Latest response')
-    expect(overview).toContain('Practice')
-    expect(overview).toContain('practiceBrowseHref(option.mode)')
+    expect(overview).not.toContain('Use a standalone prompt outside a track.')
+    expect(overview).not.toContain('practiceBrowseHref(option.mode)')
+    expect(overview).not.toContain('PRACTICE_MODE_OPTIONS')
     expect(overview).toContain('Custom Prompt')
     expect(overview).toContain('href="/practice/custom"')
   })

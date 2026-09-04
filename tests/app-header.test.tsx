@@ -22,6 +22,18 @@ vi.mock('next/link', () => ({
 vi.mock('@/actions/auth', () => ({ logOut: vi.fn() }))
 
 describe('AppHeader', () => {
+  it('keeps the complete wordmark in an intrinsic-width desktop grid track', () => {
+    const { container } = render(<AppHeader activity={null} />)
+
+    const brand = screen.getByRole('link', { name: 'FlowSense' })
+    expect(brand).toHaveTextContent('FlowSense')
+    expect(brand).toHaveClass('min-w-max', 'whitespace-nowrap')
+    expect(brand).not.toHaveClass('overflow-hidden', 'truncate')
+    expect(container.querySelector('header > div')).toHaveClass(
+      'sm:grid-cols-[max-content_minmax(0,1fr)_max-content_max-content]',
+    )
+  })
+
   it('places Progress in primary navigation and not in the account menu', () => {
     render(<AppHeader activity={null} />)
 

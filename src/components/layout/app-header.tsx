@@ -8,10 +8,10 @@ import type { PracticeActivitySummary } from '@/lib/activity/server'
 export function AppHeader({ activity }: { activity: PracticeActivitySummary | null }) {
   return (
     <header className="bg-background">
-      <div className="max-w-column mx-auto grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-2 px-6 py-2 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto]">
+      <div className="max-w-column mx-auto grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-2 px-6 py-2 sm:grid-cols-[max-content_minmax(0,1fr)_max-content_max-content]">
         <Link
           href="/home"
-          className="rounded-input col-start-1 row-start-1 flex min-h-11 items-center"
+          className="rounded-input col-start-1 row-start-1 flex min-h-11 min-w-max items-center whitespace-nowrap"
         >
           <Wordmark />
         </Link>

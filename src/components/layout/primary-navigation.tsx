@@ -20,21 +20,6 @@ const ITEMS: ReadonlyArray<{
     active: (pathname) => pathname === '/practice' || pathname.startsWith('/practice/paths/'),
   },
   {
-    label: 'Practice',
-    href: '/practice/practice' as Route,
-    active: (pathname) =>
-      pathname === '/practice/practice' ||
-      pathname.startsWith('/practice/practice/') ||
-      pathname === '/practice/interview' ||
-      pathname.startsWith('/practice/interview/') ||
-      pathname === '/practice/presentation' ||
-      pathname.startsWith('/practice/presentation/') ||
-      pathname === '/practice/conversation' ||
-      pathname.startsWith('/practice/conversation/') ||
-      pathname === '/practice/custom' ||
-      pathname.startsWith('/practice/custom/'),
-  },
-  {
     label: 'History',
     href: '/history',
     active: (pathname) => pathname === '/history' || pathname.startsWith('/history/'),

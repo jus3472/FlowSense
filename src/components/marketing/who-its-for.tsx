@@ -1,5 +1,5 @@
 const CASES = [
-  'You want general practice with an everyday question.',
+  'You want to practice with an everyday question.',
   'You want to rehearse an interview response.',
   'You want to practice a presentation out loud.',
   'You want to prepare for a meeting or conversation.',
