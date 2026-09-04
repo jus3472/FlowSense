@@ -35,10 +35,22 @@ function sectionScore(value: number | null): string {
   return value === null ? 'Unavailable / 50' : `${value} / 50`
 }
 
-function lessonStatus(result: StructuredLessonResultModel): string {
-  if (result.state === 'neutral') return 'This attempt does not change your lesson progress.'
-  if (result.state === 'passed') return 'This lesson is complete.'
-  return 'You need 70 to continue.'
+function titleCase(value: string): string {
+  return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
+}
+
+function lessonStateTitle(result: StructuredLessonResultModel): string {
+  if (result.state === 'neutral') return 'Result unavailable'
+  return result.state === 'passed' ? 'Lesson complete' : 'Lesson not passed'
+}
+
+function progressionMessage(result: StructuredLessonResultModel): string {
+  if (result.pathComplete) return `You passed every lesson in ${result.path.title}.`
+  if (!result.nextLesson) return 'Your path progress is up to date.'
+  if (result.nextLesson.level !== result.chapter.level) {
+    return `${titleCase(result.nextLesson.level)} lesson 1 is available.`
+  }
+  return `Lesson ${result.nextLesson.position} is available.`
 }
 
 export function V3ResultsView({
@@ -91,15 +103,48 @@ export function V3ResultsView({
           </div>
 
           {curriculumResult ? (
-            <div className="border-border flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-              <div>
-                <p className="text-foreground text-sm font-medium">
-                  {curriculumResult.lesson.title}
-                </p>
-                <p className="text-muted mt-1 text-sm">{lessonStatus(curriculumResult)}</p>
+            <div className="border-border flex flex-col gap-3 border-t pt-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-foreground text-lg font-semibold">
+                    {lessonStateTitle(curriculumResult)}
+                  </h2>
+                  <p className="text-muted mt-1 text-sm">{curriculumResult.lesson.title}</p>
+                </div>
+                {curriculumResult.currentStars > 0 ? (
+                  <CurriculumStars stars={curriculumResult.currentStars} />
+                ) : null}
               </div>
-              {curriculumResult.currentStars > 0 ? (
-                <CurriculumStars stars={curriculumResult.currentStars} />
+
+              {curriculumResult.state === 'neutral' ? (
+                <p className="text-muted text-sm">
+                  Some checks could not be completed, so this attempt does not affect your lesson
+                  progress.
+                </p>
+              ) : null}
+
+              {curriculumResult.bestScore !== null ? (
+                <div className="flex flex-wrap items-center gap-3 text-sm">
+                  <span className="text-foreground">
+                    Best: <span className="numeric">{curriculumResult.bestScore}</span>
+                  </span>
+                  <CurriculumStars stars={curriculumResult.bestStars} />
+                  {curriculumResult.personalBest ? (
+                    <span className="text-accent font-medium">Personal best</span>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {curriculumResult.state === 'not_passed' ? (
+                <p className="text-muted text-sm">Need 70 to continue.</p>
+              ) : null}
+              {curriculumResult.state === 'passed' ? (
+                <div className="flex flex-col gap-1">
+                  {curriculumResult.pathComplete ? (
+                    <p className="text-foreground font-medium">Path complete</p>
+                  ) : null}
+                  <p className="text-muted text-sm">{progressionMessage(curriculumResult)}</p>
+                </div>
               ) : null}
             </div>
           ) : null}

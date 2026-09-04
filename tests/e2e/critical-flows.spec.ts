@@ -21,7 +21,10 @@ interface E2EAttempt {
   failure_code: string | null
   score: number | null
   section_scores: {
-    categories: Record<string, { status: string }>
+    sections: {
+      what_you_said: { metrics: Record<string, { status: string }> }
+      how_you_sounded: { metrics: Record<string, { status: string }> }
+    }
   } | null
   metrics: {
     practice: { target_duration_seconds: number; additional_context?: string }
@@ -250,7 +253,7 @@ test('history and progress start empty after an isolated reset', async ({ page }
   await expect(page.getByText('No practice results yet')).toBeVisible()
 })
 
-test('records once, shows processing and v2 results, retries, compares, filters, and deletes', async ({
+test('records once, shows processing and v3 results, retries, compares, filters, and deletes', async ({
   page,
   context,
 }) => {
@@ -264,9 +267,24 @@ test('records once, shows processing and v2 results, retries, compares, filters,
   await page.goto('/practice/interview')
   await page.getByRole('link', { name: 'Choose this prompt' }).first().click()
   await recordOne(page)
-  await expect(page.getByText('Overall result')).toBeVisible()
-  for (const category of ['Fluency', 'Clarity', 'Vocabulary', 'Grammar', 'Structure', 'Delivery'])
-    await expect(page.getByText(category, { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Overall score' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'What You Said' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'How You Sounded' })).toBeVisible()
+  for (const metric of [
+    'Answered the Prompt',
+    'Specificity',
+    'Structure',
+    'Conciseness',
+    'Word Choice',
+    'Grammar',
+    'Pace',
+    'Time to First Word',
+    'Paused Time',
+    'Articulation',
+    'Energy',
+  ]) {
+    await expect(page.getByRole('heading', { name: metric })).toBeVisible()
+  }
   expect(attemptPosts).toBe(1)
   const firstState = await currentState(page.request)
   expect(firstState.uploads).toBe(1)
@@ -360,15 +378,19 @@ test('records once, shows processing and v2 results, retries, compares, filters,
   await expect(page.locator(`a[href="/attempts/${firstAttempt.id}"]`)).toBeVisible()
 })
 
-test('provider failure persists explicit not-checked categories', async ({ page, context }) => {
+test('provider failure persists explicit not-checked content metrics', async ({
+  page,
+  context,
+}) => {
   await context.grantPermissions(['microphone'], { origin: APP })
   await processingMocks(page, true)
   await logIn(page)
   await page.goto('/record?prompt=10000000-0000-4000-8000-000000000001')
   await recordOne(page)
-  await expect(page.getByText('Some checks are not available')).toBeVisible()
-  await expect(page.getByText('Not checked', { exact: true })).toHaveCount(3)
-  await expect(page.getByText('100')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Overall score' })).toBeVisible()
+  await expect(page.getByText('Overall unavailable')).toBeVisible()
+  const whatYouSaid = page.getByRole('region', { name: 'What You Said' })
+  await expect(whatYouSaid.getByText(/^Not checked \/ /)).toHaveCount(6)
   const failureState = await currentState(page.request)
   expect(failureState.attempts).toHaveLength(1)
   const failedAttempt = attemptAt(failureState, 0)
@@ -380,10 +402,10 @@ test('provider failure persists explicit not-checked categories', async ({ page,
     'done',
   ])
   expect(
-    Object.values(failedAttempt.section_scores?.categories ?? {}).filter(
-      (category) => category.status === 'not_checked',
+    Object.values(failedAttempt.section_scores?.sections.what_you_said.metrics ?? {}).filter(
+      (metric) => metric.status === 'not_checked',
     ),
-  ).toHaveLength(3)
+  ).toHaveLength(6)
 })
 
 test('structured lessons retry thresholds without reducing durable progress', async ({

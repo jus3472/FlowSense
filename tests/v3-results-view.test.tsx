@@ -125,6 +125,9 @@ describe('V3ResultsView', () => {
     expect(overall.compareDocumentPosition(screen.getByText('Start clearly'))).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     )
+    expect(screen.getByRole('heading', { name: 'Lesson complete' })).toBeInTheDocument()
+    expect(screen.getByText(/Best:/)).toHaveTextContent('Best: 80')
+    expect(screen.getByText('Lesson 2 is available.')).toBeInTheDocument()
     const mark = screen.getByRole('button', { name: /vague\. Word Choice:/ })
     fireEvent.click(mark)
     expect(screen.getByRole('tooltip')).toHaveTextContent(
@@ -133,5 +136,36 @@ describe('V3ResultsView', () => {
     expect(container.querySelectorAll('mark')).toHaveLength(1)
     expect(screen.getByRole('link', { name: 'Continue' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Try Again' })).not.toBeInTheDocument()
+  })
+
+  it('keeps neutral lesson progress explicit without showing a fabricated score', () => {
+    render(
+      <V3ResultsView
+        {...props}
+        payload={v3Snapshot({ notCheckedMetric: 'grammar' })}
+        curriculumResult={{
+          ...curriculumResult,
+          state: 'neutral',
+          currentScore: null,
+          currentStars: 0,
+          bestScore: 64,
+          bestStars: 0,
+          bestAttemptId: 'attempt-0',
+          personalBest: false,
+          primaryAction: {
+            label: 'Try Again',
+            href: '/record?retry=attempt-1' as Route,
+          },
+          secondaryAction: null,
+        }}
+      />,
+    )
+    expect(screen.getByRole('heading', { name: 'Result unavailable' })).toBeInTheDocument()
+    expect(screen.getByText(/Best:/)).toHaveTextContent('Best: 64')
+    expect(
+      screen.getByText(
+        'Some checks could not be completed, so this attempt does not affect your lesson progress.',
+      ),
+    ).toBeInTheDocument()
   })
 })
