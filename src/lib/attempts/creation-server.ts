@@ -18,7 +18,7 @@ import {
 } from '@/lib/attempts/server'
 import { parseLibraryPrompt } from '@/lib/prompts/selection'
 import type { CreateAttemptPayload } from '@/lib/recording/attempt-payload'
-import { RUBRIC_VERSION } from '@/lib/scoring/v2/contracts'
+import { V3_RUBRIC_VERSION as RUBRIC_VERSION } from '@/lib/scoring/v3/contracts'
 import type { PracticeSessionDescriptor } from '@/lib/practice/session'
 import { loadCurriculumLessonAccessForUser } from '@/lib/curriculum/server'
 

@@ -57,7 +57,7 @@ interface StoredRow {
   practice_mode: 'conversation'
   prompt_source: 'custom'
   prompt_difficulty: 'beginner'
-  rubric_version: 'v2'
+  rubric_version: 'v3'
   retry_of_attempt_id: null
   client_request_id: string
   metrics: ReturnType<typeof initialAttemptMetrics>
@@ -83,7 +83,7 @@ function storedRow(
     practice_mode: 'conversation',
     prompt_source: 'custom',
     prompt_difficulty: 'beginner',
-    rubric_version: 'v2',
+    rubric_version: 'v3',
     retry_of_attempt_id: null,
     client_request_id: REQUEST_ID,
     metrics: initialAttemptMetrics(session, MIME_TYPE, storagePath),
@@ -336,7 +336,11 @@ describe('server attempt creation reconciliation', () => {
       ['user_id', USER_ID],
     ])
     expect(insert.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ lesson_id: LESSON_ID, retry_of_attempt_id: OTHER_ATTEMPT_ID }),
+      expect.objectContaining({
+        lesson_id: LESSON_ID,
+        retry_of_attempt_id: OTHER_ATTEMPT_ID,
+        rubric_version: 'v3',
+      }),
     )
   })
 
