@@ -138,7 +138,7 @@ describe('AttemptRecorder', () => {
     expect(result.blob.size).toBe(11)
   })
 
-  it('carries the sampler timelines and a start timestamp into the result', async () => {
+  it('carries the scoring timelines without collecting a wall-clock start timestamp', async () => {
     const { recorder } = build()
     const promise = recorder.start()
     recorder.stop()
@@ -146,7 +146,7 @@ describe('AttemptRecorder', () => {
     const result = await promise
     expect(result.amplitude).toEqual([{ t_ms: 0, rms: 0.1 }])
     expect(result.pitch).toEqual([{ t_ms: 0, hz: 120 }])
-    expect(Number.isNaN(Date.parse(result.startedAt))).toBe(false)
+    expect(result).not.toHaveProperty('startedAt')
   })
 
   it('stops itself at the maximum duration', async () => {

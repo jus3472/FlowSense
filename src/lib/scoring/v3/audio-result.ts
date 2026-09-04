@@ -11,6 +11,51 @@ import type {
   V3ScoreEvidence,
 } from '@/lib/scoring/v3/contracts'
 
+const PERSISTED_MEASUREMENT_KEYS: Readonly<Record<HowYouSoundedMetricId, readonly string[]>> =
+  Object.freeze({
+    pace: ['words_per_minute', 'word_count', 'active_speaking_ms'],
+    paused_time: [
+      'total_unnatural_pause_ms',
+      'beginning_excessive_pause_ms',
+      'natural_boundary_excessive_pause_ms',
+      'mid_thought_excessive_pause_ms',
+    ],
+    articulation: [
+      'eligible_word_count',
+      'confidence_word_count',
+      'low_confidence_word_count',
+      'low_confidence_proportion',
+    ],
+    energy: [
+      'pitch_range_semitones',
+      'pitch_variation_semitones',
+      'flat_window_proportion',
+      'cadence_log_spread',
+      'pitch_range_component',
+      'pitch_variation_component',
+      'non_monotony_component',
+      'rhythm_cadence_component',
+    ],
+  })
+
+function persistedMeasurements(
+  metric: HowYouSoundedMetricId,
+  measurements: object,
+): V3Measurements {
+  const source = measurements as Readonly<Record<string, unknown>>
+  return Object.fromEntries(
+    PERSISTED_MEASUREMENT_KEYS[metric].flatMap((key) => {
+      const value = source[key]
+      return value === null ||
+        typeof value === 'string' ||
+        typeof value === 'boolean' ||
+        (typeof value === 'number' && Number.isFinite(value))
+        ? [[key, value]]
+        : []
+    }),
+  ) as V3Measurements
+}
+
 function scoreEvidence(evidence: AudioMetricEvidence): V3ScoreEvidence | null {
   if (
     !Number.isFinite(evidence.start) ||
@@ -59,7 +104,7 @@ function scoreMetric(metric: AudioMetricEvaluation<AudioMetricId, object>): V3Me
     status: 'scored',
     component: metric.component,
     explanation: metric.explanation,
-    measurements: Object.fromEntries(Object.entries(metric.measurements)) as V3Measurements,
+    measurements: persistedMeasurements(metric.id, metric.measurements),
     evidence,
     details: metric.deductions.map((deduction) => ({
       kind: deduction.metric,

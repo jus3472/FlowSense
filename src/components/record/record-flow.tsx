@@ -163,7 +163,6 @@ export function RecordFlow({ session }: RecordFlowProps) {
 
       const capture: CaptureMetrics = {
         mime_type: recording.mimeType,
-        started_at: recording.startedAt,
         duration_ms: recording.durationMs,
         sample_interval_ms: SAMPLE_INTERVAL_MS,
         amplitude: recording.amplitude,

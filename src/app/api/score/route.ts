@@ -16,7 +16,11 @@ import {
   markOwnedAttemptFailure,
   transitionOwnedAttempt,
 } from '@/lib/attempts/server'
-import { createDeepSeekModel, reportContentProviderFailure } from '@/lib/deepseek/provider'
+import {
+  DEEPSEEK_MODEL,
+  createDeepSeekModel,
+  reportContentProviderFailure,
+} from '@/lib/deepseek/provider'
 import {
   CONTENT_SYSTEM_PROMPT,
   REWRITE_SYSTEM_PROMPT,
@@ -52,7 +56,10 @@ import { assembleV3Score, isV3ScorePayload } from '@/lib/scoring/v3/assemble'
 import { evaluateAudioMetrics } from '@/lib/scoring/v3/audio'
 import { v3AudioMetrics } from '@/lib/scoring/v3/audio-result'
 import { v3ContentEvaluatorFromModel } from '@/lib/scoring/v3/content/adapter'
-import type { V3ContentEvaluatorProvider } from '@/lib/scoring/v3/content/contracts'
+import {
+  v3ContentAuditResult,
+  type V3ContentEvaluatorProvider,
+} from '@/lib/scoring/v3/content/contracts'
 import { runV3ContentEvaluation } from '@/lib/scoring/v3/content/evaluate'
 import { legacyContentEvidenceInput, v3ContentEvidenceInput } from '@/lib/scoring/v3/content/input'
 import type { AttemptMetrics } from '@/lib/types/metrics'
@@ -286,20 +293,11 @@ export async function POST(request: Request) {
         content,
         sounded: v3AudioMetrics(audio),
       })
-      const nextMetrics = {
-        ...metrics,
-        v3: {
-          score: assembled,
-          content,
-          audio,
-          scored_at: new Date().toISOString(),
-        },
-      }
+      const contentAudit = v3ContentAuditResult(content, DEEPSEEK_MODEL)
       const saved = await transitionOwnedAttempt(admin, userId, attemptId, ['scoring'], 'done', {
         score: assembled.total_earned_points,
         section_scores: JSON.parse(JSON.stringify(assembled)),
-        metrics: JSON.parse(JSON.stringify(nextMetrics)),
-        content_result: JSON.parse(JSON.stringify(content)),
+        content_result: JSON.parse(JSON.stringify(contentAudit)),
       })
       if (!saved) {
         const concurrentRead = await readDatabaseQuery(() =>

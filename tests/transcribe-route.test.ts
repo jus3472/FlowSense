@@ -235,6 +235,20 @@ describe('transcription retry lifecycle', () => {
       'scoring',
       expect.objectContaining({ transcript: TRANSCRIPT }),
     )
+    const completedUpdate = mocks.transitionOwnedAttempt.mock.calls[1]?.[5]
+    expect(completedUpdate).toMatchObject({
+      metrics: {
+        upload: { storage_path: AUDIO_PATH, mime_type: 'audio/webm;codecs=opus' },
+        transcript: {
+          provider: 'deepgram',
+          model: 'nova-2',
+          words: WORDS,
+        },
+      },
+    })
+    expect(completedUpdate?.metrics.transcript).not.toHaveProperty('confidence')
+    expect(completedUpdate?.metrics.transcript).not.toHaveProperty('duration_seconds')
+    expect(completedUpdate?.metrics.transcript).not.toHaveProperty('quality')
   })
 
   it('returns a conflict when a race moves the attempt somewhere other than scoring or done', async () => {

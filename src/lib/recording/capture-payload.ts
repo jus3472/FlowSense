@@ -22,9 +22,8 @@ export function parseCaptureMetrics(value: unknown): CaptureMetrics | null {
   if (!isRecord(value)) return null
 
   const mimeType = typeof value.mime_type === 'string' ? value.mime_type : null
-  const startedAt = typeof value.started_at === 'string' ? value.started_at : null
   const durationMs = finiteNumber(value.duration_ms)
-  if (!mimeType || !startedAt || durationMs === null) return null
+  if (!mimeType || durationMs === null) return null
   if (durationMs < 0 || durationMs > MAX_RECORDING_MS * 2) return null
 
   const amplitude: AmplitudeSample[] = []
@@ -51,7 +50,6 @@ export function parseCaptureMetrics(value: unknown): CaptureMetrics | null {
 
   return {
     mime_type: mimeType,
-    started_at: startedAt,
     duration_ms: Math.round(durationMs),
     sample_interval_ms: finiteNumber(value.sample_interval_ms) ?? SAMPLE_INTERVAL_MS,
     amplitude,

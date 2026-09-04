@@ -48,6 +48,16 @@ function v3Row(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function compactV3Row(overrides: Record<string, unknown> = {}) {
+  return {
+    ...v3Row(),
+    content_payload_version: 'v3.content-audit.1',
+    content_evaluator_version: 'v3.content-evaluator.1',
+    ...v3Statuses('v3_content', ''),
+    ...overrides,
+  }
+}
+
 function v2Row(overrides: Record<string, unknown> = {}) {
   return {
     completed_at: '2026-08-28T03:00:00.000Z',
@@ -126,7 +136,7 @@ describe('content reliability inspection', () => {
       successfulRetryRecoveries: 1,
       inferredDiagnostics: { missing_section: 1 },
       missingSections: { structure: 0, grammar: 1, vocabulary: 1 },
-      attemptsNeedingUnpersistedDiagnosticDetail: 3,
+      attemptsNeedingDiagnosticDetail: 3,
     })
   })
 
@@ -153,7 +163,27 @@ describe('content reliability inspection', () => {
       callsOne: 3,
       callsTwo: 1,
       successfulRetryRecoveries: 1,
-      attemptsNeedingUnpersistedDiagnosticDetail: 3,
+      attemptsNeedingDiagnosticDetail: 3,
+    })
+  })
+
+  it('uses authoritative score statuses for compact v3 content audit records', () => {
+    const summary = summarizeContentReliability([
+      compactV3Row(),
+      compactV3Row({
+        content_status: 'not_checked',
+        content_calls: '2',
+        ...v3Statuses('v3_score', 'not_checked'),
+      }),
+    ])
+
+    expect(summary).toMatchObject({
+      v3Attempts: 2,
+      allSixV3ContentMetricsScored: 1,
+      v3WithoutAllSixContentMetrics: 1,
+      malformedOrInconsistentV3Snapshots: 0,
+      contentFullyChecked: 1,
+      contentAllNotChecked: 1,
     })
   })
 
@@ -211,7 +241,7 @@ describe('content reliability inspection', () => {
       callsOne: 2,
       callsOtherOrMissing: 1,
       successfulRetryRecoveries: 0,
-      attemptsNeedingUnpersistedDiagnosticDetail: 3,
+      attemptsNeedingDiagnosticDetail: 3,
     })
   })
 

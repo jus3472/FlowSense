@@ -27,7 +27,6 @@ export interface AttemptRecording {
   /** The recorder's real output type, not the type that was requested. */
   mimeType: string
   durationMs: number
-  startedAt: string
   amplitude: AmplitudeSample[]
   pitch: PitchSample[]
 }
@@ -74,7 +73,6 @@ export class AttemptRecorder {
   private autoStopTimer: ReturnType<typeof setTimeout> | null = null
   private actualMimeType: string
   private startedAtMs = 0
-  private startedAtIso = ''
   private durationMs = 0
   private stopRequested = false
   private settled = false
@@ -107,7 +105,6 @@ export class AttemptRecorder {
 
     this.chunks = []
     this.startedAtMs = Date.now()
-    this.startedAtIso = new Date(this.startedAtMs).toISOString()
 
     this.resultPromise = new Promise<AttemptRecording>((resolve, reject) => {
       this.resolveResult = resolve
@@ -201,7 +198,6 @@ export class AttemptRecorder {
       blob,
       mimeType: this.actualMimeType,
       durationMs: this.durationMs || Math.max(0, Date.now() - this.startedAtMs),
-      startedAt: this.startedAtIso,
       amplitude,
       pitch,
     })

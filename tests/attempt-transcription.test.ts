@@ -31,7 +31,11 @@ describe('stored completed transcription', () => {
   })
 
   it('accepts historical completed snapshots without optional quality or duration', () => {
-    const stored = metrics({ quality: undefined, duration_seconds: undefined, confidence: null })
+    const stored = metrics({
+      quality: undefined,
+      duration_seconds: undefined,
+      confidence: undefined,
+    })
     expect(readStoredCompletedTranscription(TRANSCRIPT, stored)?.words).toHaveLength(3)
   })
 

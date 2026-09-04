@@ -6,6 +6,7 @@ import type {
 } from '@/lib/scoring/v3/contracts'
 
 export const V3_CONTENT_EVALUATOR_VERSION = 'v3.content-evaluator.1' as const
+export const V3_CONTENT_AUDIT_VERSION = 'v3.content-audit.1' as const
 
 /** Deterministic v3 Conciseness ownership is limited to structural restarts. */
 export type MechanicalConcisenessKind = 'false_start'
@@ -56,6 +57,32 @@ export interface V3ContentEvaluation {
   calls: number
   /** Bounded development metadata. Never render this as user-facing copy. */
   diagnostic?: V3ContentFailureDiagnostic | null
+}
+
+/** Minimal provider metadata retained outside the authoritative score snapshot. */
+export interface V3ContentAuditResult {
+  version: typeof V3_CONTENT_AUDIT_VERSION
+  evaluator_version: typeof V3_CONTENT_EVALUATOR_VERSION
+  provider: 'deepseek'
+  model: string
+  status: V3ContentEvaluation['status']
+  calls: number
+  diagnostic?: V3ContentFailureDiagnostic
+}
+
+export function v3ContentAuditResult(
+  evaluation: V3ContentEvaluation,
+  model: string,
+): V3ContentAuditResult {
+  return {
+    version: V3_CONTENT_AUDIT_VERSION,
+    evaluator_version: evaluation.version,
+    provider: 'deepseek',
+    model,
+    status: evaluation.status,
+    calls: evaluation.calls,
+    ...(evaluation.diagnostic ? { diagnostic: evaluation.diagnostic } : {}),
+  }
 }
 
 export type V3ContentFailureCategory =

@@ -66,10 +66,11 @@ describe('server-owned attempt boundary', () => {
     )
   })
 
-  it('persists transcript quality and never logs raw provider bodies', () => {
+  it('persists only abnormal transcript diagnostics and never logs raw provider bodies', () => {
     const transcribeRoute = readFileSync('src/app/api/transcribe/route.ts', 'utf8')
     expect(transcribeRoute).toContain('...deepgramQualityMetrics(parsed)')
-    expect(transcribeRoute).toContain('duration_seconds: parsed.durationSeconds')
+    expect(transcribeRoute).not.toContain('duration_seconds: parsed.durationSeconds')
+    expect(transcribeRoute).not.toContain('confidence: parsed.confidence')
     expect(transcribeRoute).not.toContain('DEEPGRAM_DEBUG')
     expect(transcribeRoute).not.toContain('JSON.stringify(raw)')
   })

@@ -279,7 +279,6 @@ export async function POST(request: Request) {
       transcript: {
         provider: 'deepgram',
         model: DEEPGRAM_MODEL,
-        confidence: null,
         words: [],
         quality: unavailableQuality,
       },
@@ -318,9 +317,7 @@ export async function POST(request: Request) {
     transcript: {
       provider: 'deepgram',
       model: DEEPGRAM_MODEL,
-      confidence: parsed.confidence,
       words: parsed.words,
-      duration_seconds: parsed.durationSeconds,
       ...deepgramQualityMetrics(parsed),
     },
   }

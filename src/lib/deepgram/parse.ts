@@ -29,23 +29,19 @@ export interface DeepgramUnavailableQuality {
 }
 
 export interface DeepgramQualityMetrics {
-  quality: DeepgramTranscriptQuality
+  quality?: Extract<DeepgramTranscriptQuality, { status: 'degraded' }>
 }
 
 /**
- * Integration seam for transcript persistence. The API layer must store this
- * result beside transcript words before scoring so degraded diagnostics are
- * not discarded when route ownership and lifecycle persistence are updated.
+ * Integration seam for transcript persistence. Routine success adds nothing;
+ * only a bounded degraded diagnostic is stored beside the words.
  */
 export function deepgramQualityMetrics(
   parsed: Pick<ParsedTranscript, 'quality'>,
 ): DeepgramQualityMetrics {
-  return {
-    quality:
-      parsed.quality.status === 'usable'
-        ? { status: 'usable', diagnostics: [] }
-        : { status: 'degraded', diagnostics: [...parsed.quality.diagnostics] },
-  }
+  return parsed.quality.status === 'degraded'
+    ? { quality: { status: 'degraded', diagnostics: [...parsed.quality.diagnostics] } }
+    : {}
 }
 
 export class DeepgramParseError extends Error {

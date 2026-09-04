@@ -424,7 +424,7 @@ describe('v3 content evaluator contract', () => {
 
       expect(evaluated.metrics.conciseness).toMatchObject({
         component: 0.82,
-        measurements: { filler_count: 1 },
+        measurements: {},
       })
       expect(evaluated.metrics.conciseness.details[0]).toMatchObject({
         kind: 'filler',
@@ -456,7 +456,7 @@ describe('v3 content evaluator contract', () => {
       expect(evidenceInput.mechanicallyOwned).toEqual([])
       expect(evaluated.metrics.conciseness).toMatchObject({
         component: 1,
-        measurements: { filler_count: 0 },
+        measurements: {},
         details: [],
       })
     })
@@ -499,7 +499,7 @@ describe('v3 content evaluator contract', () => {
       expect(evidenceInput.mechanicallyOwned).toEqual([])
       expect(evaluated.metrics.conciseness).toMatchObject({
         component: 0.86,
-        measurements: { filler_count: 1 },
+        measurements: {},
       })
       expect(evaluated.metrics.conciseness.evidence[0]?.quote).toBe("and that's about it")
     })
@@ -513,7 +513,7 @@ describe('v3 content evaluator contract', () => {
       expect(evidenceInput.mechanicallyOwned).toEqual([])
       expect(evaluated.metrics.conciseness).toMatchObject({
         component: 1,
-        measurements: { filler_count: 0 },
+        measurements: {},
         details: [],
       })
     })
@@ -583,8 +583,6 @@ describe('v3 content evaluator contract', () => {
         measurements: {
           semantic_component: 1,
           structural_component_reduction: 0.06,
-          filler_count: 0,
-          false_start_count: 1,
         },
       })
       expect(evaluated.metrics.conciseness.details[0]).toMatchObject({

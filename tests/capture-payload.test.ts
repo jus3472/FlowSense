@@ -14,8 +14,14 @@ const VALID = {
 }
 
 describe('parseCaptureMetrics', () => {
-  it('keeps a well formed payload intact', () => {
-    expect(parseCaptureMetrics(VALID)).toEqual(VALID)
+  it('keeps scoring inputs but drops the unused capture timestamp', () => {
+    expect(parseCaptureMetrics(VALID)).toEqual({
+      mime_type: VALID.mime_type,
+      duration_ms: VALID.duration_ms,
+      sample_interval_ms: VALID.sample_interval_ms,
+      amplitude: VALID.amplitude,
+      pitch: VALID.pitch,
+    })
   })
 
   it('accepts empty timelines, which is what silence produces', () => {
@@ -51,7 +57,6 @@ describe('parseCaptureMetrics', () => {
   it.each([
     ['a non object', 'nope'],
     ['a missing mime type', { ...VALID, mime_type: undefined }],
-    ['a missing start time', { ...VALID, started_at: 42 }],
     ['a missing duration', { ...VALID, duration_ms: null }],
     ['a negative duration', { ...VALID, duration_ms: -1 }],
     ['an implausible duration', { ...VALID, duration_ms: 10 * 60_000 }],

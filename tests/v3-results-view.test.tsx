@@ -338,9 +338,9 @@ describe('V3ResultsView', () => {
     expect(screen.getByText(/“fun” This mid-thought pause had 2.1 seconds/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Show Articulation details' }))
-    expect(screen.getByText('1 of 49')).toBeInTheDocument()
+    expect(screen.getByText('1')).toBeInTheDocument()
     expect(screen.getByText('2%')).toBeInTheDocument()
-    expect(screen.getByText('100%')).toBeInTheDocument()
+    expect(screen.queryByText('100%')).not.toBeInTheDocument()
     expect(screen.getByText(/“I” This word had lower recognition confidence/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Show Energy details' }))

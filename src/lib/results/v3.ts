@@ -163,8 +163,20 @@ export function v3MetricSummary(
   mode: PracticeMode,
 ): string {
   if (result.status === 'not_checked') return 'This metric could not be checked for this response.'
-  if (result.status === 'unavailable')
+  if (result.status === 'unavailable') {
+    if (metric === 'pace')
+      return 'This recording did not contain enough timed speech to measure pace.'
+    if (metric === 'paused_time') {
+      return 'This recording did not contain enough reliable timing evidence to measure paused time.'
+    }
+    if (metric === 'articulation') {
+      return 'This recording did not contain enough clear speech evidence to measure articulation.'
+    }
+    if (metric === 'energy') {
+      return 'This recording did not contain enough voiced pitch evidence to measure energy.'
+    }
     return 'This metric could not be measured from this response.'
+  }
 
   const content = contentSummary(metric, result)
   if (content) return content
@@ -278,35 +290,20 @@ function measurementViews(
     addDuration('Beginning hesitation beyond allowance', 'beginning_excessive_pause_ms')
     addDuration('Mid-thought hesitation beyond allowance', 'mid_thought_excessive_pause_ms')
     addDuration('Natural-boundary time beyond allowance', 'natural_boundary_excessive_pause_ms')
-    const veryLong = numericMeasurement(result.measurements, 'very_long_pause_count')
-    if (veryLong !== null && veryLong > 0) {
-      rows.push({ label: 'Very long pauses', value: String(veryLong), help: null })
-    }
     return rows
   }
 
   if (metric === 'articulation') {
     const low = numericMeasurement(result.measurements, 'low_confidence_word_count')
-    const eligible = numericMeasurement(result.measurements, 'eligible_word_count')
     const proportion = numericMeasurement(result.measurements, 'low_confidence_proportion')
-    const coverage = numericMeasurement(result.measurements, 'confidence_coverage')
     const rows: Array<V3MetricMeasurementView | null> = [
-      low === null || eligible === null
-        ? null
-        : { label: 'Lower-confidence words', value: `${low} of ${eligible}`, help: null },
+      low === null ? null : { label: 'Lower-confidence words', value: String(low), help: null },
       proportion === null
         ? null
         : {
             label: 'Lower-confidence rate',
             value: `${Math.round(proportion * 100)}%`,
             help: null,
-          },
-      coverage === null
-        ? null
-        : {
-            label: 'Recognition coverage',
-            value: `${Math.round(coverage * 100)}%`,
-            help: 'The share of eligible words with recognition confidence data.',
           },
     ]
     return rows.filter((item): item is V3MetricMeasurementView => item !== null)
@@ -417,7 +414,9 @@ export function v3MetricDetails(
       key: `${index}:${detailEvidenceKey(evidence)}`,
       text: evidenceText(evidence),
     })),
-    warnings: result.warnings,
+    // Stored warnings are bounded operational diagnostics. The summaries above
+    // translate unavailable states without exposing scoring internals.
+    warnings: [],
   }
 }
 

@@ -581,15 +581,7 @@ function applyStructuralConciseness(
   spans: readonly V3MechanicallyOwnedSpan[],
 ): V3ContentMetricResult {
   if (result.component === null) return result
-  const fillerCount = result.details.filter(
-    (detail) => detail.source === 'ai' && detail.kind === 'filler',
-  ).length
-  if (spans.length === 0) {
-    return {
-      ...result,
-      measurements: { ...result.measurements, filler_count: fillerCount },
-    }
-  }
+  if (spans.length === 0) return result
   const reduction = Math.min(
     MAX_STRUCTURAL_CONCISENESS_REDUCTION,
     spans.reduce((total, span) => total + STRUCTURAL_CONCISENESS_REDUCTION[span.category], 0),
@@ -603,8 +595,6 @@ function applyStructuralConciseness(
     measurements: {
       semantic_component: result.component,
       structural_component_reduction: reduction,
-      filler_count: fillerCount,
-      false_start_count: spans.length,
     },
     evidence: [...result.evidence, ...details.flatMap((detail) => detail.evidence)],
     details: [...result.details, ...details],

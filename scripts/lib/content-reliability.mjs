@@ -1,6 +1,7 @@
 export const CURRENT_SCORE_PAYLOAD_VERSION = 'v3.score.2'
 export const CURRENT_RUBRIC_VERSION = 'v3'
-export const CURRENT_CONTENT_PAYLOAD_VERSION = 'v3.content-evaluator.1'
+export const CURRENT_CONTENT_PAYLOAD_VERSION = 'v3.content-audit.1'
+export const CURRENT_CONTENT_EVALUATOR_VERSION = 'v3.content-evaluator.1'
 export const V2_SCORE_PAYLOAD_VERSION = 'v2.score.1'
 export const V2_RUBRIC_VERSION = 'v2'
 export const V2_CONTENT_PAYLOAD_VERSION = 'v2.content-detector.1'
@@ -29,11 +30,11 @@ export const V3_CONTENT_METRICS = [
 ]
 
 /**
- * These codes are bounded in the provider adapter but are currently logged,
- * not persisted. The report names that limitation instead of presenting zero
- * as evidence that a failure class did not occur.
+ * These codes are bounded in the provider adapter. Current compact v3 audit
+ * records may persist one, but this aggregate query deliberately does not read
+ * per-attempt diagnostic detail.
  */
-export const UNPERSISTED_PROVIDER_DIAGNOSTIC_CODES = [
+export const BOUNDED_PROVIDER_DIAGNOSTIC_CODES = [
   'schema_invalid',
   'malformed_json',
   'empty_response',
@@ -58,6 +59,7 @@ select
   section_scores ->> 'version' as score_payload_version,
   section_scores ->> 'rubric_version' as score_rubric_version,
   content_result ->> 'version' as content_payload_version,
+  content_result ->> 'evaluator_version' as content_evaluator_version,
   content_result ->> 'status' as content_status,
   content_result ->> 'calls' as content_calls,
   section_scores #>> '{sections,what_you_said,metrics,answered_prompt,status}' as v3_score_answered_prompt_status,
@@ -247,7 +249,7 @@ export function summarizeContentReliability(rows, options = {}) {
     successfulRetryRecoveries: 0,
     inferredDiagnostics: { missing_section: 0 },
     missingSections: { structure: 0, grammar: 0, vocabulary: 0 },
-    attemptsNeedingUnpersistedDiagnosticDetail: 0,
+    attemptsNeedingDiagnosticDetail: 0,
   }
 
   const completedTimes = []
@@ -268,38 +270,44 @@ export function summarizeContentReliability(rows, options = {}) {
       else summary.callsOtherOrMissing += 1
 
       const contentStatuses = V3_CONTENT_METRICS.map((metric) => v3ContentStatus(row, metric))
+      const scoreStatuses = V3_CONTENT_METRICS.map((metric) => v3ScoreStatus(row, metric))
       const topLevelChecked = row.content_status === 'checked'
       const topLevelNotChecked = row.content_status === 'not_checked'
       const allContentScored = contentStatuses.every((status) => status === 'scored')
       const allContentNotChecked = contentStatuses.every((status) => status === 'not_checked')
+      const allScoreScored = scoreStatuses.every((status) => status === 'scored')
+      const allScoreNotChecked = scoreStatuses.every((status) => status === 'not_checked')
       const contentMatchesScore = V3_CONTENT_METRICS.every(
         (metric) => v3ContentStatus(row, metric) === v3ScoreStatus(row, metric),
       )
-      const validV3 =
+      const compactAudit =
         row.content_payload_version === CURRENT_CONTENT_PAYLOAD_VERSION &&
-        calls !== null &&
-        calls >= 0 &&
-        calls <= 2 &&
-        contentMatchesScore &&
-        ((topLevelChecked && allContentScored) || (topLevelNotChecked && allContentNotChecked))
+        row.content_evaluator_version === CURRENT_CONTENT_EVALUATOR_VERSION
+      const historicalEvaluation = row.content_payload_version === CURRENT_CONTENT_EVALUATOR_VERSION
+      const validContentShape = compactAudit
+        ? (topLevelChecked && allScoreScored) || (topLevelNotChecked && allScoreNotChecked)
+        : historicalEvaluation &&
+          contentMatchesScore &&
+          ((topLevelChecked && allContentScored) || (topLevelNotChecked && allContentNotChecked))
+      const validV3 = validContentShape && calls !== null && calls >= 0 && calls <= 2
 
       if (!validV3) {
         summary.v3WithoutAllSixContentMetrics += 1
         summary.malformedOrInconsistentV3Snapshots += 1
-        summary.attemptsNeedingUnpersistedDiagnosticDetail += 1
+        summary.attemptsNeedingDiagnosticDetail += 1
         continue
       }
-      if (allContentScored) {
+      if (compactAudit ? allScoreScored : allContentScored) {
         summary.allSixV3ContentMetricsScored += 1
         summary.contentFullyChecked += 1
         if (calls === 2) {
           summary.successfulRetryRecoveries += 1
-          summary.attemptsNeedingUnpersistedDiagnosticDetail += 1
+          summary.attemptsNeedingDiagnosticDetail += 1
         }
       } else {
         summary.v3WithoutAllSixContentMetrics += 1
         summary.contentAllNotChecked += 1
-        summary.attemptsNeedingUnpersistedDiagnosticDetail += 1
+        summary.attemptsNeedingDiagnosticDetail += 1
       }
       continue
     }
@@ -342,7 +350,7 @@ export function summarizeContentReliability(rows, options = {}) {
     if (!validContent) {
       summary.v2WithoutAllSixCategories += 1
       summary.malformedOrInconsistentV2Snapshots += 1
-      summary.attemptsNeedingUnpersistedDiagnosticDetail += 1
+      summary.attemptsNeedingDiagnosticDetail += 1
       continue
     }
 
@@ -357,20 +365,20 @@ export function summarizeContentReliability(rows, options = {}) {
       summary.contentFullyChecked += 1
       if (calls === 2) {
         summary.successfulRetryRecoveries += 1
-        summary.attemptsNeedingUnpersistedDiagnosticDetail += 1
+        summary.attemptsNeedingDiagnosticDetail += 1
       }
       continue
     }
 
     if (notChecked.length === CONTENT_CATEGORIES.length) {
       summary.contentAllNotChecked += 1
-      summary.attemptsNeedingUnpersistedDiagnosticDetail += 1
+      summary.attemptsNeedingDiagnosticDetail += 1
       continue
     }
 
     summary.contentPartiallyNotChecked += 1
     summary.inferredDiagnostics.missing_section += 1
-    summary.attemptsNeedingUnpersistedDiagnosticDetail += 1
+    summary.attemptsNeedingDiagnosticDetail += 1
     for (const category of notChecked) summary.missingSections[category] += 1
   }
 
@@ -422,11 +430,11 @@ export function formatContentReliabilityReport(summary) {
     `${pad('Missing structure')} ${summary.missingSections.structure}`,
     `${pad('Missing grammar')} ${summary.missingSections.grammar}`,
     `${pad('Missing vocabulary')} ${summary.missingSections.vocabulary}`,
-    `${pad('Rows needing exact provider detail')} ${summary.attemptsNeedingUnpersistedDiagnosticDetail}`,
+    `${pad('Rows needing exact provider detail')} ${summary.attemptsNeedingDiagnosticDetail}`,
     '',
-    'Detailed provider codes are not currently persisted in stored attempts.',
-    'The following bounded runtime codes therefore cannot be reconstructed from stored rows:',
-    `  ${UNPERSISTED_PROVIDER_DIAGNOSTIC_CODES.join(', ')}`,
+    'Current compact v3 audit records persist one bounded code when content checking fails.',
+    'This aggregate report deliberately does not read per-attempt diagnostic codes:',
+    `  ${BOUNDED_PROVIDER_DIAGNOSTIC_CODES.join(', ')}`,
     '',
     'This report contains aggregate status, version, call-count, and timestamp metadata only.',
   ]

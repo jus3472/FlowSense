@@ -18,13 +18,14 @@ export interface PitchSample {
 
 /**
  * Raw capture data, stored under `metrics.capture`. Nothing here is derived.
- * Prompt 3 computes its delivery measurements from these timelines and writes
- * them alongside, so this shape stays as close to what the microphone gave us
- * as possible.
+ * v3 computes its audio measurements from these timelines. Intermediate audio
+ * diagnostics stay transient, so this shape stays close to the microphone data
+ * needed to reproduce and audit the result.
  */
 export interface CaptureMetrics {
   mime_type: string
-  started_at: string
+  /** Historical captures may contain this unused timestamp; new captures omit it. */
+  started_at?: string
   duration_ms: number
   sample_interval_ms: number
   amplitude: AmplitudeSample[]
@@ -35,9 +36,12 @@ export interface CaptureMetrics {
 export interface TranscriptMetrics {
   provider: 'deepgram'
   model: string
-  confidence: number | null
+  /** Historical successful transcripts may contain this unused aggregate value. */
+  confidence?: number | null
   words: TranscriptWord[]
+  /** Historical successful transcripts may contain the provider-reported duration. */
   duration_seconds?: number | null
+  /** Persisted only when Deepgram reports a degraded or unavailable result. */
   quality?: DeepgramTranscriptQuality | DeepgramUnavailableQuality
 }
 

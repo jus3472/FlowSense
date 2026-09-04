@@ -96,6 +96,18 @@ describe('v3 result presentation helpers', () => {
     expect(v3PrimaryMeasurement('energy', unavailable)).toBeNull()
   })
 
+  it('translates unavailable audio gates without exposing internal diagnostics', () => {
+    const articulation = {
+      ...v3Snapshot({ unavailableMetric: 'articulation' }).sections.how_you_sounded.metrics
+        .articulation,
+      warnings: ['Recognized speech did not separate reliably from surrounding audio.'],
+    }
+    expect(v3MetricSummary('articulation', articulation, 'practice')).toBe(
+      'This recording did not contain enough clear speech evidence to measure articulation.',
+    )
+    expect(v3MetricDetails('articulation', articulation, 'practice').warnings).toEqual([])
+  })
+
   it('builds concise summaries and friendly detail rows from stored audio measurements', () => {
     const payload = v3Snapshot({ mode: 'practice', component: 0.8 })
     const pace = {

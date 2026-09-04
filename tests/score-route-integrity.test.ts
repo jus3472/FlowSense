@@ -41,6 +41,7 @@ vi.mock('@/lib/attempts/legacy-recheck', () => ({
 }))
 
 vi.mock('@/lib/deepseek/provider', () => ({
+  DEEPSEEK_MODEL: 'deepseek-v4-flash',
   createDeepSeekModel: vi.fn(() => ({ name: 'deepseek', complete: mocks.deepSeekComplete })),
   reportContentProviderFailure: vi.fn((error: unknown) => error),
 }))
@@ -684,7 +685,7 @@ describe('score route database integrity', () => {
           metric: 'pace',
           status: 'scored',
           component: 0.8,
-          measurements: { raw: 1 },
+          measurements: {},
           evidence: [
             expect.objectContaining({
               coordinate: { space: 'audio_timeline', unit: 'millisecond' },
@@ -720,12 +721,18 @@ describe('score route database integrity', () => {
       expect.objectContaining({
         score: 74,
         section_scores: V3_SCORE,
-        content_result: V3_CONTENT,
-        metrics: expect.objectContaining({
-          v3: expect.objectContaining({ score: V3_SCORE, content: V3_CONTENT, audio: V3_AUDIO }),
-        }),
+        content_result: {
+          version: 'v3.content-audit.1',
+          evaluator_version: 'v3.content-evaluator.1',
+          provider: 'deepseek',
+          model: 'deepseek-v4-flash',
+          status: 'checked',
+          calls: 1,
+        },
       }),
     )
+    const persisted = mocks.transitionOwnedAttempt.mock.calls.at(-1)?.[5]
+    expect(persisted).not.toHaveProperty('metrics')
     expect(mocks.recordPracticeActivityDay).toHaveBeenCalledWith(
       setup.admin,
       USER_ID,

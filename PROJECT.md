@@ -68,6 +68,11 @@ explicit occurrence for repeated quotes, supports multiple exact spans for one r
 prevents overlap between structural and AI findings. The four current audio metrics are pure over stored
 capture evidence and the final Deepgram word array:
 
+For new v3 attempts, `section_scores` is the only authoritative result snapshot. Its measurement maps
+contain only score inputs and user-facing or audit-relevant values. Raw audio-analysis diagnostics are
+computed transiently. `content_result` stores the compact `v3.content-audit.1` provider record, while
+historical full content results and historical `metrics.v3` copies remain readable and untouched.
+
 - Pace is articulation rate: timed words divided by active speaking time after detected silence is removed.
 - Paused Time combines excessive beginning hesitation and excessive interword pauses. It uses the same hardened first-word onset as Pace, allows more time at the beginning and natural sentence boundaries than mid-thought, adds only duration beyond each allowance, and never counts trailing silence.
 - Articulation uses the proportion of eligible words with low final recognition confidence, gated by confidence coverage and audio signal separation. It does not use accent labels or native similarity.

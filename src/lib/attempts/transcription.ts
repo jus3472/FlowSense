@@ -16,6 +16,10 @@ function validConfidence(value: unknown): value is number | null {
   )
 }
 
+function validOptionalConfidence(value: unknown): value is number | null | undefined {
+  return value === undefined || validConfidence(value)
+}
+
 function validQuality(value: unknown): boolean {
   if (value === undefined) return true
   if (!isRecord(value) || (value.status !== 'usable' && value.status !== 'degraded')) return false
@@ -43,7 +47,7 @@ export function readStoredCompletedTranscription(
     stored.provider !== 'deepgram' ||
     typeof stored.model !== 'string' ||
     stored.model.trim().length === 0 ||
-    !validConfidence(stored.confidence) ||
+    !validOptionalConfidence(stored.confidence) ||
     !Array.isArray(stored.words) ||
     stored.words.length === 0 ||
     !validQuality(stored.quality)

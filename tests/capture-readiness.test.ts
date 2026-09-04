@@ -17,7 +17,6 @@ function recording(
     blob: overrides.blob ?? new Blob([overrides.blobText ?? 'recorded-audio']),
     mimeType: overrides.mimeType ?? 'audio/webm;codecs=opus',
     durationMs,
-    startedAt: overrides.startedAt ?? '2026-08-27T12:00:00.000Z',
     amplitude: overrides.amplitude ?? amplitude,
     pitch: overrides.pitch ?? [],
   }
