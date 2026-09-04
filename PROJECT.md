@@ -57,8 +57,9 @@ Transcription uses Deepgram `nova-2` with punctuation and filler words enabled. 
 
 New attempts use rubric `v3` and payload `v3.score.1`. The two sections are always worth 50 points.
 DeepSeek evaluates only the six content metrics as normalized components under a strict schema.
-Code owns fillers, false starts, and closers within Conciseness, validates exact UTF-16 evidence,
-and prevents overlap between mechanical and AI findings. The five audio metrics are pure over stored
+DeepSeek owns context-aware fillers and the other semantic Conciseness findings. Code retains only
+clear false starts and restarts within Conciseness, validates exact UTF-16 evidence, and prevents
+overlap between structural and AI findings. The five audio metrics are pure over stored
 capture evidence and the final Deepgram word array:
 
 - Pace is articulation rate: timed words divided by active speaking time after detected silence is removed.

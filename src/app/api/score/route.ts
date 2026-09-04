@@ -54,7 +54,7 @@ import { v3AudioMetrics } from '@/lib/scoring/v3/audio-result'
 import { v3ContentEvaluatorFromModel } from '@/lib/scoring/v3/content/adapter'
 import type { V3ContentEvaluatorProvider } from '@/lib/scoring/v3/content/contracts'
 import { runV3ContentEvaluation } from '@/lib/scoring/v3/content/evaluate'
-import { v3ContentEvidenceInput } from '@/lib/scoring/v3/content/input'
+import { legacyContentEvidenceInput, v3ContentEvidenceInput } from '@/lib/scoring/v3/content/input'
 import type { AttemptMetrics } from '@/lib/types/metrics'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { SCORING_PROVIDER_TIMEOUT_MS, SCORING_WORK_BUDGET_MS } from '@/lib/recording/timeouts'
@@ -389,13 +389,13 @@ export async function POST(request: Request) {
       } catch (error) {
         provider = unavailableV2Provider(error)
       }
-      const contentEvidence = v3ContentEvidenceInput(transcript, transcriptWords)
+      const contentEvidence = legacyContentEvidenceInput(transcript, transcriptWords)
       const contentPromise = runV2ContentEvaluation({
         provider,
         mode: v2Mode,
         prompt: attempt.prompt_text,
         transcript,
-        mechanicallyCounted: contentEvidence.mechanicallyOwned,
+        mechanicallyCounted: contentEvidence.mechanicallyCounted,
         unreliableTranscriptSpans: contentEvidence.unreliableTranscriptSpans,
         timeoutMs: SCORING_PROVIDER_TIMEOUT_MS,
       })

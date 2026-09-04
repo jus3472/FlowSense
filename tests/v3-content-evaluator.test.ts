@@ -2,6 +2,7 @@ import { CONTENT_PROVIDER_UNAVAILABLE_MESSAGE, type ContentModel } from '@/lib/d
 import {
   V3_CONTENT_EVALUATOR_VERSION,
   type V3ContentEvaluatorProvider,
+  type V3MechanicallyOwnedSpan,
 } from '@/lib/scoring/v3/content/contracts'
 import { v3ContentEvaluatorFromModel } from '@/lib/scoring/v3/content/adapter'
 import {
@@ -9,9 +10,11 @@ import {
   runV3ContentEvaluation,
   V3ContentParseError,
 } from '@/lib/scoring/v3/content/evaluate'
+import { legacyContentEvidenceInput, v3ContentEvidenceInput } from '@/lib/scoring/v3/content/input'
 import { buildV3ContentUserPrompt, V3_CONTENT_SYSTEM_PROMPT } from '@/lib/scoring/v3/content/prompt'
 import { WHAT_YOU_SAID_METRICS } from '@/lib/scoring/v3/contracts'
 import { describe, expect, it, vi } from 'vitest'
+import { wordsFrom } from './helpers/transcript'
 
 const TRANSCRIPT = 'Um I led the launch. The result was clear and useful.'
 
@@ -52,6 +55,19 @@ function response(overrides: Record<string, unknown> = {}) {
 
 function provider(complete: V3ContentEvaluatorProvider['complete']): V3ContentEvaluatorProvider {
   return { name: 'fake-v3', complete }
+}
+
+async function evaluateTranscript(transcript: string, conciseness: ReturnType<typeof metric>) {
+  const complete = vi.fn().mockResolvedValue(response({ conciseness }))
+  const evidenceInput = v3ContentEvidenceInput(transcript, wordsFrom(transcript))
+  const evaluated = await runV3ContentEvaluation({
+    provider: provider(complete),
+    mode: 'practice',
+    prompt: 'Describe your role.',
+    transcript,
+    ...evidenceInput,
+  })
+  return { complete, evaluated, evidenceInput }
 }
 
 describe('v3 content evaluator contract', () => {
@@ -198,7 +214,7 @@ describe('v3 content evaluator contract', () => {
         }),
         {
           transcript: TRANSCRIPT,
-          mechanicallyOwned: [{ start, end: start + 6, text: 'useful', category: 'filler' }],
+          mechanicallyOwned: [{ start, end: start + 6, text: 'useful', category: 'false_start' }],
         },
       ),
     ).toThrow(/mechanically owned speech/)
@@ -217,52 +233,213 @@ describe('v3 content evaluator contract', () => {
     ).toThrow(/owned by another metric/)
   })
 
-  it('assigns fillers, false starts, and closers only to Conciseness', () => {
+  it('ignores invalid or overlapping structural spans instead of charging twice', () => {
     const parsed = parseV3ContentResponse(response(), {
       transcript: TRANSCRIPT,
       mechanicallyOwned: [
-        { start: 0, end: 2, text: 'Um', category: 'filler' },
-        { start: 3, end: 8, text: 'I led', category: 'false_start' },
-      ],
-    })
-    expect(parsed.metrics.conciseness.component).toBe(0.91)
-    expect(parsed.metrics.conciseness.measurements).toMatchObject({
-      semantic_component: 1,
-      filler_count: 1,
-      false_start_count: 1,
-      closer_count: 0,
-      mechanical_component_reduction: 0.09,
-    })
-    expect(parsed.metrics.conciseness.details.map((detail) => detail.kind)).toEqual([
-      'filler',
-      'false_start',
-    ])
-    for (const metric of WHAT_YOU_SAID_METRICS.filter((name) => name !== 'conciseness')) {
-      expect(parsed.metrics[metric].details).toEqual([])
-    }
-  })
-
-  it('ignores invalid or overlapping local mechanical spans instead of charging twice', () => {
-    const parsed = parseV3ContentResponse(response(), {
-      transcript: TRANSCRIPT,
-      mechanicallyOwned: [
-        { start: 0, end: 2, text: 'Um', category: 'filler' },
         { start: 0, end: 4, text: 'Um I', category: 'false_start' },
-        { start: 500, end: 502, text: 'Um', category: 'filler' },
+        { start: 0, end: 2, text: 'Um', category: 'false_start' },
+        { start: 500, end: 502, text: 'Um', category: 'false_start' },
       ],
     })
-    expect(parsed.metrics.conciseness.component).toBe(0.97)
+    expect(parsed.metrics.conciseness.component).toBe(0.94)
     expect(parsed.metrics.conciseness.details).toHaveLength(1)
   })
 
-  it('does not charge mechanically detected speech when its transcription is unreliable', () => {
+  it('does not charge a structural span when its transcription is unreliable', () => {
     const parsed = parseV3ContentResponse(response(), {
       transcript: TRANSCRIPT,
-      mechanicallyOwned: [{ start: 0, end: 2, text: 'Um', category: 'filler' }],
+      mechanicallyOwned: [{ start: 0, end: 2, text: 'Um', category: 'false_start' }],
       unreliableTranscriptSpans: [{ start: 0, end: 2, confidence: 0.2 }],
     })
     expect(parsed.metrics.conciseness.component).toBe(1)
     expect(parsed.metrics.conciseness.details).toEqual([])
+  })
+
+  describe('context-aware filler ownership', () => {
+    it('accepts an AI-owned um filler with validated transcript evidence', async () => {
+      const transcript = 'Um, I led the launch.'
+      const { evaluated } = await evaluateTranscript(
+        transcript,
+        metric({
+          component: 0.82,
+          explanation: 'You open with unnecessary filler.',
+          findings: [finding('filler', 'Um,', transcript)],
+        }),
+      )
+
+      expect(evaluated.metrics.conciseness).toMatchObject({
+        component: 0.82,
+        measurements: { filler_count: 1 },
+      })
+      expect(evaluated.metrics.conciseness.details[0]).toMatchObject({
+        kind: 'filler',
+        source: 'ai',
+        quote: 'Um,',
+      })
+    })
+
+    it('penalizes like only when the provider identifies its contextual use as filler', async () => {
+      const transcript = 'I handled, like, five launches.'
+      const { evaluated, evidenceInput } = await evaluateTranscript(
+        transcript,
+        metric({
+          component: 0.8,
+          explanation: 'You insert one unnecessary filler.',
+          findings: [finding('filler', 'like,', transcript)],
+        }),
+      )
+
+      expect(evidenceInput.mechanicallyOwned).toEqual([])
+      expect(evaluated.metrics.conciseness.component).toBe(0.8)
+      expect(evaluated.metrics.conciseness.evidence[0]?.quote).toBe('like,')
+    })
+
+    it('does not automatically penalize a meaningful use of like', async () => {
+      const transcript = 'I like the approach because it reduces errors.'
+      const { evaluated, evidenceInput } = await evaluateTranscript(transcript, metric())
+
+      expect(evidenceInput.mechanicallyOwned).toEqual([])
+      expect(evaluated.metrics.conciseness).toMatchObject({
+        component: 1,
+        measurements: { filler_count: 0 },
+        details: [],
+      })
+    })
+
+    it('does not automatically penalize a meaningful use of honestly', async () => {
+      const transcript = 'I honestly reported the delay as soon as I found it.'
+      const { evaluated, evidenceInput } = await evaluateTranscript(transcript, metric())
+
+      expect(evidenceInput.mechanicallyOwned).toEqual([])
+      expect(evaluated.metrics.conciseness.component).toBe(1)
+      expect(evaluated.metrics.conciseness.details).toEqual([])
+    })
+
+    it('accepts a niche filler phrase without adding it to a dictionary', async () => {
+      const transcript = 'The thing is, I led the launch.'
+      const { evaluated, evidenceInput } = await evaluateTranscript(
+        transcript,
+        metric({
+          component: 0.76,
+          explanation: 'You use a phrase that adds no useful meaning here.',
+          findings: [finding('filler', 'The thing is,', transcript)],
+        }),
+      )
+
+      expect(evidenceInput.mechanicallyOwned).toEqual([])
+      expect(evaluated.metrics.conciseness.component).toBe(0.76)
+      expect(evaluated.metrics.conciseness.details[0]?.kind).toBe('filler')
+    })
+
+    it('assigns a filler finding only to Conciseness', async () => {
+      const transcript = 'Um, I led the launch.'
+      const { evaluated } = await evaluateTranscript(
+        transcript,
+        metric({
+          component: 0.82,
+          explanation: 'You open with unnecessary filler.',
+          findings: [finding('filler', 'Um,', transcript)],
+        }),
+      )
+
+      for (const name of WHAT_YOU_SAID_METRICS.filter(
+        (metricName) => metricName !== 'conciseness',
+      )) {
+        expect(evaluated.metrics[name]).toMatchObject({ component: 1, details: [] })
+      }
+    })
+
+    it('does not mechanically subtract the same filler span', async () => {
+      const transcript = 'Um, I led the launch.'
+      const { evaluated, evidenceInput } = await evaluateTranscript(
+        transcript,
+        metric({
+          component: 0.82,
+          explanation: 'You open with unnecessary filler.',
+          findings: [finding('filler', 'Um,', transcript)],
+        }),
+      )
+
+      expect(evidenceInput.mechanicallyOwned).toEqual([])
+      expect(evaluated.metrics.conciseness.component).toBe(0.82)
+      expect(evaluated.metrics.conciseness.details).toHaveLength(1)
+      expect(evaluated.metrics.conciseness.measurements).not.toHaveProperty(
+        'structural_component_reduction',
+      )
+
+      const staleMechanicalFiller = [
+        { start: 0, end: 3, text: 'Um,', category: 'filler' },
+      ] as unknown as V3MechanicallyOwnedSpan[]
+      const parsed = parseV3ContentResponse(
+        response({
+          conciseness: metric({
+            component: 0.82,
+            explanation: 'You open with unnecessary filler.',
+            findings: [finding('filler', 'Um,', transcript)],
+          }),
+        }),
+        { transcript, mechanicallyOwned: staleMechanicalFiller },
+      )
+      expect(parsed.metrics.conciseness.component).toBe(0.82)
+      expect(parsed.metrics.conciseness.details).toHaveLength(1)
+    })
+
+    it('retains a separate deterministic false-start deduction', async () => {
+      const transcript = 'I, I answered the prompt.'
+      const { evaluated, evidenceInput } = await evaluateTranscript(transcript, metric())
+
+      expect(evidenceInput.mechanicallyOwned).toEqual([
+        { start: 0, end: 2, text: 'I,', category: 'false_start' },
+      ])
+      expect(evaluated.metrics.conciseness).toMatchObject({
+        component: 0.94,
+        measurements: {
+          semantic_component: 1,
+          structural_component_reduction: 0.06,
+          filler_count: 0,
+          false_start_count: 1,
+        },
+      })
+      expect(evaluated.metrics.conciseness.details[0]).toMatchObject({
+        kind: 'false_start',
+        source: 'mechanical',
+      })
+    })
+
+    it('rejects invented filler evidence and fails the content evaluation closed', async () => {
+      const complete = vi.fn().mockResolvedValue(
+        response({
+          conciseness: metric({
+            component: 0.7,
+            explanation: 'You use unnecessary filler.',
+            findings: [finding('filler', 'invented')],
+          }),
+        }),
+      )
+      const evaluated = await runV3ContentEvaluation({
+        provider: provider(complete),
+        mode: 'practice',
+        prompt: 'Describe your role.',
+        transcript: TRANSCRIPT,
+      })
+
+      expect(complete).toHaveBeenCalledTimes(2)
+      expect(evaluated.status).toBe('not_checked')
+      expect(evaluated.diagnostic).toEqual({
+        category: 'content_validation_failed',
+        code: 'schema_invalid',
+        reason: 'evidence_not_in_transcript',
+        metric: 'conciseness',
+      })
+    })
+  })
+
+  it('preserves lexical mechanical exclusions for historical v2 rechecks', () => {
+    const transcript = 'Um, I led the launch.'
+    expect(
+      legacyContentEvidenceInput(transcript, wordsFrom(transcript)).mechanicallyCounted,
+    ).toEqual([{ start: 0, end: 3, text: 'Um,', category: 'filler' }])
   })
 
   it('retries once, then returns no usable metric when output remains malformed', async () => {
@@ -353,6 +530,9 @@ describe('v3 content evaluator contract', () => {
     )
     expect(request?.system).toContain('Score only these visible metrics')
     expect(request?.system).toContain('Do not assess delivery')
+    expect(request?.system).toContain('filler words or phrases')
+    expect(request?.system).toContain('not from a fixed vocabulary list')
+    expect(request?.system).toContain('A word such as "like" or "honestly" is not a filler')
     expect(request?.system).not.toContain('executive presence')
   })
 })

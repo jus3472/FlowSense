@@ -7,7 +7,8 @@ import type {
 
 export const V3_CONTENT_EVALUATOR_VERSION = 'v3.content-evaluator.1' as const
 
-export type MechanicalConcisenessKind = 'filler' | 'false_start' | 'closer'
+/** Deterministic v3 Conciseness ownership is limited to structural restarts. */
+export type MechanicalConcisenessKind = 'false_start'
 
 export interface V3TranscriptSpan {
   start: number

@@ -8,7 +8,7 @@ METRIC OWNERSHIP
 - answered_prompt: only prompt coverage. Once the prompt is fully answered, irrelevant extra speech cannot lower this metric.
 - specificity: concrete details, examples, reasons, evidence, experiences, outcomes, and how or why explanations.
 - structure: logical order and grouping across the response, not sentence grammar.
-- conciseness: only semantic repeated ideas, redundant sentences, irrelevant content, unnecessary tangents, and unnecessary qualifiers. Do not report fillers, false starts, abandoned phrases, or closers listed as mechanically_owned; code assigns those only to Conciseness. For a repeated idea in separated sentences, use null quote, start, and end rather than joining non-contiguous text. Otherwise quote one exact contiguous transcript substring.
+- conciseness: filler words or phrases, repeated ideas, redundant sentences, irrelevant content, unnecessary tangents, and unnecessary qualifiers. Decide whether a word or phrase functions as unnecessary filler from its meaning and role in this response, not from a fixed vocabulary list. A word such as "like" or "honestly" is not a filler when it contributes meaning. Detect unusual or speaker-specific filler language when it adds no useful meaning. The Conciseness component must already include every model-owned filler finding; code does not subtract a separate per-filler amount. Do not report false starts, restarts, or abandoned phrases listed as mechanically_owned. For a repeated idea in separated sentences, use null quote, start, and end rather than joining non-contiguous text. Every filler finding must quote one exact contiguous transcript substring.
 - word_choice: materially vague, imprecise, or context-inappropriate wording. Never reward sophisticated vocabulary or assess vocabulary level.
 - grammar: clear spoken grammatical errors that affect correctness, clarity, or effectiveness. Do not enforce formal written style.
 
@@ -53,6 +53,7 @@ export function buildV3ContentUserPrompt(request: V3ContentEvaluatorRequest): st
         ),
         conciseness: emptyMetric(
           [
+            'filler',
             'repeated_idea',
             'redundant_sentence',
             'irrelevant_content',

@@ -1,6 +1,7 @@
 import type { TranscriptWord } from '@/lib/deepgram/parse'
-import { analyseFillers } from '@/lib/scoring/fillers'
+import { analyseFillers, type FillerHit } from '@/lib/scoring/fillers'
 import { buildTokens } from '@/lib/scoring/tokens'
+import type { MechanicallyCountedSpan } from '@/lib/scoring/v2/content/contracts'
 import type { V3MechanicallyOwnedSpan, V3TranscriptSpan } from '@/lib/scoring/v3/content/contracts'
 
 export interface V3ContentEvidenceInput {
@@ -8,14 +9,30 @@ export interface V3ContentEvidenceInput {
   unreliableTranscriptSpans: V3TranscriptSpan[]
 }
 
-/** Builds the exact evidence exclusions shared by production scoring and live diagnostics. */
-export function v3ContentEvidenceInput(
-  transcript: string,
-  words: readonly TranscriptWord[],
-): V3ContentEvidenceInput {
+interface TokenEvidence {
+  fillers: ReturnType<typeof analyseFillers>
+  tokens: ReturnType<typeof buildTokens>
+  unreliableTranscriptSpans: V3TranscriptSpan[]
+}
+
+function tokenEvidence(transcript: string, words: readonly TranscriptWord[]): TokenEvidence {
   const tokens = buildTokens(words, transcript)
   const fillers = analyseFillers(tokens, tokens.length)
-  const mechanicallyOwned = fillers.hits.flatMap((hit) => {
+  const unreliableTranscriptSpans = tokens.flatMap((token, index) => {
+    const confidence = words[index]?.confidence
+    return typeof confidence === 'number' && confidence >= 0 && confidence < 0.75
+      ? [{ start: token.charStart, end: token.charEnd, confidence }]
+      : []
+  })
+  return { fillers, tokens, unreliableTranscriptSpans }
+}
+
+function spansFromHits(
+  hits: readonly FillerHit[],
+  tokens: ReturnType<typeof buildTokens>,
+  transcript: string,
+): MechanicallyCountedSpan[] {
+  return hits.flatMap((hit) => {
     const selected = hit.token_indices.map((index) => tokens[index]).filter(Boolean)
     const first = selected[0]
     const last = selected.at(-1)
@@ -30,11 +47,33 @@ export function v3ContentEvidenceInput(
         ]
       : []
   })
-  const unreliableTranscriptSpans = tokens.flatMap((token, index) => {
-    const confidence = words[index]?.confidence
-    return typeof confidence === 'number' && confidence >= 0 && confidence < 0.75
-      ? [{ start: token.charStart, end: token.charEnd, confidence }]
-      : []
-  })
+}
+
+/** Builds v3 exclusions and deductions. Lexical fillers and closers remain model-owned. */
+export function v3ContentEvidenceInput(
+  transcript: string,
+  words: readonly TranscriptWord[],
+): V3ContentEvidenceInput {
+  const { fillers, tokens, unreliableTranscriptSpans } = tokenEvidence(transcript, words)
+  const mechanicallyOwned = spansFromHits(
+    fillers.hits.filter((hit) => hit.category === 'false_start'),
+    tokens,
+    transcript,
+  ).map((span): V3MechanicallyOwnedSpan => ({ ...span, category: 'false_start' }))
   return { mechanicallyOwned, unreliableTranscriptSpans }
+}
+
+/** Preserves the complete legacy exclusion set for historical v2 rechecks. */
+export function legacyContentEvidenceInput(
+  transcript: string,
+  words: readonly TranscriptWord[],
+): {
+  mechanicallyCounted: MechanicallyCountedSpan[]
+  unreliableTranscriptSpans: V3TranscriptSpan[]
+} {
+  const { fillers, tokens, unreliableTranscriptSpans } = tokenEvidence(transcript, words)
+  return {
+    mechanicallyCounted: spansFromHits(fillers.hits, tokens, transcript),
+    unreliableTranscriptSpans,
+  }
 }

@@ -111,4 +111,35 @@ describe('v3 result presentation helpers', () => {
     expect(v3PrimaryMeasurement('time_to_first_word', metric)).toBe('2.9 sec')
     expect(v3MeasurementDetails(metric)).toEqual(['seconds: 2.90'])
   })
+
+  it('shows validated AI filler counts and transcript evidence under Conciseness', () => {
+    const transcript = 'Um, I led the launch.'
+    const payload = v3Snapshot({
+      component: 0.82,
+      evidenceMetric: 'conciseness',
+      measurements: { filler_count: 1 },
+      evidence: [
+        {
+          source: 'transcript',
+          start: 0,
+          end: 3,
+          coordinate: { space: 'transcript', unit: 'utf16_code_unit' },
+          quote: 'Um,',
+          detail: 'This opening functions as unnecessary filler.',
+        },
+      ],
+    })
+    const conciseness = payload.sections.what_you_said.metrics.conciseness
+
+    expect(v3MeasurementDetails(conciseness)).toEqual(['filler count: 1'])
+    expect(v3EvidenceViews(conciseness).map((item) => item.text)).toContain(
+      '“Um,” This opening functions as unnecessary filler.',
+    )
+    expect(v3TranscriptSegments(transcript, payload)).toContainEqual({
+      type: 'highlight',
+      text: 'Um,',
+      kind: 'word_choice',
+      label: 'Conciseness: This opening functions as unnecessary filler.',
+    })
+  })
 })

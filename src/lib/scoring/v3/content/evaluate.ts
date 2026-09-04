@@ -37,6 +37,7 @@ const FINDING_KINDS: Readonly<Record<WhatYouSaidMetricId, readonly string[]>> = 
     'incomplete_arc',
   ]),
   conciseness: Object.freeze([
+    'filler',
     'repeated_idea',
     'redundant_sentence',
     'irrelevant_content',
@@ -64,9 +65,9 @@ const MAX_FINDINGS_PER_METRIC = 8
 const MAX_EXPLANATION_LENGTH = 500
 const MAX_DETAIL_LENGTH = 500
 
-export const MECHANICAL_CONCISENESS_REDUCTION: Readonly<Record<MechanicalConcisenessKind, number>> =
-  Object.freeze({ filler: 0.03, false_start: 0.06, closer: 0.03 })
-export const MAX_MECHANICAL_CONCISENESS_REDUCTION = 0.5
+export const STRUCTURAL_CONCISENESS_REDUCTION: Readonly<Record<MechanicalConcisenessKind, number>> =
+  Object.freeze({ false_start: 0.06 })
+export const MAX_STRUCTURAL_CONCISENESS_REDUCTION = 0.5
 
 export class V3ContentParseError extends Error {
   constructor(
@@ -142,7 +143,7 @@ function resolvedTranscriptSpan(
 function validMechanicalSpan(span: V3MechanicallyOwnedSpan, transcript: string): boolean {
   return (
     validSpan(span, transcript) &&
-    (span.category === 'filler' || span.category === 'false_start' || span.category === 'closer') &&
+    span.category === 'false_start' &&
     span.text.length === span.end - span.start &&
     transcript.slice(span.start, span.end) === span.text
   )
@@ -384,12 +385,7 @@ function parseMetric(
 }
 
 function mechanicalDetail(span: V3MechanicallyOwnedSpan): V3MetricDetail {
-  const labels: Record<MechanicalConcisenessKind, string> = {
-    filler: 'This filler adds unnecessary speech.',
-    false_start: 'This false start adds unnecessary speech.',
-    closer: 'This closer adds unnecessary speech.',
-  }
-  const observation = labels[span.category]
+  const observation = 'This false start adds unnecessary speech.'
   const evidence: V3ScoreEvidence = {
     source: 'transcript',
     start: span.start,
@@ -408,29 +404,35 @@ function mechanicalDetail(span: V3MechanicallyOwnedSpan): V3MetricDetail {
   }
 }
 
-function applyMechanicalConciseness(
+function applyStructuralConciseness(
   result: V3ContentMetricResult,
   spans: readonly V3MechanicallyOwnedSpan[],
 ): V3ContentMetricResult {
-  if (result.component === null || spans.length === 0) return result
+  if (result.component === null) return result
+  const fillerCount = result.details.filter(
+    (detail) => detail.source === 'ai' && detail.kind === 'filler',
+  ).length
+  if (spans.length === 0) {
+    return {
+      ...result,
+      measurements: { ...result.measurements, filler_count: fillerCount },
+    }
+  }
   const reduction = Math.min(
-    MAX_MECHANICAL_CONCISENESS_REDUCTION,
-    spans.reduce((total, span) => total + MECHANICAL_CONCISENESS_REDUCTION[span.category], 0),
+    MAX_STRUCTURAL_CONCISENESS_REDUCTION,
+    spans.reduce((total, span) => total + STRUCTURAL_CONCISENESS_REDUCTION[span.category], 0),
   )
-  const counts = (category: MechanicalConcisenessKind) =>
-    spans.filter((span) => span.category === category).length
   const details = spans.map(mechanicalDetail)
-  const countedSpeech = `${spans.length} filler, false-start, or closer ${spans.length === 1 ? 'span' : 'spans'}`
+  const countedSpeech = `${spans.length} false-start ${spans.length === 1 ? 'span' : 'spans'}`
   return {
     ...result,
     component: Math.max(0, Number((result.component - reduction).toFixed(4))),
     explanation: `${result.explanation} You use ${countedSpeech} that ${spans.length === 1 ? 'adds' : 'add'} unnecessary speech.`,
     measurements: {
       semantic_component: result.component,
-      mechanical_component_reduction: reduction,
-      filler_count: counts('filler'),
-      false_start_count: counts('false_start'),
-      closer_count: counts('closer'),
+      structural_component_reduction: reduction,
+      filler_count: fillerCount,
+      false_start_count: spans.length,
     },
     evidence: [...result.evidence, ...details.flatMap((detail) => detail.evidence)],
     details: [...result.details, ...details],
@@ -501,7 +503,7 @@ export function parseV3ContentResponse(
       'no_answer_double_count',
     )
   }
-  parsed.conciseness = applyMechanicalConciseness(parsed.conciseness, mechanicallyOwned)
+  parsed.conciseness = applyStructuralConciseness(parsed.conciseness, mechanicallyOwned)
 
   return {
     version: V3_CONTENT_EVALUATOR_VERSION,
