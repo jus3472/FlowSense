@@ -287,6 +287,20 @@ test('records once, shows processing and v3 results, retries, compares, filters,
     await expect(page.getByRole('heading', { name: metric })).toBeVisible()
   }
   await expect(page.getByRole('heading', { name: 'Time to First Word' })).toHaveCount(0)
+  await expect(page.getByText('Review evidence', { exact: true })).toHaveCount(0)
+  const paceDetails = page.getByRole('button', { name: 'Show Pace details' })
+  await expect(paceDetails).toHaveAttribute('aria-expanded', 'false')
+  await paceDetails.click()
+  await expect(page.getByRole('button', { name: 'Hide Pace details' })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  )
+  await expect(page.getByText('Full-credit range', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Hide Pace details' }).click()
+  await expect(page.getByRole('button', { name: 'Show Pace details' })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  )
   expect(attemptPosts).toBe(1)
   const firstState = await currentState(page.request)
   expect(firstState.uploads).toBe(1)

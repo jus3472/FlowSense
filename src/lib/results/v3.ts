@@ -1,4 +1,6 @@
 import type { Segment } from '@/lib/results/highlights'
+import type { PracticeMode } from '@/lib/practice/contracts'
+import { AUDIO_THRESHOLDS_BY_MODE } from '@/lib/scoring/v3/audio'
 import {
   HOW_YOU_SOUNDED_METRICS,
   LEGACY_HOW_YOU_SOUNDED_METRICS,
@@ -87,6 +89,369 @@ function numericMeasurement(
 ): number | null {
   const value = measurements?.[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function measurementSeconds(milliseconds: number): string {
+  return `${(milliseconds / 1_000).toFixed(1)} sec`
+}
+
+export interface V3MetricMeasurementView {
+  label: string
+  value: string
+  help: string | null
+}
+
+export interface V3MetricFindingView {
+  key: string
+  label: string | null
+  quotes: readonly string[]
+  observation: string
+  suggestion: string | null
+}
+
+export interface V3MetricDetailView {
+  overview: string | null
+  counts: readonly V3MetricMeasurementView[]
+  measurements: readonly V3MetricMeasurementView[]
+  findings: readonly V3MetricFindingView[]
+  evidence: readonly V3EvidenceView[]
+  warnings: readonly string[]
+}
+
+function contentSummary(metric: StoredV3MetricId, result: V3PersistedMetricScore): string | null {
+  const full = result.component === 1 && result.details.length === 0
+  if (metric === 'answered_prompt') {
+    if (result.details.some((detail) => detail.kind === 'no_prompt_answer')) {
+      return 'Your response did not address what the prompt asked.'
+    }
+    return full
+      ? 'You fully answered what the prompt asked.'
+      : 'You answered part of the prompt, but one requirement was missing.'
+  }
+  if (metric === 'specificity') {
+    return full
+      ? 'You supported your response with clear, concrete details.'
+      : 'You included useful detail, but part of your response needed more support.'
+  }
+  if (metric === 'structure') {
+    return full
+      ? 'Your response was organized and easy to follow.'
+      : 'Your response was mostly easy to follow, with some room for clearer organization.'
+  }
+  if (metric === 'conciseness') {
+    return full
+      ? 'Your response stayed focused and avoided unnecessary wording.'
+      : 'Your response stayed focused overall, but some wording was unnecessary.'
+  }
+  if (metric === 'word_choice') {
+    return full
+      ? 'Your wording was clear and precise.'
+      : 'Most of your wording was clear, but one or more phrases could be more precise.'
+  }
+  if (metric === 'grammar') {
+    return full
+      ? 'Your spoken grammar was clear and easy to understand.'
+      : 'Some spoken grammar made parts of your response less clear.'
+  }
+  return null
+}
+
+/** A short, presentation-only answer to “How did I do?” for one stored metric. */
+export function v3MetricSummary(
+  metric: StoredV3MetricId,
+  result: V3PersistedMetricScore,
+  mode: PracticeMode,
+): string {
+  if (result.status === 'not_checked') return 'This metric could not be checked for this response.'
+  if (result.status === 'unavailable')
+    return 'This metric could not be measured from this response.'
+
+  const content = contentSummary(metric, result)
+  if (content) return content
+
+  if (metric === 'pace') {
+    const wpm =
+      numericMeasurement(result.measurements, 'words_per_minute') ??
+      numericMeasurement(result.measurements, 'articulation_rate_wpm')
+    const range = AUDIO_THRESHOLDS_BY_MODE[mode].pace
+    if (wpm !== null && wpm > range.full_through_wpm) {
+      return 'You spoke faster than the full-credit range.'
+    }
+    if (wpm !== null && wpm < range.full_from_wpm) {
+      return 'You spoke slower than the full-credit range.'
+    }
+    return 'You spoke at a steady pace within the full-credit range.'
+  }
+
+  if (metric === 'paused_time') {
+    const total = numericMeasurement(result.measurements, 'total_unnatural_pause_ms')
+    const midThought = numericMeasurement(result.measurements, 'mid_thought_excessive_pause_ms')
+    if (total === 0) return 'Your pauses stayed natural throughout the response.'
+    if (midThought !== null && midThought > 0) {
+      return 'Most pauses were natural, with some longer hesitation mid-thought.'
+    }
+    return 'Most pauses were natural, with a small amount of excessive paused time.'
+  }
+
+  if (metric === 'articulation') {
+    const low = numericMeasurement(result.measurements, 'low_confidence_word_count')
+    const eligible = numericMeasurement(result.measurements, 'eligible_word_count')
+    if (low === 0) return 'Your words were consistently easy for speech recognition to understand.'
+    if (low !== null && eligible !== null && low / Math.max(eligible, 1) <= 0.05) {
+      return 'Nearly all of your words were easy for speech recognition to understand.'
+    }
+    return 'Most of your words were easy for speech recognition to understand, with a few less certain words.'
+  }
+
+  if (metric === 'energy') {
+    const component = result.component ?? 0
+    if (component >= 0.8) return 'You used natural variation in your pitch and speaking rhythm.'
+    if (component >= 0.5) {
+      return 'You used some natural vocal variation, with a few flatter or more even stretches.'
+    }
+    return 'Your pitch or speaking rhythm stayed fairly even through much of the response.'
+  }
+
+  if (metric === 'time_to_first_word') {
+    return 'Your response includes a measured start time.'
+  }
+  return result.explanation ?? 'This metric was scored from the available evidence.'
+}
+
+const CONCISENESS_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  filler: 'Fillers',
+  false_start: 'False starts / restarts',
+  repeated_idea: 'Repeated ideas',
+  redundant_sentence: 'Redundant wording',
+  irrelevant_content: 'Irrelevant details',
+  unnecessary_tangent: 'Unnecessary tangents',
+  unnecessary_qualifier: 'Unnecessary qualifiers / closers',
+})
+
+function concisenessCounts(result: V3PersistedMetricScore): V3MetricMeasurementView[] {
+  const counts = new Map<string, number>()
+  for (const detail of result.details) {
+    const label = CONCISENESS_LABELS[detail.kind]
+    if (label) counts.set(label, (counts.get(label) ?? 0) + 1)
+  }
+  return [...counts].map(([label, count]) => ({ label, value: String(count), help: null }))
+}
+
+function cadenceLabel(component: number): string {
+  return component >= 0.8 ? 'Varied' : component >= 0.35 ? 'Somewhat varied' : 'Fairly even'
+}
+
+function measurementViews(
+  metric: StoredV3MetricId,
+  result: V3PersistedMetricScore,
+  mode: PracticeMode,
+): V3MetricMeasurementView[] {
+  if (metric === 'pace') {
+    const wpm = numericMeasurement(result.measurements, 'words_per_minute')
+    const active = numericMeasurement(result.measurements, 'active_speaking_ms')
+    const words = numericMeasurement(result.measurements, 'word_count')
+    const range = AUDIO_THRESHOLDS_BY_MODE[mode].pace
+    const rows: Array<V3MetricMeasurementView | null> = [
+      wpm === null ? null : { label: 'Speaking pace', value: `${Math.round(wpm)} WPM`, help: null },
+      {
+        label: 'Full-credit range',
+        value: `${range.full_from_wpm} to ${range.full_through_wpm} WPM`,
+        help: null,
+      },
+      active === null
+        ? null
+        : { label: 'Active speaking time', value: measurementSeconds(active), help: null },
+      words === null ? null : { label: 'Words spoken', value: String(words), help: null },
+    ]
+    return rows.filter((item): item is V3MetricMeasurementView => item !== null)
+  }
+
+  if (metric === 'paused_time') {
+    const rows: V3MetricMeasurementView[] = []
+    const addDuration = (label: string, key: string, always = false) => {
+      const value = numericMeasurement(result.measurements, key)
+      if (value !== null && (always || value > 0)) {
+        rows.push({ label, value: measurementSeconds(value), help: null })
+      }
+    }
+    addDuration('Total excessive paused time', 'total_unnatural_pause_ms', true)
+    addDuration('Beginning hesitation beyond allowance', 'beginning_excessive_pause_ms')
+    addDuration('Mid-thought hesitation beyond allowance', 'mid_thought_excessive_pause_ms')
+    addDuration('Natural-boundary time beyond allowance', 'natural_boundary_excessive_pause_ms')
+    const veryLong = numericMeasurement(result.measurements, 'very_long_pause_count')
+    if (veryLong !== null && veryLong > 0) {
+      rows.push({ label: 'Very long pauses', value: String(veryLong), help: null })
+    }
+    return rows
+  }
+
+  if (metric === 'articulation') {
+    const low = numericMeasurement(result.measurements, 'low_confidence_word_count')
+    const eligible = numericMeasurement(result.measurements, 'eligible_word_count')
+    const proportion = numericMeasurement(result.measurements, 'low_confidence_proportion')
+    const coverage = numericMeasurement(result.measurements, 'confidence_coverage')
+    const rows: Array<V3MetricMeasurementView | null> = [
+      low === null || eligible === null
+        ? null
+        : { label: 'Lower-confidence words', value: `${low} of ${eligible}`, help: null },
+      proportion === null
+        ? null
+        : {
+            label: 'Lower-confidence rate',
+            value: `${Math.round(proportion * 100)}%`,
+            help: null,
+          },
+      coverage === null
+        ? null
+        : {
+            label: 'Recognition coverage',
+            value: `${Math.round(coverage * 100)}%`,
+            help: 'The share of eligible words with recognition confidence data.',
+          },
+    ]
+    return rows.filter((item): item is V3MetricMeasurementView => item !== null)
+  }
+
+  if (metric === 'energy') {
+    const range = numericMeasurement(result.measurements, 'pitch_range_semitones')
+    const variation = numericMeasurement(result.measurements, 'pitch_variation_semitones')
+    const flat = numericMeasurement(result.measurements, 'flat_window_proportion')
+    const cadence = numericMeasurement(result.measurements, 'rhythm_cadence_component')
+    const rows: Array<V3MetricMeasurementView | null> = [
+      range === null
+        ? null
+        : {
+            label: 'Pitch range',
+            value: `${range.toFixed(1)} semitones`,
+            help: 'How wide a range of pitches your voice used.',
+          },
+      variation === null
+        ? null
+        : {
+            label: 'Pitch variation',
+            value: `${variation.toFixed(1)} semitones`,
+            help: 'How much your pitch naturally moved while you spoke.',
+          },
+      flat === null
+        ? null
+        : {
+            label: 'Flat vocal sections',
+            value: `${Math.round(flat * 100)}%`,
+            help: 'Whether long parts of your response stayed unusually flat.',
+          },
+      cadence === null
+        ? null
+        : {
+            label: 'Speaking rhythm',
+            value: cadenceLabel(cadence),
+            help: 'Whether your tempo varied naturally during active speech.',
+          },
+    ]
+    return rows.filter((item): item is V3MetricMeasurementView => item !== null)
+  }
+
+  if (metric === 'time_to_first_word') {
+    const value =
+      numericMeasurement(result.measurements, 'seconds') ??
+      (() => {
+        const milliseconds = numericMeasurement(result.measurements, 'time_to_first_word_ms')
+        return milliseconds === null ? null : milliseconds / 1_000
+      })()
+    return value === null
+      ? []
+      : [{ label: 'Time to first word', value: `${value.toFixed(1)} sec`, help: null }]
+  }
+  return []
+}
+
+function detailEvidenceKey(evidence: V3ScoreEvidence): string {
+  return [evidence.source, evidence.start, evidence.end, evidence.quote, evidence.detail].join(':')
+}
+
+function findingViews(result: V3PersistedMetricScore): V3MetricFindingView[] {
+  return result.details.map((detail, index) => {
+    const quotes = [
+      ...(detail.quote ? [detail.quote] : []),
+      ...detail.evidence.flatMap((evidence) => (evidence.quote ? [evidence.quote] : [])),
+    ]
+    return {
+      key: `${index}:${detail.kind}:${detail.observation}`,
+      label: CONCISENESS_LABELS[detail.kind] ?? null,
+      quotes: [...new Set(quotes)],
+      observation: detail.observation,
+      suggestion: detail.suggestion,
+    }
+  })
+}
+
+/** Friendly, metric-specific evidence derived only from the immutable stored result. */
+export function v3MetricDetails(
+  metric: StoredV3MetricId,
+  result: V3PersistedMetricScore,
+  mode: PracticeMode,
+): V3MetricDetailView {
+  const summary = v3MetricSummary(metric, result, mode)
+  const findings = findingViews(result)
+  const coveredEvidence = new Set(
+    result.details.flatMap((detail) => detail.evidence.map(detailEvidenceKey)),
+  )
+  const standaloneEvidence = result.evidence.filter(
+    (evidence) => !coveredEvidence.has(detailEvidenceKey(evidence)),
+  )
+  const userUsefulEvidence =
+    metric === 'pace' || metric === 'energy'
+      ? []
+      : metric === 'articulation'
+        ? standaloneEvidence.filter(
+            (evidence) => evidence.quote && evidence.coordinate?.space === 'transcript',
+          )
+        : standaloneEvidence
+  const showOverview = result.explanation !== null && result.explanation.trim() !== summary.trim()
+
+  return {
+    overview: showOverview ? result.explanation : null,
+    counts: metric === 'conciseness' ? concisenessCounts(result) : [],
+    measurements: measurementViews(metric, result, mode),
+    findings,
+    evidence: userUsefulEvidence.map((evidence, index) => ({
+      key: `${index}:${detailEvidenceKey(evidence)}`,
+      text: evidenceText(evidence),
+    })),
+    warnings: result.warnings,
+  }
+}
+
+export function v3MetricHasDetails(
+  metric: StoredV3MetricId,
+  result: V3PersistedMetricScore,
+  details: V3MetricDetailView,
+): boolean {
+  if (
+    (metric === 'grammar' || metric === 'word_choice') &&
+    result.component === 1 &&
+    details.findings.length === 0 &&
+    details.evidence.length === 0 &&
+    details.warnings.length === 0
+  ) {
+    return false
+  }
+  if (
+    metric === 'conciseness' &&
+    details.counts.length === 0 &&
+    details.findings.length === 0 &&
+    details.evidence.length === 0 &&
+    details.warnings.length === 0
+  ) {
+    return false
+  }
+  return (
+    details.overview !== null ||
+    details.counts.length > 0 ||
+    details.measurements.length > 0 ||
+    details.findings.length > 0 ||
+    details.evidence.length > 0 ||
+    details.warnings.length > 0
+  )
 }
 
 function seconds(milliseconds: number): string {

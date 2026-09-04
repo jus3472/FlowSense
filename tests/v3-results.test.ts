@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   v3EvidenceViews,
   v3MeasurementDetails,
+  v3MetricDetails,
+  v3MetricHasDetails,
   v3MetricStatus,
+  v3MetricSummary,
   v3PrimaryMeasurement,
   v3TranscriptSegments,
 } from '@/lib/results/v3'
@@ -91,6 +94,120 @@ describe('v3 result presentation helpers', () => {
       description: 'The evidence needed for this metric was unavailable.',
     })
     expect(v3PrimaryMeasurement('energy', unavailable)).toBeNull()
+  })
+
+  it('builds concise summaries and friendly detail rows from stored audio measurements', () => {
+    const payload = v3Snapshot({ mode: 'practice', component: 0.8 })
+    const pace = {
+      ...payload.sections.how_you_sounded.metrics.pace,
+      measurements: {
+        words_per_minute: 194.2,
+        active_speaking_ms: 15_800,
+        word_count: 51,
+        excluded_silence_ms: 3_000,
+      },
+    }
+    expect(v3MetricSummary('pace', pace, 'practice')).toBe(
+      'You spoke faster than the full-credit range.',
+    )
+    expect(v3MetricDetails('pace', pace, 'practice').measurements).toEqual([
+      { label: 'Speaking pace', value: '194 WPM', help: null },
+      { label: 'Full-credit range', value: '120 to 175 WPM', help: null },
+      { label: 'Active speaking time', value: '15.8 sec', help: null },
+      { label: 'Words spoken', value: '51', help: null },
+    ])
+
+    const energy = {
+      ...payload.sections.how_you_sounded.metrics.energy,
+      measurements: {
+        pitch_range_semitones: 6,
+        pitch_variation_semitones: 1.8,
+        flat_window_proportion: 0,
+        rhythm_cadence_component: 0.83,
+        voiced_frame_count: 72,
+        temporal_bin_count: 4,
+      },
+    }
+    const energyDetails = v3MetricDetails('energy', energy, 'practice')
+    expect(energyDetails.measurements.map(({ label, value }) => ({ label, value }))).toEqual([
+      { label: 'Pitch range', value: '6.0 semitones' },
+      { label: 'Pitch variation', value: '1.8 semitones' },
+      { label: 'Flat vocal sections', value: '0%' },
+      { label: 'Speaking rhythm', value: 'Varied' },
+    ])
+    expect(JSON.stringify(energyDetails)).not.toMatch(/frame|bin/i)
+  })
+
+  it('derives Conciseness counts only from validated findings and groups multi-span examples', () => {
+    const base = v3Snapshot({ component: 0.75 }).sections.what_you_said.metrics.conciseness
+    const detail = 'These two portions communicate essentially the same idea.'
+    const result = {
+      ...base,
+      measurements: { filler_count: 99 },
+      details: [
+        {
+          kind: 'filler',
+          source: 'ai' as const,
+          quote: 'Honestly',
+          observation: 'This word does not add meaning in this context.',
+          suggestion: 'Begin with the main point.',
+          evidence: [],
+        },
+        {
+          kind: 'repeated_idea',
+          source: 'ai' as const,
+          quote: null,
+          observation: detail,
+          suggestion: 'State the idea once.',
+          evidence: [
+            {
+              source: 'transcript',
+              start: 0,
+              end: 13,
+              coordinate: { space: 'transcript', unit: 'utf16_code_unit' } as const,
+              quote: 'I like my car',
+              detail,
+            },
+            {
+              source: 'transcript',
+              start: 15,
+              end: 46,
+              coordinate: { space: 'transcript', unit: 'utf16_code_unit' } as const,
+              quote: 'I enjoy spending time in my car',
+              detail,
+            },
+          ],
+        },
+      ],
+      evidence: [],
+    }
+    const details = v3MetricDetails('conciseness', result, 'practice')
+    expect(details.counts).toEqual([
+      { label: 'Fillers', value: '1', help: null },
+      { label: 'Repeated ideas', value: '1', help: null },
+    ])
+    expect(details.findings[1]?.quotes).toEqual([
+      'I like my car',
+      'I enjoy spending time in my car',
+    ])
+    expect(details.evidence).toEqual([])
+  })
+
+  it('omits empty disclosures for perfect Word Choice and Grammar but keeps useful positive detail', () => {
+    const payload = v3Snapshot({ component: 1 })
+    const grammar = payload.sections.what_you_said.metrics.grammar
+    const wordChoice = payload.sections.what_you_said.metrics.word_choice
+    const specificity = {
+      ...payload.sections.what_you_said.metrics.specificity,
+      explanation: 'You supported the main idea with two concrete examples.',
+    }
+
+    const grammarDetails = v3MetricDetails('grammar', grammar, 'practice')
+    const wordChoiceDetails = v3MetricDetails('word_choice', wordChoice, 'practice')
+    const specificityDetails = v3MetricDetails('specificity', specificity, 'practice')
+    expect(v3MetricHasDetails('grammar', grammar, grammarDetails)).toBe(false)
+    expect(v3MetricHasDetails('word_choice', wordChoice, wordChoiceDetails)).toBe(false)
+    expect(v3MetricHasDetails('specificity', specificity, specificityDetails)).toBe(true)
   })
 
   it('keeps first-word corroboration diagnostics out of the user-facing detail list', () => {

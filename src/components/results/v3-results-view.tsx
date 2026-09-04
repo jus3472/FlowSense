@@ -4,20 +4,25 @@ import { AudioPlayer } from '@/components/record/audio-player'
 import { TranscriptPanel } from '@/components/results/transcript-panel'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Disclosure } from '@/components/ui/disclosure'
 import type { StructuredLessonResultModel } from '@/lib/curriculum/result'
 import type { RetryComparison } from '@/lib/results/retry-comparison'
 import {
-  v3EvidenceViews,
-  v3MeasurementDetails,
+  type V3MetricDetailView,
+  type V3MetricFindingView,
+  type V3MetricMeasurementView,
+  v3MetricDetails,
+  v3MetricHasDetails,
   v3MetricResult,
   v3MetricStatus,
-  v3PrimaryMeasurement,
+  v3MetricSummary,
   v3SectionViews,
   v3TranscriptSegments,
 } from '@/lib/results/v3'
 import {
   V3_LEGACY_SCORE_PAYLOAD_VERSION,
   V3_METRIC_LABELS,
+  type StoredV3MetricId,
   type StoredV3ScorePayload,
 } from '@/lib/scoring/v3/contracts'
 
@@ -42,6 +47,101 @@ function sectionScore(value: number | null): string {
 function lessonStateTitle(result: StructuredLessonResultModel): string {
   if (result.state === 'neutral') return 'Result unavailable'
   return result.state === 'passed' ? 'Lesson complete' : 'Lesson not passed'
+}
+
+function DetailRows({
+  heading,
+  rows,
+}: {
+  heading: string
+  rows: readonly V3MetricMeasurementView[]
+}) {
+  if (rows.length === 0) return null
+  return (
+    <section className="flex flex-col gap-2">
+      <h4 className="text-foreground text-sm font-medium">{heading}</h4>
+      <dl className="border-border divide-border divide-y border-y">
+        {rows.map((row) => (
+          <div
+            key={`${row.label}:${row.value}`}
+            className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 py-2.5 text-sm"
+          >
+            <dt className="text-muted min-w-0">
+              <span>{row.label}</span>
+              {row.help ? <span className="mt-0.5 block text-xs">{row.help}</span> : null}
+            </dt>
+            <dd className="numeric text-foreground text-right font-medium">{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
+function Finding({ metric, finding }: { metric: StoredV3MetricId; finding: V3MetricFindingView }) {
+  const suggestionLead =
+    metric === 'word_choice' ? 'More precise:' : metric === 'grammar' ? 'Clearer form:' : 'Try:'
+  return (
+    <li className="border-border flex flex-col gap-1.5 border-t pt-3 first:border-t-0 first:pt-0">
+      {finding.label ? (
+        <p className="text-foreground text-xs font-medium">{finding.label}</p>
+      ) : null}
+      {finding.quotes.map((quote) => (
+        <p key={quote} className="text-foreground text-sm font-medium break-words">
+          “{quote}”
+        </p>
+      ))}
+      <p className="text-muted text-sm">{finding.observation}</p>
+      {finding.suggestion ? (
+        <p className="text-foreground text-sm">
+          {suggestionLead} {finding.suggestion}
+        </p>
+      ) : null}
+    </li>
+  )
+}
+
+function MetricDetails({
+  metric,
+  details,
+}: {
+  metric: StoredV3MetricId
+  details: V3MetricDetailView
+}) {
+  return (
+    <div className="flex flex-col gap-6">
+      {details.overview ? <p className="text-muted text-sm">{details.overview}</p> : null}
+      <DetailRows heading="Detected patterns" rows={details.counts} />
+      <DetailRows heading="Measurements" rows={details.measurements} />
+      {details.findings.length > 0 ? (
+        <section className="flex flex-col gap-2">
+          <h4 className="text-foreground text-sm font-medium">
+            {metric === 'conciseness' ? 'Examples' : 'What affected this score'}
+          </h4>
+          <ul className="flex flex-col gap-3">
+            {details.findings.map((finding) => (
+              <Finding key={finding.key} metric={metric} finding={finding} />
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {details.evidence.length > 0 ? (
+        <section className="flex flex-col gap-2">
+          <h4 className="text-foreground text-sm font-medium">Evidence</h4>
+          <ul className="text-muted flex flex-col gap-2 text-sm">
+            {details.evidence.map((item) => (
+              <li key={item.key}>{item.text}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {details.warnings.map((warning) => (
+        <p key={warning} className="text-muted text-xs">
+          {warning}
+        </p>
+      ))}
+    </div>
+  )
 }
 
 export function V3ResultsView({
@@ -171,59 +271,39 @@ export function V3ResultsView({
               {section.metrics.map((metric) => {
                 const result = v3MetricResult(payload, metric)
                 const status = v3MetricStatus(result)
-                const primaryMeasurement = v3PrimaryMeasurement(metric, result)
-                const measurements = v3MeasurementDetails(result)
-                const evidence = v3EvidenceViews(result)
-                const hasMore =
-                  measurements.length > 0 || evidence.length > 0 || result.warnings.length > 0
+                const label = V3_METRIC_LABELS[metric]
+                const summary = v3MetricSummary(metric, result, payload.mode)
+                const details = v3MetricDetails(metric, result, payload.mode)
+                const hasDetails = v3MetricHasDetails(metric, result, details)
+                const cardHeader = (
+                  <span className="flex w-full items-start justify-between gap-4">
+                    <span role="heading" aria-level={3} className="text-foreground font-medium">
+                      {label}
+                    </span>
+                    <span className="numeric text-muted shrink-0 text-sm">{status.score}</span>
+                  </span>
+                )
+
+                if (hasDetails) {
+                  return (
+                    <Disclosure
+                      key={metric}
+                      summary={cardHeader}
+                      hint={summary}
+                      showLabel={`Show ${label} details`}
+                      hideLabel={`Hide ${label} details`}
+                      buttonClassName="items-start py-6"
+                      contentClassName="border-border border-t pt-6"
+                    >
+                      <MetricDetails metric={metric} details={details} />
+                    </Disclosure>
+                  )
+                }
+
                 return (
                   <Card key={metric}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <h3 className="text-foreground font-medium">{V3_METRIC_LABELS[metric]}</h3>
-                        {primaryMeasurement ? (
-                          <p className="numeric text-foreground mt-1 text-lg">
-                            {primaryMeasurement}
-                          </p>
-                        ) : null}
-                      </div>
-                      <p className="numeric text-muted shrink-0 text-sm">{status.score}</p>
-                    </div>
-
-                    {result.explanation ? (
-                      <p className="text-muted mt-3 text-sm">{result.explanation}</p>
-                    ) : status.description ? (
-                      <p className="text-muted mt-3 text-sm">{status.description}</p>
-                    ) : null}
-
-                    {hasMore ? (
-                      <details className="mt-4">
-                        <summary className="text-foreground cursor-pointer text-sm font-medium">
-                          Review evidence
-                        </summary>
-                        <div className="mt-3 flex flex-col gap-3">
-                          {measurements.length > 0 ? (
-                            <ul className="text-muted flex flex-col gap-1 text-xs">
-                              {measurements.map((measurement) => (
-                                <li key={measurement}>{measurement}</li>
-                              ))}
-                            </ul>
-                          ) : null}
-                          {evidence.length > 0 ? (
-                            <ul className="text-muted flex flex-col gap-2 text-sm">
-                              {evidence.map((item) => (
-                                <li key={item.key}>{item.text}</li>
-                              ))}
-                            </ul>
-                          ) : null}
-                          {result.warnings.map((warning) => (
-                            <p key={warning} className="text-muted text-xs">
-                              {warning}
-                            </p>
-                          ))}
-                        </div>
-                      </details>
-                    ) : null}
+                    {cardHeader}
+                    <p className="text-muted mt-2 text-sm">{summary}</p>
                   </Card>
                 )
               })}

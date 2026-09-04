@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import type { Route } from 'next'
 import type { AnchorHTMLAttributes, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -90,6 +90,267 @@ describe('V3ResultsView', () => {
       'href',
       '/record?retry=attempt-1',
     )
+    expect(screen.queryByText('Review evidence')).not.toBeInTheDocument()
+  })
+
+  it('shows a useful collapsed summary and an accessible disclosure that opens and closes', () => {
+    const payload = v3Snapshot({ component: 1 })
+    Object.assign(payload.sections.what_you_said.metrics.specificity, {
+      component: 0.78,
+      earned_points: 7,
+      explanation: 'You gave one concrete reason, but the outcome remained unclear.',
+      details: [
+        {
+          kind: 'missing_outcome',
+          source: 'ai' as const,
+          quote: 'a quiet place where I could think',
+          observation: 'This is concrete, but the response does not explain what happened next.',
+          suggestion: 'Add the result of having space to think.',
+          evidence: [],
+        },
+      ],
+    })
+
+    render(<V3ResultsView {...props} payload={payload} />)
+
+    const trigger = screen.getByRole('button', { name: 'Show Specificity details' })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(within(trigger).getByText('Specificity')).toBeInTheDocument()
+    expect(within(trigger).getByText('7 / 9')).toBeInTheDocument()
+    expect(
+      within(trigger).getByText(
+        'You included useful detail, but part of your response needed more support.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Add the result of having space to think.')).not.toBeInTheDocument()
+
+    fireEvent.click(trigger)
+    const close = screen.getByRole('button', { name: 'Hide Specificity details' })
+    expect(close).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('“a quiet place where I could think”')).toBeInTheDocument()
+    expect(screen.getByText(/Add the result of having space to think/)).toHaveTextContent(
+      'Try: Add the result of having space to think.',
+    )
+
+    fireEvent.click(close)
+    expect(screen.getByRole('button', { name: 'Show Specificity details' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+  })
+
+  it('renders validated content findings without forcing empty perfect-score disclosures', () => {
+    const payload = v3Snapshot({ component: 1 })
+    Object.assign(payload.sections.what_you_said.metrics.answered_prompt, {
+      explanation: 'You named the place and included both requested details.',
+    })
+    Object.assign(payload.sections.what_you_said.metrics.structure, {
+      component: 0.78,
+      earned_points: 7,
+      explanation: 'Your opening and development were clear, but the final idea arrived abruptly.',
+      details: [
+        {
+          kind: 'misplaced_information',
+          source: 'ai' as const,
+          quote: null,
+          observation: 'The final reason would be easier to follow beside the related example.',
+          suggestion: 'Group the final reason with that example.',
+          evidence: [],
+        },
+      ],
+    })
+    Object.assign(payload.sections.what_you_said.metrics.conciseness, {
+      component: 0.75,
+      earned_points: 6,
+      explanation: 'Two parts of the response communicate the same idea.',
+      details: [
+        {
+          kind: 'repeated_idea',
+          source: 'ai' as const,
+          quote: null,
+          observation: 'These two portions communicate essentially the same idea.',
+          suggestion: 'State the idea once.',
+          evidence: [
+            {
+              source: 'transcript',
+              start: 0,
+              end: 13,
+              coordinate: { space: 'transcript', unit: 'utf16_code_unit' } as const,
+              quote: 'I like my car',
+              detail: 'These two portions communicate essentially the same idea.',
+            },
+            {
+              source: 'transcript',
+              start: 15,
+              end: 46,
+              coordinate: { space: 'transcript', unit: 'utf16_code_unit' } as const,
+              quote: 'I enjoy spending time in my car',
+              detail: 'These two portions communicate essentially the same idea.',
+            },
+          ],
+        },
+      ],
+      evidence: [],
+    })
+
+    render(<V3ResultsView {...props} payload={payload} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show Answered the Prompt details' }))
+    expect(
+      screen.getByText('You named the place and included both requested details.'),
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show Structure details' }))
+    expect(
+      screen.getByText('The final reason would be easier to follow beside the related example.'),
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show Conciseness details' }))
+    const count = screen.getAllByText('Repeated ideas')[0]?.closest('div')
+    expect(count).not.toBeNull()
+    expect(count).toHaveTextContent('1')
+    expect(screen.getByText('“I like my car”')).toBeInTheDocument()
+    expect(screen.getByText('“I enjoy spending time in my car”')).toBeInTheDocument()
+    expect(
+      screen.getAllByText('These two portions communicate essentially the same idea.'),
+    ).toHaveLength(1)
+
+    expect(
+      screen.queryByRole('button', { name: 'Show Word Choice details' }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Show Grammar details' })).not.toBeInTheDocument()
+    expect(screen.getByText('Your wording was clear and precise.')).toBeInTheDocument()
+    expect(
+      screen.getByText('Your spoken grammar was clear and easy to understand.'),
+    ).toBeInTheDocument()
+  })
+
+  it('shows concrete Word Choice and spoken Grammar findings with tailored suggestions', () => {
+    const payload = v3Snapshot({ component: 0.8 })
+    Object.assign(payload.sections.what_you_said.metrics.word_choice, {
+      details: [
+        {
+          kind: 'vague_wording',
+          source: 'ai' as const,
+          quote: 'some stuff',
+          observation: 'This phrase is vague about what actually happened.',
+          suggestion: 'the two delayed tasks',
+          evidence: [],
+        },
+      ],
+    })
+    Object.assign(payload.sections.what_you_said.metrics.grammar, {
+      details: [
+        {
+          kind: 'missing_subject',
+          source: 'ai' as const,
+          quote: 'find it very fun',
+          observation: 'This construction is missing a clear subject before “find.”',
+          suggestion: 'I find it very fun',
+          evidence: [],
+        },
+      ],
+    })
+
+    render(<V3ResultsView {...props} payload={payload} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show Word Choice details' }))
+    expect(screen.getByText('“some stuff”')).toBeInTheDocument()
+    expect(screen.getByText(/the two delayed tasks/)).toHaveTextContent(
+      'More precise: the two delayed tasks',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show Grammar details' }))
+    expect(screen.getByText('“find it very fun”')).toBeInTheDocument()
+    expect(screen.getByText(/I find it very fun/)).toHaveTextContent(
+      'Clearer form: I find it very fun',
+    )
+  })
+
+  it('renders user-friendly audio measurements and omits implementation diagnostics', () => {
+    const payload = v3Snapshot({ component: 0.8 })
+    Object.assign(payload.sections.how_you_sounded.metrics.pace, {
+      measurements: {
+        words_per_minute: 194.2,
+        active_speaking_ms: 15_800,
+        word_count: 51,
+        excluded_silence_ms: 2_000,
+      },
+    })
+    Object.assign(payload.sections.how_you_sounded.metrics.paused_time, {
+      measurements: {
+        total_unnatural_pause_ms: 2_300,
+        beginning_excessive_pause_ms: 0,
+        mid_thought_excessive_pause_ms: 2_100,
+        natural_boundary_excessive_pause_ms: 200,
+        very_long_pause_count: 1,
+      },
+      evidence: [
+        {
+          source: 'audio_timeline',
+          start: 2_000,
+          end: 4_100,
+          coordinate: { space: 'audio_timeline', unit: 'millisecond' } as const,
+          quote: 'fun',
+          detail: 'This mid-thought pause had 2.1 seconds beyond the natural allowance.',
+        },
+      ],
+    })
+    Object.assign(payload.sections.how_you_sounded.metrics.articulation, {
+      measurements: {
+        low_confidence_word_count: 1,
+        eligible_word_count: 49,
+        low_confidence_proportion: 1 / 49,
+        confidence_coverage: 1,
+        speech_to_noise_ratio: 8.4,
+      },
+      evidence: [
+        {
+          source: 'deepgram_word_confidence',
+          start: 0,
+          end: 1,
+          coordinate: { space: 'transcript', unit: 'utf16_code_unit' } as const,
+          quote: 'I',
+          detail: 'This word had lower recognition confidence.',
+        },
+      ],
+    })
+    Object.assign(payload.sections.how_you_sounded.metrics.energy, {
+      measurements: {
+        pitch_range_semitones: 6,
+        pitch_variation_semitones: 1.8,
+        flat_window_proportion: 0,
+        rhythm_cadence_component: 0.83,
+        voiced_frame_count: 72,
+        temporal_bin_count: 4,
+      },
+    })
+
+    render(<V3ResultsView {...props} payload={payload} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show Pace details' }))
+    expect(screen.getByText('194 WPM')).toBeInTheDocument()
+    expect(screen.getByText('120 to 175 WPM')).toBeInTheDocument()
+    expect(screen.getByText('15.8 sec')).toBeInTheDocument()
+    expect(screen.getByText('51')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show Paused Time details' }))
+    expect(screen.getByText('2.3 sec')).toBeInTheDocument()
+    expect(screen.getByText(/“fun” This mid-thought pause had 2.1 seconds/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show Articulation details' }))
+    expect(screen.getByText('1 of 49')).toBeInTheDocument()
+    expect(screen.getByText('2%')).toBeInTheDocument()
+    expect(screen.getByText('100%')).toBeInTheDocument()
+    expect(screen.getByText(/“I” This word had lower recognition confidence/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show Energy details' }))
+    expect(screen.getByText('6.0 semitones')).toBeInTheDocument()
+    expect(screen.getByText('1.8 semitones')).toBeInTheDocument()
+    expect(screen.getByText('0%')).toBeInTheDocument()
+    expect(screen.getByText('Varied')).toBeInTheDocument()
+    expect(
+      screen.queryByText(/excluded silence|speech to noise|voiced frame|temporal bin/i),
+    ).not.toBeInTheDocument()
   })
 
   it('renders a stored v3.score.1 snapshot with its historical first-word metric', () => {
