@@ -11,20 +11,23 @@ import {
 } from '@/lib/progress/aggregation'
 import { decodeStoredSectionSnapshot } from '@/lib/results/snapshot'
 import {
+  LEGACY_V3_METRIC_IDS,
   V3_METRIC_IDS,
-  type V3MetricId,
+  V3_LEGACY_SCORE_PAYLOAD_VERSION,
+  type StoredV3MetricId,
   type V3PersistedMetricScore,
-  type V3ScorePayload,
+  type StoredV3ScorePayload,
 } from '@/lib/scoring/v3/contracts'
 
 export interface V3ProgressWindow {
   attemptCount: number
   overall: ProgressSeries
-  metrics: Readonly<Record<V3MetricId, ProgressSeries>>
+  metrics: Readonly<Record<StoredV3MetricId, ProgressSeries>>
 }
 
 export interface V3ProgressAggregation {
   cohort: { scoreVersion: string; rubricVersion: string } | null
+  metricIds: readonly StoredV3MetricId[]
   counts: {
     input: number
     validV3: number
@@ -48,7 +51,7 @@ interface AcceptedAttempt {
   id: string
   createdAt: string
   time: number
-  payload: V3ScorePayload
+  payload: StoredV3ScorePayload
 }
 
 function emptySeries(): ProgressSeries {
@@ -67,18 +70,21 @@ function series(points: readonly ProgressPoint[]): ProgressSeries {
   }
 }
 
+function metricIdsFor(payload: StoredV3ScorePayload | null): readonly StoredV3MetricId[] {
+  return payload?.version === V3_LEGACY_SCORE_PAYLOAD_VERSION ? LEGACY_V3_METRIC_IDS : V3_METRIC_IDS
+}
+
 function emptyWindow(): V3ProgressWindow {
   return {
     attemptCount: 0,
     overall: emptySeries(),
-    metrics: Object.fromEntries(V3_METRIC_IDS.map((metric) => [metric, emptySeries()])) as Record<
-      V3MetricId,
-      ProgressSeries
-    >,
+    metrics: Object.fromEntries(
+      LEGACY_V3_METRIC_IDS.map((metric) => [metric, emptySeries()]),
+    ) as Record<StoredV3MetricId, ProgressSeries>,
   }
 }
 
-function metric(payload: V3ScorePayload, id: V3MetricId): V3PersistedMetricScore {
+function metric(payload: StoredV3ScorePayload, id: StoredV3MetricId): V3PersistedMetricScore {
   return id in payload.sections.what_you_said.metrics
     ? payload.sections.what_you_said.metrics[
         id as keyof typeof payload.sections.what_you_said.metrics
@@ -88,7 +94,10 @@ function metric(payload: V3ScorePayload, id: V3MetricId): V3PersistedMetricScore
       ]
 }
 
-function windowFor(attempts: readonly AcceptedAttempt[]): V3ProgressWindow {
+function windowFor(
+  attempts: readonly AcceptedAttempt[],
+  metricIds: readonly StoredV3MetricId[],
+): V3ProgressWindow {
   if (attempts.length === 0) return emptyWindow()
   const point = (attempt: AcceptedAttempt, value: number): ProgressPoint => ({
     attemptId: attempt.id,
@@ -105,19 +114,22 @@ function windowFor(attempts: readonly AcceptedAttempt[]): V3ProgressWindow {
           : [point(attempt, attempt.payload.total_earned_points)],
       ),
     ),
-    metrics: Object.fromEntries(
-      V3_METRIC_IDS.map((id) => [
-        id,
-        series(
-          attempts.flatMap((attempt) => {
-            const result = metric(attempt.payload, id)
-            return result.status === 'scored' && result.component !== null
-              ? [point(attempt, result.component * 100)]
-              : []
-          }),
-        ),
-      ]),
-    ) as Record<V3MetricId, ProgressSeries>,
+    metrics: {
+      ...Object.fromEntries(LEGACY_V3_METRIC_IDS.map((id) => [id, emptySeries()])),
+      ...Object.fromEntries(
+        metricIds.map((id) => [
+          id,
+          series(
+            attempts.flatMap((attempt) => {
+              const result = metric(attempt.payload, id)
+              return result.status === 'scored' && result.component !== null
+                ? [point(attempt, result.component * 100)]
+                : []
+            }),
+          ),
+        ]),
+      ),
+    } as Record<StoredV3MetricId, ProgressSeries>,
   }
 }
 
@@ -161,32 +173,48 @@ export function aggregateV3Progress(
   accepted.sort((left, right) => left.time - right.time || left.id.localeCompare(right.id))
   const recentStart = now - RECENT_PROGRESS_WINDOW_DAYS * 24 * 60 * 60 * 1_000
   const longerStart = now - LONGER_HISTORY_WINDOW_DAYS * 24 * 60 * 60 * 1_000
-  const cohort = accepted[0]
+  const newest = accepted.at(-1) ?? null
+  const cohort = newest
     ? {
-        scoreVersion: accepted[0].payload.version,
-        rubricVersion: accepted[0].payload.rubric_version,
+        scoreVersion: newest.payload.version,
+        rubricVersion: newest.payload.rubric_version,
       }
     : null
+  const selected = cohort
+    ? accepted.filter(
+        (attempt) =>
+          attempt.payload.version === cohort.scoreVersion &&
+          attempt.payload.rubric_version === cohort.rubricVersion,
+      )
+    : []
+  const metricIds = metricIdsFor(newest?.payload ?? null)
+  const excludedIncompatibleV3 = accepted.length - selected.length
 
   return {
     cohort,
+    metricIds,
     counts: {
       input: input.length,
       validV3,
-      selectedCohort: accepted.length,
+      selectedCohort: selected.length,
       earlierV2,
       legacy,
       incomplete,
       malformed,
       unsupportedVersion,
       excludedMode,
-      excludedIncompatible: earlierV2 + legacy + incomplete + malformed + unsupportedVersion,
+      excludedIncompatible:
+        earlierV2 + legacy + incomplete + malformed + unsupportedVersion + excludedIncompatibleV3,
     },
     windows: {
-      all: windowFor(accepted),
-      recent: windowFor(accepted.filter((attempt) => attempt.time >= recentStart)),
+      all: windowFor(selected, metricIds),
+      recent: windowFor(
+        selected.filter((attempt) => attempt.time >= recentStart),
+        metricIds,
+      ),
       longerHistory: windowFor(
-        accepted.filter((attempt) => attempt.time >= longerStart && attempt.time < recentStart),
+        selected.filter((attempt) => attempt.time >= longerStart && attempt.time < recentStart),
+        metricIds,
       ),
     },
   }

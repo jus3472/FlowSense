@@ -82,7 +82,6 @@ export function v3AudioMetrics(
 ): Record<HowYouSoundedMetricId, V3MetricEvaluation> {
   return {
     pace: scoreMetric(audio.metrics.pace),
-    time_to_first_word: scoreMetric(audio.metrics.time_to_first_word),
     paused_time: scoreMetric(audio.metrics.paused_time),
     articulation: scoreMetric(audio.metrics.articulation),
     energy: scoreMetric(audio.metrics.energy),

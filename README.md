@@ -6,9 +6,9 @@ built-in library or is custom, the user answers aloud for up to 60 seconds, and 
 that response out of 100.
 
 New attempts use one scoring system with a transparent 50/50 split. What You Said measures Answered the Prompt,
-Specificity, Structure, Conciseness, Word Choice, and Grammar. How You Sounded measures Pace, Time
-to First Word, Paused Time, Articulation, and Energy. Modes change the points assigned to those same
-11 metrics, not the scoring ontology. Results describe the response, never a permanent rating of the
+Specificity, Structure, Conciseness, Word Choice, and Grammar. How You Sounded measures Pace,
+Paused Time, Articulation, and Energy. Modes change the points assigned to those same 10 metrics,
+not the scoring ontology. Results describe the response, never a permanent rating of the
 person. Feedback is concrete and measurement-first, and a speech span can cost points under only one
 check or metric.
 

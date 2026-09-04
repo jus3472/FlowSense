@@ -6,7 +6,7 @@ import {
   v3PrimaryMeasurement,
   v3TranscriptSegments,
 } from '@/lib/results/v3'
-import { v3Snapshot } from './helpers/result-snapshots'
+import { legacyV3Snapshot, v3Snapshot } from './helpers/result-snapshots'
 
 describe('v3 result presentation helpers', () => {
   it('marks only exact transcript evidence for a metric that lost points', () => {
@@ -94,7 +94,7 @@ describe('v3 result presentation helpers', () => {
   })
 
   it('keeps first-word corroboration diagnostics out of the user-facing detail list', () => {
-    const metric = v3Snapshot({
+    const metric = legacyV3Snapshot({
       evidenceMetric: 'time_to_first_word',
       measurements: {
         seconds: 2.9,

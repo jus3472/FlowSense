@@ -9,7 +9,6 @@ import {
   evaluateAudioMetrics,
   paceComponent,
   pausedTimeComponent,
-  timeToFirstWordComponent,
   validateAudioModeThresholds,
 } from '@/lib/scoring/v3/audio'
 import type { CaptureMetrics } from '@/lib/types/metrics'
@@ -81,7 +80,6 @@ describe('v3 audio threshold policy', () => {
       expect(validateAudioModeThresholds(AUDIO_THRESHOLDS_BY_MODE[mode])).toBe(true)
       for (const component of [
         paceComponent(155, mode),
-        timeToFirstWordComponent(2_000, mode),
         pausedTimeComponent(2_000, mode),
         articulationComponent(0.2, mode),
         energyComponent(2, mode),
@@ -92,18 +90,18 @@ describe('v3 audio threshold policy', () => {
     }
     expect(AUDIO_THRESHOLDS_BY_MODE.practice).not.toEqual(AUDIO_THRESHOLDS_BY_MODE.conversation)
     expect(paceComponent(110, 'practice')).not.toBe(paceComponent(110, 'presentation'))
-    expect(timeToFirstWordComponent(2_000, 'practice')).not.toBe(
-      timeToFirstWordComponent(2_000, 'conversation'),
+    expect(pausedTimeComponent(2_000, 'practice')).not.toBe(
+      pausedTimeComponent(2_000, 'conversation'),
     )
     expect(pausedTimeComponent(-1, 'practice')).toBe(0)
     expect(energyComponent(Number.NaN, 'practice')).toBe(0)
   })
 
-  it('gives time to first word a natural full-score plateau', () => {
-    expect(timeToFirstWordComponent(0, 'practice')).toBe(1)
-    expect(timeToFirstWordComponent(2_500, 'practice')).toBe(1)
-    expect(timeToFirstWordComponent(7_250, 'practice')).toBeCloseTo(0.5)
-    expect(timeToFirstWordComponent(12_000, 'practice')).toBe(0)
+  it('gives excessive paused time a natural full-score plateau', () => {
+    expect(pausedTimeComponent(0, 'practice')).toBe(1)
+    expect(pausedTimeComponent(750, 'practice')).toBe(1)
+    expect(pausedTimeComponent(4_375, 'practice')).toBeCloseTo(0.5)
+    expect(pausedTimeComponent(8_000, 'practice')).toBe(0)
   })
 
   it('makes paused-time score depend on total duration and not event count', () => {
@@ -125,10 +123,10 @@ describe('evaluateAudioMetrics', () => {
   const transcript =
     'I explained the project timeline and described the expected result for everyone today.'
 
-  it('returns five explicit, independently scored metric records', () => {
+  it('returns four explicit, independently scored metric records', () => {
     const result = evaluation(transcript)
 
-    expect(result.version).toBe('v3.audio.1')
+    expect(result.version).toBe('v3.audio.2')
     expect(Object.keys(result.metrics)).toEqual(AUDIO_METRIC_IDS)
     for (const metric of Object.values(result.metrics)) {
       expect(metric.status).toBe('scored')
@@ -190,16 +188,17 @@ describe('evaluateAudioMetrics', () => {
       ]),
       pitch: pitchAcrossWords(words),
     })
-    const metric = evaluation(transcript, words, capture).metrics.time_to_first_word
+    const metric = evaluation(transcript, words, capture).metrics.paused_time
 
     expect(metric.status).toBe('scored')
     expect(metric.measurements.transcript_ms).toBe(2_000)
-    expect(metric.measurements.seconds).toBe(2)
     expect(metric.measurements.amplitude_onset_ms).toBe(500)
     expect(metric.measurements.anchored_acoustic_onset_ms).toBe(2_000)
     expect(metric.measurements.selected_onset_ms).toBe(2_000)
     expect(metric.measurements.source).toBe('anchored_acoustic')
     expect(metric.measurements.rms_corroborated).toBe(true)
+    expect(metric.measurements.beginning_silence_ms).toBe(2_000)
+    expect(metric.measurements.beginning_excessive_pause_ms).toBe(900)
     expect(metric.warnings).toEqual([])
   })
 
@@ -213,11 +212,30 @@ describe('evaluateAudioMetrics', () => {
       start: word.start + shiftSeconds,
       end: word.end + shiftSeconds,
     }))
-    const metric = evaluation(transcript, words, captureFor(words)).metrics.time_to_first_word
+    const metric = evaluation(transcript, words, captureFor(words)).metrics.paused_time
 
     expect(metric.status).toBe('scored')
     expect(metric.measurements.selected_onset_ms).toBe(expectedMs)
-    expect(metric.measurements.seconds).toBe(expectedMs / 1_000)
+    expect(metric.measurements.beginning_silence_ms).toBe(expectedMs)
+    expect(metric.measurements.beginning_excessive_pause_ms).toBe(Math.max(0, expectedMs - 1_100))
+    expect(metric.measurements.total_unnatural_pause_ms).toBe(Math.max(0, expectedMs - 1_100))
+    if (expectedMs <= 1_100) expect(metric.component).toBe(1)
+  })
+
+  it('labels a very long beginning hesitation while charging only excess duration', () => {
+    const words = withConfidence(transcript).map((word) => ({
+      ...word,
+      start: word.start + 4,
+      end: word.end + 4,
+    }))
+    const metric = evaluation(transcript, words, captureFor(words)).metrics.paused_time
+
+    expect(metric.status).toBe('scored')
+    expect(metric.measurements.beginning_silence_ms).toBe(4_500)
+    expect(metric.measurements.beginning_excessive_pause_ms).toBe(3_400)
+    expect(metric.measurements.very_long_pause_count).toBe(1)
+    expect(metric.component).toBeLessThan(1)
+    expect(metric.evidence[0]?.detail).toContain('very long excessive beginning hesitation')
   })
 
   it('requires voiced evidence at acoustic onset instead of treating a breath as speech', () => {
@@ -235,7 +253,7 @@ describe('evaluateAudioMetrics', () => {
       ]),
       pitch: pitchAcrossWords(words),
     })
-    const metric = evaluation(transcript, words, capture).metrics.time_to_first_word
+    const metric = evaluation(transcript, words, capture).metrics.paused_time
 
     expect(metric.status).toBe('scored')
     expect(metric.measurements.amplitude_onset_ms).toBe(1_700)
@@ -265,7 +283,7 @@ describe('evaluateAudioMetrics', () => {
       ]),
       pitch,
     })
-    const metric = evaluation(transcript, words, capture).metrics.time_to_first_word
+    const metric = evaluation(transcript, words, capture).metrics.paused_time
 
     expect(metric.status).toBe('scored')
     expect(metric.measurements.transcript_ms).toBe(2_000)
@@ -290,7 +308,7 @@ describe('evaluateAudioMetrics', () => {
       amplitude: amplitudeTimeline(durationMs, [{ from_ms: 1_100, to_ms: 1_400, rms: 0.12 }]),
       pitch: backgroundPitch,
     })
-    const metric = evaluation(transcript, words, capture).metrics.time_to_first_word
+    const metric = evaluation(transcript, words, capture).metrics.paused_time
 
     expect(metric.status).toBe('scored')
     expect(metric.measurements.amplitude_onset_ms).toBe(1_100)
@@ -298,7 +316,7 @@ describe('evaluateAudioMetrics', () => {
     expect(metric.measurements.source).toBe('transcript')
   })
 
-  it('uses the same robust onset for first-word timing and pace on the real-attempt shape', () => {
+  it('uses the same robust onset for beginning hesitation and pace on the real-attempt shape', () => {
     const words = withConfidence(transcript).map((word) => ({
       ...word,
       start: word.start + 2.7,
@@ -325,21 +343,22 @@ describe('evaluateAudioMetrics', () => {
       pitch: [...earlyPitch, ...onsetPitch, ...pitchAcrossWords(words)],
     })
     const result = evaluation(transcript, words, capture)
-    const firstWord = result.metrics.time_to_first_word
+    const paused = result.metrics.paused_time
     const pace = result.metrics.pace
 
-    expect(firstWord.status).toBe('scored')
-    expect(firstWord.measurements.transcript_ms).toBeCloseTo(3_200)
-    expect(firstWord.measurements.amplitude_onset_ms).toBe(650)
-    expect(firstWord.measurements.selected_onset_ms).toBe(2_900)
-    expect(firstWord.measurements.seconds).toBe(2.9)
+    expect(paused.status).toBe('scored')
+    expect(paused.measurements.transcript_ms).toBeCloseTo(3_200)
+    expect(paused.measurements.amplitude_onset_ms).toBe(650)
+    expect(paused.measurements.selected_onset_ms).toBe(2_900)
+    expect(paused.measurements.beginning_silence_ms).toBe(2_900)
+    expect(paused.measurements.beginning_excessive_pause_ms).toBe(1_800)
     expect(pace.status).toBe('scored')
     const expectedExcludedMs = 2_900 + (durationMs - words.at(-1)!.end * 1_000)
     expect(pace.measurements.excluded_silence_ms).toBeCloseTo(expectedExcludedMs)
     expect(pace.measurements.active_speaking_ms).toBeCloseTo(durationMs - expectedExcludedMs)
   })
 
-  it('counts only unnatural interword pause duration and excludes edge silence', () => {
+  it('counts only excess beyond contextual allowances and excludes trailing silence', () => {
     const naturalTranscript = 'We finished. Then continued.'
     const unnaturalTranscript = 'We finished and continued.'
     const timings = [
@@ -369,12 +388,37 @@ describe('evaluateAudioMetrics', () => {
     ).metrics.paused_time
 
     expect(natural.status).toBe('scored')
-    expect(natural.measurements.total_unnatural_pause_ms).toBe(0)
+    expect(natural.measurements.total_unnatural_pause_ms).toBe(500)
+    expect(natural.measurements.natural_boundary_excessive_pause_ms).toBe(500)
+    expect(natural.measurements.mid_thought_excessive_pause_ms).toBe(0)
     expect(natural.measurements.total_interword_silence_ms).toBe(1_600)
     expect(unnatural.status).toBe('scored')
-    expect(unnatural.measurements.total_unnatural_pause_ms).toBe(1_600)
+    expect(unnatural.measurements.total_unnatural_pause_ms).toBe(950)
+    expect(unnatural.measurements.natural_boundary_excessive_pause_ms).toBe(0)
+    expect(unnatural.measurements.mid_thought_excessive_pause_ms).toBe(950)
     expect(unnatural.measurements.unnatural_pause_count).toBe(1)
     expect(unnatural.measurements.total_unnatural_pause_ms).toBeLessThan(8_000 - 1_600)
+  })
+
+  it('does not add silence after the final word to Paused Time', () => {
+    const words = withConfidence(transcript)
+    const shortTail = evaluation(
+      transcript,
+      words,
+      captureFor(words, { duration_ms: Math.ceil(words.at(-1)!.end * 1_000 + 500) }),
+    ).metrics.paused_time
+    const longTail = evaluation(
+      transcript,
+      words,
+      captureFor(words, { duration_ms: Math.ceil(words.at(-1)!.end * 1_000 + 5_000) }),
+    ).metrics.paused_time
+
+    expect(shortTail.status).toBe('scored')
+    expect(longTail.status).toBe('scored')
+    expect(longTail.measurements.total_unnatural_pause_ms).toBe(
+      shortTail.measurements.total_unnatural_pause_ms,
+    )
+    expect(longTail.component).toBe(shortTail.component)
   })
 
   it('excludes filler, false-start, and closer token spans from articulation', () => {

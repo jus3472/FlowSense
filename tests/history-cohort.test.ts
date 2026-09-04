@@ -70,7 +70,7 @@ describe('History score cohorts', () => {
 
     expect(summary.cohort).toEqual({
       kind: 'v3',
-      scoreVersion: 'v3.score.1',
+      scoreVersion: 'v3.score.2',
       rubricVersion: 'v3',
       mode: 'interview',
     })

@@ -16,9 +16,8 @@ describe('v3 product contract documentation', () => {
       expect(document.contents).toMatch(/built-in[\s\S]*custom|custom[\s\S]*built-in/i)
       expect(document.contents).toMatch(/never a permanent rating of\s+(the\s+)?person/)
       expect(document.contents).toMatch(/Answered the Prompt[\s\S]*Specificity[\s\S]*Conciseness/)
-      expect(document.contents).toMatch(
-        /Pace[\s\S]*Time\s+to\s+First\s+Word[\s\S]*Articulation[\s\S]*Energy/,
-      )
+      expect(document.contents).toMatch(/Pace[\s\S]*Paused\s+Time[\s\S]*Articulation[\s\S]*Energy/)
+      expect(document.contents).toMatch(/10 visible\s+metrics|same 10 metrics/)
       expect(document.contents).toMatch(/unrelated\s+scoring system|one\s+scoring system/)
     }
   })
@@ -49,7 +48,7 @@ describe('v3 product contract documentation', () => {
 
     expect(project).toMatch(/50\/50, ten-metric score[\s\S]*legacy v1 implementation/i)
     expect(project).toMatch(/does not define the v2 category architecture/i)
-    expect(agents).toMatch(/six-category v2[\s\S]*ten-metric v1 implementations/i)
-    expect(agents).toMatch(/Do not treat either as the v3 11-metric architecture/i)
+    expect(agents).toMatch(/six-category v2[\s\S]*ten-metric v1[\s\S]*v3\.score\.1/i)
+    expect(agents).toMatch(/current 10-metric `v3\.score\.2` architecture/i)
   })
 })

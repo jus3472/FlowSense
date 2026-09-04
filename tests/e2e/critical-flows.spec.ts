@@ -280,13 +280,13 @@ test('records once, shows processing and v3 results, retries, compares, filters,
     'Word Choice',
     'Grammar',
     'Pace',
-    'Time to First Word',
     'Paused Time',
     'Articulation',
     'Energy',
   ]) {
     await expect(page.getByRole('heading', { name: metric })).toBeVisible()
   }
+  await expect(page.getByRole('heading', { name: 'Time to First Word' })).toHaveCount(0)
   expect(attemptPosts).toBe(1)
   const firstState = await currentState(page.request)
   expect(firstState.uploads).toBe(1)

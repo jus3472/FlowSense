@@ -84,7 +84,6 @@ console.log(
 )
 console.log(`Overall score: ${assembled.total_earned_points ?? 'unavailable'} / 100`)
 console.log(`Pace: ${JSON.stringify(audio.metrics.pace.measurements)}`)
-console.log(`Time to first word: ${JSON.stringify(audio.metrics.time_to_first_word.measurements)}`)
 console.log(`Paused time: ${JSON.stringify(audio.metrics.paused_time.measurements)}`)
 console.log(`Articulation: ${JSON.stringify(audio.metrics.articulation.measurements)}`)
 console.log(`Energy: ${JSON.stringify(audio.metrics.energy.measurements)}`)

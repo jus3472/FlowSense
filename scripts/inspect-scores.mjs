@@ -70,7 +70,10 @@ for (const row of rows) {
   console.log(`prompt: ${row.prompt_text}`)
   console.log(line())
 
-  if (sections.version === 'v3.score.1' && sections.rubric_version === 'v3') {
+  if (
+    (sections.version === 'v3.score.1' || sections.version === 'v3.score.2') &&
+    sections.rubric_version === 'v3'
+  ) {
     console.log(`OVERALL ${row.score === null ? 'unavailable' : `${row.score} / 100`}`)
     if (sections.recommendation?.text) {
       console.log(`  recommendation: ${sections.recommendation.text}`)

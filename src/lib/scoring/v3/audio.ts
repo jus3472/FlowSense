@@ -9,15 +9,9 @@ import { clamp01, median, medianAbsoluteDeviation } from '@/lib/scoring/scale'
 import { buildTokens, normalizeWord, type Token } from '@/lib/scoring/tokens'
 import type { CaptureMetrics } from '@/lib/types/metrics'
 
-export const AUDIO_ANALYSIS_VERSION = 'v3.audio.1' as const
+export const AUDIO_ANALYSIS_VERSION = 'v3.audio.2' as const
 
-export const AUDIO_METRIC_IDS = [
-  'pace',
-  'time_to_first_word',
-  'paused_time',
-  'articulation',
-  'energy',
-] as const
+export const AUDIO_METRIC_IDS = ['pace', 'paused_time', 'articulation', 'energy'] as const
 
 export type AudioMetricId = (typeof AUDIO_METRIC_IDS)[number]
 
@@ -28,15 +22,11 @@ export interface AudioModeThresholds {
     readonly full_through_wpm: number
     readonly zero_above_wpm: number
   }
-  readonly time_to_first_word: {
-    readonly full_through_ms: number
-    readonly zero_at_ms: number
-    readonly corroboration_tolerance_ms: number
-  }
   readonly paused_time: {
     readonly candidate_gap_ms: number
-    readonly unfinished_thought_ms: number
-    readonly disruptive_gap_ms: number
+    readonly mid_thought_allowance_ms: number
+    readonly natural_boundary_allowance_ms: number
+    readonly very_long_pause_ms: number
     readonly full_through_ms: number
     readonly zero_at_ms: number
   }
@@ -55,7 +45,6 @@ export interface AudioModeThresholds {
 function frozenThresholds(value: AudioModeThresholds): AudioModeThresholds {
   return Object.freeze({
     pace: Object.freeze(value.pace),
-    time_to_first_word: Object.freeze(value.time_to_first_word),
     paused_time: Object.freeze(value.paused_time),
     articulation: Object.freeze(value.articulation),
     energy: Object.freeze(value.energy),
@@ -65,8 +54,8 @@ function frozenThresholds(value: AudioModeThresholds): AudioModeThresholds {
 /**
  * Mode-specific measurement thresholds. Metric weights live in the scoring definition.
  * Each component is piecewise linear between named anchors so product tuning remains
- * explicit: pace has a natural band, onset has a no-penalty plateau, pause duration
- * is cumulative, confidence is a low-word proportion, and energy is robust pitch spread.
+ * explicit: pace has a natural band, paused time totals only silence beyond contextual
+ * allowances, confidence is a low-word proportion, and energy is robust pitch spread.
  */
 export const AUDIO_THRESHOLDS_BY_MODE: Readonly<Record<PracticeMode, AudioModeThresholds>> =
   Object.freeze({
@@ -77,15 +66,11 @@ export const AUDIO_THRESHOLDS_BY_MODE: Readonly<Record<PracticeMode, AudioModeTh
         full_through_wpm: 175,
         zero_above_wpm: 235,
       },
-      time_to_first_word: {
-        full_through_ms: 2_500,
-        zero_at_ms: 12_000,
-        corroboration_tolerance_ms: 300,
-      },
       paused_time: {
         candidate_gap_ms: 350,
-        unfinished_thought_ms: 1_100,
-        disruptive_gap_ms: 3_000,
+        mid_thought_allowance_ms: 650,
+        natural_boundary_allowance_ms: 1_100,
+        very_long_pause_ms: 3_000,
         full_through_ms: 750,
         zero_at_ms: 8_000,
       },
@@ -104,15 +89,11 @@ export const AUDIO_THRESHOLDS_BY_MODE: Readonly<Record<PracticeMode, AudioModeTh
         full_through_wpm: 170,
         zero_above_wpm: 225,
       },
-      time_to_first_word: {
-        full_through_ms: 2_500,
-        zero_at_ms: 10_000,
-        corroboration_tolerance_ms: 300,
-      },
       paused_time: {
         candidate_gap_ms: 350,
-        unfinished_thought_ms: 1_000,
-        disruptive_gap_ms: 2_750,
+        mid_thought_allowance_ms: 600,
+        natural_boundary_allowance_ms: 1_000,
+        very_long_pause_ms: 2_750,
         full_through_ms: 500,
         zero_at_ms: 6_500,
       },
@@ -131,15 +112,11 @@ export const AUDIO_THRESHOLDS_BY_MODE: Readonly<Record<PracticeMode, AudioModeTh
         full_through_wpm: 165,
         zero_above_wpm: 220,
       },
-      time_to_first_word: {
-        full_through_ms: 3_000,
-        zero_at_ms: 12_000,
-        corroboration_tolerance_ms: 300,
-      },
       paused_time: {
         candidate_gap_ms: 350,
-        unfinished_thought_ms: 1_200,
-        disruptive_gap_ms: 3_250,
+        mid_thought_allowance_ms: 750,
+        natural_boundary_allowance_ms: 1_200,
+        very_long_pause_ms: 3_250,
         full_through_ms: 1_000,
         zero_at_ms: 7_500,
       },
@@ -158,15 +135,11 @@ export const AUDIO_THRESHOLDS_BY_MODE: Readonly<Record<PracticeMode, AudioModeTh
         full_through_wpm: 185,
         zero_above_wpm: 245,
       },
-      time_to_first_word: {
-        full_through_ms: 1_800,
-        zero_at_ms: 8_000,
-        corroboration_tolerance_ms: 300,
-      },
       paused_time: {
         candidate_gap_ms: 350,
-        unfinished_thought_ms: 900,
-        disruptive_gap_ms: 2_750,
+        mid_thought_allowance_ms: 550,
+        natural_boundary_allowance_ms: 900,
+        very_long_pause_ms: 2_750,
         full_through_ms: 500,
         zero_at_ms: 6_000,
       },
@@ -183,21 +156,19 @@ export const AUDIO_THRESHOLDS_BY_MODE: Readonly<Record<PracticeMode, AudioModeTh
 export function validateAudioModeThresholds(value: AudioModeThresholds): boolean {
   const numbers = [
     ...Object.values(value.pace),
-    ...Object.values(value.time_to_first_word),
     ...Object.values(value.paused_time),
     ...Object.values(value.articulation),
     ...Object.values(value.energy),
   ]
   if (!numbers.every((item) => Number.isFinite(item) && item >= 0)) return false
-  const { pace, time_to_first_word: firstWord, paused_time: pause, articulation, energy } = value
+  const { pace, paused_time: pause, articulation, energy } = value
   return (
     pace.zero_below_wpm < pace.full_from_wpm &&
     pace.full_from_wpm <= pace.full_through_wpm &&
     pace.full_through_wpm < pace.zero_above_wpm &&
-    firstWord.full_through_ms < firstWord.zero_at_ms &&
-    firstWord.corroboration_tolerance_ms > 0 &&
-    pause.candidate_gap_ms <= pause.unfinished_thought_ms &&
-    pause.unfinished_thought_ms < pause.disruptive_gap_ms &&
+    pause.candidate_gap_ms <= pause.mid_thought_allowance_ms &&
+    pause.mid_thought_allowance_ms < pause.natural_boundary_allowance_ms &&
+    pause.natural_boundary_allowance_ms < pause.very_long_pause_ms &&
     pause.full_through_ms < pause.zero_at_ms &&
     articulation.low_confidence_below <= 1 &&
     articulation.full_through_low_proportion < articulation.zero_at_low_proportion &&
@@ -264,22 +235,23 @@ export interface PaceMeasurements {
   excluded_silence_ms: number | null
 }
 
-export interface TimeToFirstWordMeasurements {
-  seconds: number | null
-  transcript_ms: number | null
-  /** Earliest threshold crossing, retained for diagnostics but never scored directly. */
-  amplitude_onset_ms: number | null
-  anchored_acoustic_onset_ms: number | null
-  selected_onset_ms: number | null
-  rms_corroborated: boolean | null
-  source: 'anchored_acoustic' | 'transcript' | null
-  origin: 'recording_start'
-}
-
 export interface PausedTimeMeasurements {
   total_unnatural_pause_ms: number | null
   unnatural_pause_count: number
   total_interword_silence_ms: number | null
+  beginning_silence_ms: number | null
+  beginning_excessive_pause_ms: number | null
+  interword_excessive_pause_ms: number | null
+  natural_boundary_excessive_pause_ms: number | null
+  mid_thought_excessive_pause_ms: number | null
+  very_long_pause_count: number
+  transcript_ms: number | null
+  amplitude_onset_ms: number | null
+  anchored_acoustic_onset_ms: number | null
+  selected_onset_ms: number | null
+  rms_corroborated: boolean
+  source: 'anchored_acoustic' | 'transcript' | null
+  origin: 'recording_start'
 }
 
 export interface ArticulationMeasurements {
@@ -302,7 +274,6 @@ export interface EnergyMeasurements {
 
 export interface AudioMetricEvaluations {
   pace: AudioMetricEvaluation<'pace', PaceMeasurements>
-  time_to_first_word: AudioMetricEvaluation<'time_to_first_word', TimeToFirstWordMeasurements>
   paused_time: AudioMetricEvaluation<'paused_time', PausedTimeMeasurements>
   articulation: AudioMetricEvaluation<'articulation', ArticulationMeasurements>
   energy: AudioMetricEvaluation<'energy', EnergyMeasurements>
@@ -369,11 +340,6 @@ export function paceComponent(wpm: number, mode: PracticeMode): number {
     return higherBetter(wpm, threshold.zero_below_wpm, threshold.full_from_wpm)
   }
   return lowerBetter(wpm, threshold.full_through_wpm, threshold.zero_above_wpm)
-}
-
-export function timeToFirstWordComponent(milliseconds: number, mode: PracticeMode): number {
-  const threshold = AUDIO_THRESHOLDS_BY_MODE[mode].time_to_first_word
-  return lowerBetter(milliseconds, threshold.full_through_ms, threshold.zero_at_ms)
 }
 
 /** Depends on total unnatural duration only. Pause count never enters this function. */
@@ -775,101 +741,37 @@ function evaluatePace(prepared: Prepared, mode: PracticeMode): AudioMetricEvalua
   }
 }
 
-function evaluateTimeToFirstWord(
-  prepared: Prepared,
-  mode: PracticeMode,
-): AudioMetricEvaluations['time_to_first_word'] {
-  const issue = prepareIssue(prepared, false)
-  const firstWord = prepared.tokens[0]
-  const timing = prepared.firstWordTiming
-  const transcriptMs = timing?.transcript_ms ?? (firstWord ? firstWord.start * 1000 : null)
-  const rawAmplitudeOnsetMs = timing?.raw_amplitude_onset_ms ?? null
-  const anchoredAcousticOnsetMs = timing?.anchored_acoustic_onset_ms ?? null
-  const empty: TimeToFirstWordMeasurements = {
-    seconds: null,
-    transcript_ms: transcriptMs,
-    amplitude_onset_ms: rawAmplitudeOnsetMs,
-    anchored_acoustic_onset_ms: anchoredAcousticOnsetMs,
-    selected_onset_ms: timing?.selected_onset_ms ?? null,
-    rms_corroborated: null,
-    source: timing?.source ?? null,
-    origin: 'recording_start',
-  }
-  if (issue || !prepared.capture || !firstWord || transcriptMs === null || !timing) {
-    return unavailable(
-      'time_to_first_word',
-      'Your time to first word could not be measured from this recording.',
-      empty,
-      issue ?? 'The first timed word was unavailable.',
-    )
-  }
+type PauseContext = 'mid_thought' | 'natural_boundary'
 
-  const tolerance = AUDIO_THRESHOLDS_BY_MODE[mode].time_to_first_word.corroboration_tolerance_ms
-  const corroborated =
-    anchoredAcousticOnsetMs === null
-      ? null
-      : Math.abs(transcriptMs - anchoredAcousticOnsetMs) <= tolerance
-  const warnings: string[] = []
-  if (prepared.amplitudeIssue) {
-    warnings.push(`Acoustic onset was unavailable. ${prepared.amplitudeIssue}`)
-  } else if (prepared.pitchIssue) {
-    warnings.push(`Voiced onset was unavailable. ${prepared.pitchIssue}`)
-  }
-
-  const selectedOnsetMs = timing.selected_onset_ms
-  const component = timeToFirstWordComponent(selectedOnsetMs, mode)
-  const seconds = selectedOnsetMs / 1000
-  const evidenceEndMs = Math.max(
-    selectedOnsetMs,
-    Math.min(prepared.capture.duration_ms, prepared.capture.sample_interval_ms),
-  )
-  return {
-    id: 'time_to_first_word',
-    status: 'scored',
-    component,
-    explanation: `You began speaking after ${seconds.toFixed(1)} seconds.`,
-    measurements: {
-      seconds,
-      transcript_ms: transcriptMs,
-      amplitude_onset_ms: rawAmplitudeOnsetMs,
-      anchored_acoustic_onset_ms: anchoredAcousticOnsetMs,
-      selected_onset_ms: selectedOnsetMs,
-      rms_corroborated: corroborated,
-      source: timing.source,
-      origin: 'recording_start',
-    },
-    evidence: [
-      {
-        source: 'transcript_and_audio_timeline',
-        start: 0,
-        end: evidenceEndMs,
-        coordinate: 'audio_millisecond',
-        quote: firstWord.raw,
-        detail:
-          timing.source === 'anchored_acoustic'
-            ? 'Measured from recording start using sustained voiced onset near the first recognized word.'
-            : 'Measured from recording start to the first final transcript word.',
-      },
-    ],
-    deductions: deductions(
-      'time_to_first_word',
-      component,
-      `${seconds.toFixed(1)} seconds before you began speaking.`,
-    ),
-    warnings,
-  }
+interface ExcessivePause {
+  pause: Pause
+  context: PauseContext
+  allowance_ms: number
+  excessive_ms: number
+  very_long: boolean
 }
 
-function unnaturalPause(
+function excessivePause(
   pause: Pause,
   before: Token | undefined,
   threshold: AudioModeThresholds['paused_time'],
-): boolean {
-  // Very long gaps disrupt even at a sentence boundary. Medium gaps count only
-  // when word context shows the speaker had not completed the thought.
-  if (pause.duration_ms >= threshold.disruptive_gap_ms) return true
-  if (pause.duration_ms < threshold.unfinished_thought_ms) return false
-  return pause.after_filler || !before?.endsSentence || FUNCTION_WORDS.has(before.word)
+): ExcessivePause | null {
+  const naturalBoundary =
+    !pause.after_filler && Boolean(before?.endsSentence) && !FUNCTION_WORDS.has(before?.word ?? '')
+  const context: PauseContext = naturalBoundary ? 'natural_boundary' : 'mid_thought'
+  const allowanceMs = naturalBoundary
+    ? threshold.natural_boundary_allowance_ms
+    : threshold.mid_thought_allowance_ms
+  const excessiveMs = Math.max(0, pause.duration_ms - allowanceMs)
+  return excessiveMs > 0
+    ? {
+        pause,
+        context,
+        allowance_ms: allowanceMs,
+        excessive_ms: excessiveMs,
+        very_long: pause.duration_ms >= threshold.very_long_pause_ms,
+      }
+    : null
 }
 
 function tokenBeforePause(tokens: readonly Token[], pause: Pause): Token | undefined {
@@ -894,21 +796,52 @@ function evaluatePausedTime(
     total_unnatural_pause_ms: null,
     unnatural_pause_count: 0,
     total_interword_silence_ms: null,
+    beginning_silence_ms: null,
+    beginning_excessive_pause_ms: null,
+    interword_excessive_pause_ms: null,
+    natural_boundary_excessive_pause_ms: null,
+    mid_thought_excessive_pause_ms: null,
+    very_long_pause_count: 0,
+    transcript_ms: null,
+    amplitude_onset_ms: null,
+    anchored_acoustic_onset_ms: null,
+    selected_onset_ms: null,
+    rms_corroborated: false,
+    source: null,
+    origin: 'recording_start',
   }
-  if (issue || !prepared.pauseAnalysis) {
+  const timing = prepared.firstWordTiming
+  const firstWord = prepared.tokens[0]
+  if (issue || !prepared.pauseAnalysis || !timing || !firstWord) {
     return unavailable(
       'paused_time',
       'Your paused time could not be measured from this recording.',
       empty,
-      issue ?? 'Interword pause evidence was unavailable.',
+      issue ?? 'Speech onset or interword pause evidence was unavailable.',
     )
   }
 
   const threshold = AUDIO_THRESHOLDS_BY_MODE[mode].paused_time
-  const unnatural = prepared.pauseAnalysis.pauses.filter((pause) =>
-    unnaturalPause(pause, tokenBeforePause(prepared.tokens, pause), threshold),
+  const beginningSilenceMs = timing.selected_onset_ms
+  const beginningExcessiveMs = Math.max(
+    0,
+    beginningSilenceMs - threshold.natural_boundary_allowance_ms,
   )
-  const totalUnnaturalMs = unnatural.reduce((sum, pause) => sum + pause.duration_ms, 0)
+  const excessiveInterword = prepared.pauseAnalysis.pauses.flatMap((pause) => {
+    const charged = excessivePause(pause, tokenBeforePause(prepared.tokens, pause), threshold)
+    return charged ? [charged] : []
+  })
+  const interwordExcessiveMs = excessiveInterword.reduce((sum, item) => sum + item.excessive_ms, 0)
+  const naturalBoundaryExcessiveMs = excessiveInterword
+    .filter((item) => item.context === 'natural_boundary')
+    .reduce((sum, item) => sum + item.excessive_ms, 0)
+  const midThoughtExcessiveMs = excessiveInterword
+    .filter((item) => item.context === 'mid_thought')
+    .reduce((sum, item) => sum + item.excessive_ms, 0)
+  const beginningVeryLong = beginningSilenceMs >= threshold.very_long_pause_ms
+  const veryLongPauseCount =
+    excessiveInterword.filter((item) => item.very_long).length + (beginningVeryLong ? 1 : 0)
+  const totalUnnaturalMs = beginningExcessiveMs + interwordExcessiveMs
   const totalInterwordMs = prepared.pauseAnalysis.pauses.reduce(
     (sum, pause) => sum + pause.duration_ms,
     0,
@@ -923,36 +856,69 @@ function evaluatePausedTime(
   }
 
   const component = pausedTimeComponent(totalUnnaturalMs, mode)
+  const initialEvidence: AudioMetricEvidence[] =
+    beginningExcessiveMs > 0
+      ? [
+          {
+            source: 'transcript_and_audio_timeline',
+            start: threshold.natural_boundary_allowance_ms,
+            end: beginningSilenceMs,
+            coordinate: 'audio_millisecond',
+            quote: firstWord.raw,
+            detail: `${(beginningExcessiveMs / 1000).toFixed(1)} seconds of ${beginningVeryLong ? 'very long ' : ''}excessive beginning hesitation after ${(threshold.natural_boundary_allowance_ms / 1000).toFixed(1)} seconds of natural leeway.`,
+          },
+        ]
+      : []
+  const interwordEvidence = excessiveInterword.map((item): AudioMetricEvidence => {
+    const context = item.context === 'natural_boundary' ? 'natural-boundary' : 'mid-thought'
+    const prefix = item.very_long
+      ? `This very long ${context} pause had`
+      : `This ${context} pause had`
+    return {
+      source: 'audio_timeline',
+      start: item.pause.end_ms - item.excessive_ms,
+      end: item.pause.end_ms,
+      coordinate: 'audio_millisecond',
+      quote: item.pause.preceding_word,
+      detail: `${prefix} ${(item.excessive_ms / 1000).toFixed(1)} seconds beyond ${(item.allowance_ms / 1000).toFixed(1)} seconds of natural leeway.`,
+    }
+  })
+  const evidence = [...initialEvidence, ...interwordEvidence]
+  const warnings = [...prepared.pauseAnalysis.warnings]
+  if (prepared.pitchIssue) warnings.push(`Voiced onset was unavailable. ${prepared.pitchIssue}`)
+  if (evidence.length > MAX_EVIDENCE_ITEMS) {
+    warnings.push(`Pause evidence was limited to ${MAX_EVIDENCE_ITEMS} items.`)
+  }
   return {
     id: 'paused_time',
     status: 'scored',
     component,
-    explanation: `You had ${(totalUnnaturalMs / 1000).toFixed(1)} seconds of disruptive paused time.`,
+    explanation: `You had ${(totalUnnaturalMs / 1000).toFixed(1)} seconds of excessive paused time.`,
     measurements: {
       total_unnatural_pause_ms: totalUnnaturalMs,
-      unnatural_pause_count: unnatural.length,
+      unnatural_pause_count: excessiveInterword.length + (beginningExcessiveMs > 0 ? 1 : 0),
       total_interword_silence_ms: totalInterwordMs,
+      beginning_silence_ms: beginningSilenceMs,
+      beginning_excessive_pause_ms: beginningExcessiveMs,
+      interword_excessive_pause_ms: interwordExcessiveMs,
+      natural_boundary_excessive_pause_ms: naturalBoundaryExcessiveMs,
+      mid_thought_excessive_pause_ms: midThoughtExcessiveMs,
+      very_long_pause_count: veryLongPauseCount,
+      transcript_ms: timing.transcript_ms,
+      amplitude_onset_ms: timing.raw_amplitude_onset_ms,
+      anchored_acoustic_onset_ms: timing.anchored_acoustic_onset_ms,
+      selected_onset_ms: timing.selected_onset_ms,
+      rms_corroborated: timing.anchored_acoustic_onset_ms !== null,
+      source: timing.source,
+      origin: 'recording_start',
     },
-    evidence: unnatural.slice(0, MAX_EVIDENCE_ITEMS).map((pause) => ({
-      source: 'audio_timeline',
-      start: pause.start_ms,
-      end: pause.end_ms,
-      coordinate: 'audio_millisecond',
-      quote: pause.preceding_word,
-      detail: `${(pause.duration_ms / 1000).toFixed(1)} seconds of disruptive paused time.`,
-    })),
+    evidence: evidence.slice(0, MAX_EVIDENCE_ITEMS),
     deductions: deductions(
       'paused_time',
       component,
-      `${(totalUnnaturalMs / 1000).toFixed(1)} total seconds of disruptive paused time.`,
+      `${(totalUnnaturalMs / 1000).toFixed(1)} total seconds of excessive paused time.`,
     ),
-    warnings:
-      unnatural.length > MAX_EVIDENCE_ITEMS
-        ? [
-            ...prepared.pauseAnalysis.warnings,
-            `Pause evidence was limited to ${MAX_EVIDENCE_ITEMS} items.`,
-          ]
-        : prepared.pauseAnalysis.warnings,
+    warnings,
   }
 }
 
@@ -1211,14 +1177,13 @@ function evaluateEnergy(
 }
 
 /**
- * Scores five visible audio metrics from persisted recording evidence. No LLM,
+ * Scores four visible audio metrics from persisted recording evidence. No LLM,
  * Azure output, accent label, or volume-consistency dimension enters the score.
  */
 export function evaluateAudioMetrics(input: AudioEvaluationInput): AudioEvaluation {
   const prepared = prepare(input)
   const metrics: AudioMetricEvaluations = {
     pace: evaluatePace(prepared, input.mode),
-    time_to_first_word: evaluateTimeToFirstWord(prepared, input.mode),
     paused_time: evaluatePausedTime(prepared, input.mode),
     articulation: evaluateArticulation(prepared, input.words, input.mode),
     energy: evaluateEnergy(prepared, input.words, input.mode),

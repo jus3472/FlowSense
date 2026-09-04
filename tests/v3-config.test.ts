@@ -17,28 +17,28 @@ import { describe, expect, it } from 'vitest'
 const EXPECTED = {
   practice: {
     what_you_said: [10, 9, 9, 8, 7, 7],
-    how_you_sounded: [12, 5, 10, 13, 10],
+    how_you_sounded: [12, 15, 13, 10],
   },
   interview: {
     what_you_said: [12, 11, 10, 6, 6, 5],
-    how_you_sounded: [10, 6, 9, 15, 10],
+    how_you_sounded: [10, 15, 15, 10],
   },
   presentation: {
     what_you_said: [9, 9, 12, 7, 7, 6],
-    how_you_sounded: [12, 3, 9, 11, 15],
+    how_you_sounded: [12, 12, 11, 15],
   },
   conversation: {
     what_you_said: [9, 8, 7, 10, 8, 8],
-    how_you_sounded: [11, 4, 10, 15, 10],
+    how_you_sounded: [11, 14, 15, 10],
   },
 } as const
 
 describe('v3 scoring configuration', () => {
-  it('defines exactly two sections and eleven visible metrics', () => {
+  it('defines exactly two sections and ten visible metrics', () => {
     expect(V3_SECTION_IDS).toEqual(['what_you_said', 'how_you_sounded'])
     expect(WHAT_YOU_SAID_METRICS).toHaveLength(6)
-    expect(HOW_YOU_SOUNDED_METRICS).toHaveLength(5)
-    expect(new Set(V3_METRIC_IDS).size).toBe(11)
+    expect(HOW_YOU_SOUNDED_METRICS).toHaveLength(4)
+    expect(new Set(V3_METRIC_IDS).size).toBe(10)
   })
 
   it('locks each mode to its reviewed 50/50 distribution', () => {
@@ -101,7 +101,7 @@ describe('v3 scoring configuration', () => {
     expect(Object.isFrozen(V3_MODE_CONFIGS)).toBe(true)
     expect(Object.isFrozen(V3_SCORING_DEFINITION)).toBe(true)
     expect(V3_SCORING_DEFINITION).toMatchObject({
-      scorePayloadVersion: 'v3.score.1',
+      scorePayloadVersion: 'v3.score.2',
       rubricVersion: 'v3',
     })
     expect(Object.isFrozen(config)).toBe(true)

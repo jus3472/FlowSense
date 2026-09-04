@@ -108,8 +108,7 @@ const V3_WEIGHTS = {
     },
     how_you_sounded: {
       pace: 12,
-      time_to_first_word: 5,
-      paused_time: 10,
+      paused_time: 15,
       articulation: 13,
       energy: 10,
     },
@@ -125,8 +124,7 @@ const V3_WEIGHTS = {
     },
     how_you_sounded: {
       pace: 10,
-      time_to_first_word: 6,
-      paused_time: 9,
+      paused_time: 15,
       articulation: 15,
       energy: 10,
     },
@@ -142,8 +140,7 @@ const V3_WEIGHTS = {
     },
     how_you_sounded: {
       pace: 12,
-      time_to_first_word: 3,
-      paused_time: 9,
+      paused_time: 12,
       articulation: 11,
       energy: 15,
     },
@@ -159,8 +156,7 @@ const V3_WEIGHTS = {
     },
     how_you_sounded: {
       pace: 11,
-      time_to_first_word: 4,
-      paused_time: 10,
+      paused_time: 14,
       articulation: 15,
       energy: 10,
     },
@@ -557,7 +553,7 @@ function v3ScorePayload(attempt, failure = false, forcedScore = null) {
       candidate.component < selected.component ? candidate : selected,
     )
   return {
-    version: 'v3.score.1',
+    version: 'v3.score.2',
     rubric_version: 'v3',
     mode: attempt.practice_mode,
     total_earned_points: complete ? whatYouSaid.earned_points + howYouSounded.earned_points : null,
@@ -601,7 +597,7 @@ function validV3ScorePayload(attempt, snapshot) {
       'recommendation',
       'warnings',
     ]) ||
-    snapshot.version !== 'v3.score.1' ||
+    snapshot.version !== 'v3.score.2' ||
     snapshot.rubric_version !== 'v3' ||
     snapshot.mode !== attempt.practice_mode ||
     snapshot.total_max_points !== 100 ||

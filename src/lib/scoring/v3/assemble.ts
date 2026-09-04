@@ -3,15 +3,22 @@ import {
   V3_CONTENT_EVALUATOR_VERSION,
   type V3ContentEvaluation,
 } from '@/lib/scoring/v3/content/contracts'
-import { V3_MODE_CONFIGS, v3ConfigFor } from '@/lib/scoring/v3/config'
+import { V3_LEGACY_MODE_CONFIGS, V3_MODE_CONFIGS, v3ConfigFor } from '@/lib/scoring/v3/config'
 import {
   HOW_YOU_SOUNDED_METRICS,
+  LEGACY_HOW_YOU_SOUNDED_METRICS,
+  LEGACY_V3_METRIC_IDS,
   V3_METRIC_IDS,
+  V3_LEGACY_SCORE_PAYLOAD_VERSION,
   V3_RUBRIC_VERSION,
   V3_SCORE_PAYLOAD_VERSION,
   WHAT_YOU_SAID_METRICS,
   inUnitInterval,
   type HowYouSoundedMetricId,
+  type LegacyHowYouSoundedMetricId,
+  type LegacyV3MetricId,
+  type StoredV3MetricId,
+  type StoredV3ScorePayload,
   type V3MetricDetail,
   type V3MetricEvaluation,
   type V3MetricId,
@@ -31,7 +38,7 @@ export interface V3AssemblyInput {
 }
 
 function unavailableMetric(
-  metric: V3MetricId,
+  metric: StoredV3MetricId,
   maxPoints: number,
   status: Exclude<V3MetricStatus, 'scored'>,
   warning: string,
@@ -51,7 +58,7 @@ function unavailableMetric(
 }
 
 function persistedMetric(
-  metric: V3MetricId,
+  metric: StoredV3MetricId,
   evaluation: V3MetricEvaluation | undefined,
   maxPoints: number,
 ): V3PersistedMetricScore {
@@ -97,7 +104,7 @@ function sectionStatus(metrics: readonly V3PersistedMetricScore[]): V3MetricStat
   return metrics.some((metric) => metric.status === 'unavailable') ? 'unavailable' : 'not_checked'
 }
 
-function section<Metric extends V3MetricId>(
+function section<Metric extends StoredV3MetricId>(
   sectionId: 'what_you_said' | 'how_you_sounded',
   metricIds: readonly Metric[],
   evaluations: Readonly<Partial<Record<Metric, V3MetricEvaluation>>>,
@@ -139,37 +146,46 @@ function notCheckedContentMetric(
   }
 }
 
-/** Uses only explanations already visible on the highest and lowest scored metrics. */
-export function composeV3Recommendation(
-  metrics: Readonly<Record<V3MetricId, V3PersistedMetricScore>>,
-): V3Recommendation | null {
-  const scored = V3_METRIC_IDS.map((metric) => metrics[metric]).filter(
-    (metric) =>
-      metric.status === 'scored' &&
-      metric.component !== null &&
-      typeof metric.explanation === 'string' &&
-      metric.explanation.length > 0,
-  )
-  if (scored.length !== V3_METRIC_IDS.length) return null
+function composeRecommendation<Metric extends StoredV3MetricId>(
+  metricIds: readonly Metric[],
+  metrics: Readonly<Record<Metric, V3PersistedMetricScore>>,
+): V3Recommendation<Metric> | null {
+  const scored = metricIds
+    .map((id) => ({ id, result: metrics[id] }))
+    .filter(
+      ({ result }) =>
+        result.status === 'scored' &&
+        result.component !== null &&
+        typeof result.explanation === 'string' &&
+        result.explanation.length > 0,
+    )
+  if (scored.length !== metricIds.length) return null
   const strongest = scored.reduce((selected, candidate) =>
-    (candidate.component ?? -1) > (selected.component ?? -1) ? candidate : selected,
+    (candidate.result.component ?? -1) > (selected.result.component ?? -1) ? candidate : selected,
   )
   const weakest = [...scored]
     .reverse()
     .reduce((selected, candidate) =>
-      (candidate.component ?? 2) < (selected.component ?? 2) ? candidate : selected,
+      (candidate.result.component ?? 2) < (selected.result.component ?? 2) ? candidate : selected,
     )
   return {
-    strongest_metric: strongest.metric,
-    weakest_metric: weakest.metric,
+    strongest_metric: strongest.id,
+    weakest_metric: weakest.id,
     text:
-      strongest.metric === weakest.metric
-        ? (strongest.explanation ?? '')
-        : `${strongest.explanation} ${weakest.explanation}`,
+      strongest.id === weakest.id
+        ? (strongest.result.explanation ?? '')
+        : `${strongest.result.explanation} ${weakest.result.explanation}`,
   }
 }
 
-/** Converts eleven normalized metric evaluations into the immutable v3 50/50 payload. */
+/** Uses only explanations already visible on the highest and lowest scored metrics. */
+export function composeV3Recommendation(
+  metrics: Readonly<Record<V3MetricId, V3PersistedMetricScore>>,
+): V3Recommendation | null {
+  return composeRecommendation(V3_METRIC_IDS, metrics)
+}
+
+/** Converts ten normalized metric evaluations into the current immutable v3 50/50 payload. */
 export function assembleV3Score(input: V3AssemblyInput): V3ScorePayload {
   const config = v3ConfigFor(input.mode)
   const contentMetrics =
@@ -321,7 +337,7 @@ function validMeasurements(value: unknown): boolean {
 
 function validMetric(
   value: unknown,
-  metric: V3MetricId,
+  metric: StoredV3MetricId,
   maxPoints: number,
 ): value is V3PersistedMetricScore {
   if (
@@ -371,7 +387,7 @@ function validMetric(
   )
 }
 
-function validSection<Metric extends V3MetricId>(
+function validSection<Metric extends StoredV3MetricId>(
   value: unknown,
   sectionId: 'what_you_said' | 'how_you_sounded',
   metricIds: readonly Metric[],
@@ -401,8 +417,14 @@ function validSection<Metric extends V3MetricId>(
   )
 }
 
-/** Validates a stored payload only against the immutable v3.score.1/v3 definition. */
-export function isV3ScorePayload(value: unknown): value is V3ScorePayload {
+function isSupportedV3Version(
+  value: unknown,
+): value is typeof V3_SCORE_PAYLOAD_VERSION | typeof V3_LEGACY_SCORE_PAYLOAD_VERSION {
+  return value === V3_SCORE_PAYLOAD_VERSION || value === V3_LEGACY_SCORE_PAYLOAD_VERSION
+}
+
+/** Validates both immutable v3 score shapes without reinterpreting either one. */
+export function isV3ScorePayload(value: unknown): value is StoredV3ScorePayload {
   if (
     !isRecord(value) ||
     !exactKeys(value, [
@@ -415,7 +437,7 @@ export function isV3ScorePayload(value: unknown): value is V3ScorePayload {
       'recommendation',
       'warnings',
     ]) ||
-    value.version !== V3_SCORE_PAYLOAD_VERSION ||
+    !isSupportedV3Version(value.version) ||
     value.rubric_version !== V3_RUBRIC_VERSION ||
     typeof value.mode !== 'string' ||
     !(PRACTICE_MODES as readonly string[]).includes(value.mode) ||
@@ -427,7 +449,8 @@ export function isV3ScorePayload(value: unknown): value is V3ScorePayload {
     return false
   }
   const mode = value.mode as PracticeMode
-  const config = V3_MODE_CONFIGS[mode]
+  const legacy = value.version === V3_LEGACY_SCORE_PAYLOAD_VERSION
+  const config = legacy ? V3_LEGACY_MODE_CONFIGS[mode] : V3_MODE_CONFIGS[mode]
   if (
     !validSection(
       value.sections.what_you_said,
@@ -435,26 +458,37 @@ export function isV3ScorePayload(value: unknown): value is V3ScorePayload {
       WHAT_YOU_SAID_METRICS,
       config.sections.what_you_said,
     ) ||
-    !validSection(
-      value.sections.how_you_sounded,
-      'how_you_sounded',
-      HOW_YOU_SOUNDED_METRICS,
-      config.sections.how_you_sounded,
-    )
+    !(legacy
+      ? validSection(
+          value.sections.how_you_sounded,
+          'how_you_sounded',
+          LEGACY_HOW_YOU_SOUNDED_METRICS,
+          V3_LEGACY_MODE_CONFIGS[mode].sections.how_you_sounded,
+        )
+      : validSection(
+          value.sections.how_you_sounded,
+          'how_you_sounded',
+          HOW_YOU_SOUNDED_METRICS,
+          V3_MODE_CONFIGS[mode].sections.how_you_sounded,
+        ))
   ) {
     return false
   }
-  const what = value.sections.what_you_said
-  const sounded = value.sections.how_you_sounded
+  const what = value.sections.what_you_said as V3PersistedSectionScore<WhatYouSaidMetricId>
+  const sounded = value.sections.how_you_sounded as
+    | V3PersistedSectionScore<HowYouSoundedMetricId>
+    | V3PersistedSectionScore<LegacyHowYouSoundedMetricId>
   const complete = what.status === 'scored' && sounded.status === 'scored'
   if (!complete) return value.total_earned_points === null && value.recommendation === null
   const expectedTotal = (what.earned_points ?? 0) + (sounded.earned_points ?? 0)
   if (value.total_earned_points !== expectedTotal || expectedTotal > 100) return false
   const metrics = { ...what.metrics, ...sounded.metrics } as Record<
-    V3MetricId,
+    LegacyV3MetricId,
     V3PersistedMetricScore
   >
-  const expectedRecommendation = composeV3Recommendation(metrics)
+  const expectedRecommendation = legacy
+    ? composeRecommendation(LEGACY_V3_METRIC_IDS, metrics)
+    : composeRecommendation(V3_METRIC_IDS, metrics as Record<V3MetricId, V3PersistedMetricScore>)
   return (
     isRecord(value.recommendation) &&
     exactKeys(value.recommendation, ['strongest_metric', 'weakest_metric', 'text']) &&
@@ -462,4 +496,8 @@ export function isV3ScorePayload(value: unknown): value is V3ScorePayload {
     value.recommendation.weakest_metric === expectedRecommendation?.weakest_metric &&
     value.recommendation.text === expectedRecommendation?.text
   )
+}
+
+export function isCurrentV3ScorePayload(value: unknown): value is V3ScorePayload {
+  return isRecord(value) && value.version === V3_SCORE_PAYLOAD_VERSION && isV3ScorePayload(value)
 }

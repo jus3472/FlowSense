@@ -1,46 +1,61 @@
 import type { Segment } from '@/lib/results/highlights'
 import {
   HOW_YOU_SOUNDED_METRICS,
+  LEGACY_HOW_YOU_SOUNDED_METRICS,
+  LEGACY_V3_METRIC_IDS,
   V3_METRIC_IDS,
   V3_METRIC_LABELS,
+  V3_LEGACY_SCORE_PAYLOAD_VERSION,
   WHAT_YOU_SAID_METRICS,
-  type V3MetricId,
+  type StoredV3MetricId,
   type V3PersistedMetricScore,
   type V3ScoreEvidence,
-  type V3ScorePayload,
+  type StoredV3ScorePayload,
 } from '@/lib/scoring/v3/contracts'
 
-export const V3_SECTION_VIEWS = [
-  {
-    id: 'what_you_said',
-    label: 'What You Said',
-    metrics: WHAT_YOU_SAID_METRICS,
-  },
-  {
-    id: 'how_you_sounded',
-    label: 'How You Sounded',
-    metrics: HOW_YOU_SOUNDED_METRICS,
-  },
-] as const
+export function v3SectionViews(payload: StoredV3ScorePayload) {
+  return [
+    {
+      id: 'what_you_said',
+      label: 'What You Said',
+      metrics: WHAT_YOU_SAID_METRICS,
+    },
+    {
+      id: 'how_you_sounded',
+      label: 'How You Sounded',
+      metrics:
+        payload.version === V3_LEGACY_SCORE_PAYLOAD_VERSION
+          ? LEGACY_HOW_YOU_SOUNDED_METRICS
+          : HOW_YOU_SOUNDED_METRICS,
+    },
+  ] as const
+}
+
+export function v3MetricIds(payload: StoredV3ScorePayload): readonly StoredV3MetricId[] {
+  return payload.version === V3_LEGACY_SCORE_PAYLOAD_VERSION ? LEGACY_V3_METRIC_IDS : V3_METRIC_IDS
+}
 
 export interface V3MetricView {
-  id: V3MetricId
+  id: StoredV3MetricId
   label: string
   result: V3PersistedMetricScore
 }
 
-export function v3MetricResult(payload: V3ScorePayload, id: V3MetricId): V3PersistedMetricScore {
-  return id in payload.sections.what_you_said.metrics
-    ? payload.sections.what_you_said.metrics[
-        id as keyof typeof payload.sections.what_you_said.metrics
-      ]
-    : payload.sections.how_you_sounded.metrics[
-        id as keyof typeof payload.sections.how_you_sounded.metrics
-      ]
+export function v3MetricResult(
+  payload: StoredV3ScorePayload,
+  id: StoredV3MetricId,
+): V3PersistedMetricScore {
+  const metrics = {
+    ...payload.sections.what_you_said.metrics,
+    ...payload.sections.how_you_sounded.metrics,
+  } as Partial<Record<StoredV3MetricId, V3PersistedMetricScore>>
+  const result = metrics[id]
+  if (!result) throw new Error(`Stored v3 metric ${id} was missing.`)
+  return result
 }
 
-export function v3MetricViews(payload: V3ScorePayload): V3MetricView[] {
-  return V3_METRIC_IDS.map((id) => ({
+export function v3MetricViews(payload: StoredV3ScorePayload): V3MetricView[] {
+  return v3MetricIds(payload).map((id) => ({
     id,
     label: V3_METRIC_LABELS[id],
     result: v3MetricResult(payload, id),
@@ -80,7 +95,7 @@ function seconds(milliseconds: number): string {
 
 /** Returns the primary user-facing raw measurement for a sounded metric. */
 export function v3PrimaryMeasurement(
-  metric: V3MetricId,
+  metric: StoredV3MetricId,
   result: V3PersistedMetricScore,
 ): string | null {
   if (metric === 'pace') {
@@ -167,7 +182,7 @@ interface TranscriptDeduction {
 
 function transcriptDeduction(
   transcript: string,
-  metric: V3MetricId,
+  metric: StoredV3MetricId,
   evidence: V3ScoreEvidence,
 ): TranscriptDeduction | null {
   if (
@@ -193,7 +208,7 @@ function transcriptDeduction(
 }
 
 /** Amber marks only exact transcript evidence belonging to a metric that lost points. */
-export function v3TranscriptSegments(transcript: string, payload: V3ScorePayload): Segment[] {
+export function v3TranscriptSegments(transcript: string, payload: StoredV3ScorePayload): Segment[] {
   const candidates = v3MetricViews(payload).flatMap(({ id, result }) => {
     if (result.status !== 'scored' || result.component === null || result.component >= 1) return []
     return result.evidence.flatMap((evidence) => {

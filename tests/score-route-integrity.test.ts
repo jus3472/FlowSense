@@ -121,7 +121,7 @@ const V3_CONTENT = {
 }
 
 const V3_SCORE = {
-  version: 'v3.score.1',
+  version: 'v3.score.2',
   rubric_version: 'v3',
   mode: 'practice',
   total_earned_points: 74,
@@ -154,12 +154,12 @@ function audioMetric(id: string, component = 0.8) {
 }
 
 const V3_AUDIO = {
-  version: 'v3.audio.1',
+  version: 'v3.audio.2',
   mode: 'practice',
   metrics: {
     pace: audioMetric('pace'),
-    time_to_first_word: {
-      ...audioMetric('time_to_first_word'),
+    paused_time: {
+      ...audioMetric('paused_time'),
       evidence: [
         {
           source: 'transcript_and_audio_timeline',
@@ -171,7 +171,6 @@ const V3_AUDIO = {
         },
       ],
     },
-    paused_time: audioMetric('paused_time'),
     articulation: {
       ...audioMetric('articulation'),
       evidence: [
@@ -700,7 +699,7 @@ describe('score route database integrity', () => {
             }),
           ],
         }),
-        time_to_first_word: expect.objectContaining({
+        paused_time: expect.objectContaining({
           status: 'scored',
           component: 0.8,
           evidence: [],

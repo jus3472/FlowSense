@@ -1,6 +1,10 @@
 import { parseCurriculumScore } from '@/lib/curriculum/thresholds'
 import { decodeStoredSectionSnapshot } from '@/lib/results/snapshot'
 import { isV3ScorePayload } from '@/lib/scoring/v3/assemble'
+import {
+  V3_LEGACY_SCORE_PAYLOAD_VERSION,
+  V3_SCORE_PAYLOAD_VERSION,
+} from '@/lib/scoring/v3/contracts'
 
 export interface SpeakingActivityInput {
   status: unknown
@@ -59,7 +63,11 @@ export function classifySpeakingActivity(
       ? { kind: 'scored', score, resultKind: 'v3' }
       : { kind: 'invalid', reason: 'score_mismatch' }
   }
-  if (isRecord(input.sectionScores) && input.sectionScores.version === 'v3.score.1') {
+  if (
+    isRecord(input.sectionScores) &&
+    (input.sectionScores.version === V3_SCORE_PAYLOAD_VERSION ||
+      input.sectionScores.version === V3_LEGACY_SCORE_PAYLOAD_VERSION)
+  ) {
     return { kind: 'invalid', reason: 'malformed_result' }
   }
 

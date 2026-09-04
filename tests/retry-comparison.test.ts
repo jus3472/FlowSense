@@ -6,7 +6,7 @@ import {
 } from '@/lib/results/retry-comparison'
 import { V2_SCORE_PAYLOAD_VERSION, type V2ScorePayload } from '@/lib/scoring/v2/assemble'
 import { describe, expect, it } from 'vitest'
-import { v3Snapshot } from './helpers/result-snapshots'
+import { legacyV3Snapshot, v3Snapshot } from './helpers/result-snapshots'
 
 function score(overrides: Partial<V2ScorePayload> = {}): V2ScorePayload {
   const categories = Object.fromEntries(
@@ -126,12 +126,19 @@ describe('retry comparison', () => {
     const previous = v3Snapshot({ component: 0.4 })
     const comparison = compareV3RetryResults(current, previous)
 
-    expect(comparison?.rows).toHaveLength(12)
+    expect(comparison?.rows).toHaveLength(11)
     expect(comparison?.rows[0]).toMatchObject({ category: 'overall', label: 'Overall' })
     expect(comparison?.rows).toContainEqual(
       expect.objectContaining({ category: 'answered_prompt', label: 'Answered the Prompt' }),
     )
     expect(compareV3RetryResults(current, v3Snapshot({ mode: 'interview' }))).toBeNull()
+    expect(compareV3RetryResults(current, legacyV3Snapshot())).toBeNull()
+    expect(
+      compareV3RetryResults(
+        legacyV3Snapshot({ component: 0.8 }),
+        legacyV3Snapshot({ component: 0.4 }),
+      )?.rows,
+    ).toHaveLength(12)
     expect(compareV3RetryResults(current, score() as never)).toBeNull()
   })
 

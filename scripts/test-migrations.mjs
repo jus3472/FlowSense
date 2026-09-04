@@ -1083,7 +1083,7 @@ function malformedV2Payloads(mode, score) {
   ]
 }
 
-const V3_MODE_WEIGHTS = {
+const V3_SCORE_1_MODE_WEIGHTS = {
   practice: {
     what_you_said: {
       answered_prompt: 10,
@@ -1154,8 +1154,27 @@ const V3_MODE_WEIGHTS = {
   },
 }
 
-function structuredV3ScorePayload(mode, score) {
-  const weights = V3_MODE_WEIGHTS[mode]
+const V3_MODE_WEIGHTS = {
+  practice: {
+    what_you_said: V3_SCORE_1_MODE_WEIGHTS.practice.what_you_said,
+    how_you_sounded: { pace: 12, paused_time: 15, articulation: 13, energy: 10 },
+  },
+  interview: {
+    what_you_said: V3_SCORE_1_MODE_WEIGHTS.interview.what_you_said,
+    how_you_sounded: { pace: 10, paused_time: 15, articulation: 15, energy: 10 },
+  },
+  presentation: {
+    what_you_said: V3_SCORE_1_MODE_WEIGHTS.presentation.what_you_said,
+    how_you_sounded: { pace: 12, paused_time: 12, articulation: 11, energy: 15 },
+  },
+  conversation: {
+    what_you_said: V3_SCORE_1_MODE_WEIGHTS.conversation.what_you_said,
+    how_you_sounded: { pace: 11, paused_time: 14, articulation: 15, energy: 10 },
+  },
+}
+
+function structuredV3ScorePayloadFor(mode, score, weightsByMode, version) {
+  const weights = weightsByMode[mode]
   assert(weights, `unsupported v3 score mode: ${mode}`)
   const maximums = { ...weights.what_you_said, ...weights.how_you_sounded }
   const allocated = allocateScore(maximums, score)
@@ -1204,7 +1223,7 @@ function structuredV3ScorePayload(mode, score) {
       candidate.component < selected.component ? candidate : selected,
     )
   return {
-    version: 'v3.score.1',
+    version,
     rubric_version: 'v3',
     mode,
     total_earned_points: score,
@@ -1223,6 +1242,14 @@ function structuredV3ScorePayload(mode, score) {
     },
     warnings: [],
   }
+}
+
+function structuredV3ScorePayload(mode, score) {
+  return structuredV3ScorePayloadFor(mode, score, V3_MODE_WEIGHTS, 'v3.score.2')
+}
+
+function structuredLegacyV3ScorePayload(mode, score) {
+  return structuredV3ScorePayloadFor(mode, score, V3_SCORE_1_MODE_WEIGHTS, 'v3.score.1')
 }
 
 function malformedV3Payloads(mode, score) {
@@ -1765,6 +1792,13 @@ async function assertV3Progression(label) {
       [JSON.stringify(payload), mode],
     )
     assert(valid.rows[0]?.valid === true, `${label}: ${mode} v3 weights were rejected`)
+    const legacy = await client.query(
+      `select public.is_valid_v3_score_payload_for_attempt(
+         $1::jsonb, $2, 83, true
+       ) as valid`,
+      [JSON.stringify(structuredLegacyV3ScorePayload(mode, 83)), mode],
+    )
+    assert(legacy.rows[0]?.valid === true, `${label}: ${mode} v3.score.1 was reinterpreted`)
   }
 
   const lessons = await client.query(`
@@ -2158,8 +2192,8 @@ async function runPreCurriculumUpgrade(migrations) {
   )
   assert(
     JSON.stringify(v3Progression.map(({ name }) => name)) ===
-      JSON.stringify(['v3_progression_compatibility']),
-    'expected exactly one additive v3 progression migration',
+      JSON.stringify(['v3_progression_compatibility', 'v3_score_2_progression_compatibility']),
+    'expected both additive v3 progression migrations',
   )
 
   await applyAll(preCurriculum)
@@ -2364,8 +2398,8 @@ async function runPrePhase5Upgrade(migrations) {
   )
   assert(
     JSON.stringify(v3Progression.map(({ name }) => name)) ===
-      JSON.stringify(['v3_progression_compatibility']),
-    'pre-Phase-5 upgrade must end with additive v3 progression support',
+      JSON.stringify(['v3_progression_compatibility', 'v3_score_2_progression_compatibility']),
+    'pre-Phase-5 upgrade must end with both additive v3 progression validators',
   )
 
   await applyAll(prePhase5)
@@ -2456,8 +2490,8 @@ async function runGrantHardeningUpgrade(migrations) {
   )
   assert(
     JSON.stringify(v3Progression.map(({ name }) => name)) ===
-      JSON.stringify(['v3_progression_compatibility']),
-    'grant-hardening upgrade must be followed by v3 progression compatibility',
+      JSON.stringify(['v3_progression_compatibility', 'v3_score_2_progression_compatibility']),
+    'grant-hardening upgrade must be followed by both v3 progression validators',
   )
 
   await seedAuthUser(USERS.missingProfile, 'Hardening Upgrade General')
@@ -2531,8 +2565,8 @@ try {
   await client.connect()
   const migrations = loadMigrations()
   assert(
-    migrations.length === 15,
-    'Expected nine production, three curriculum, one Phase 5, one hardening, and one v3 migration.',
+    migrations.length === 16,
+    'Expected nine production, three curriculum, one Phase 5, one hardening, and two v3 migrations.',
   )
   await runFresh(migrations)
   await runUpgrade(migrations)

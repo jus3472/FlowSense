@@ -7,10 +7,10 @@ appears, a countdown runs, and the user answers aloud for up to 60 seconds. The 
 response out of 100, never a permanent rating of the person.
 
 The primary modes are General Practice (`practice`), Interviews (`interview`), Presentations
-(`presentation`), and Conversations (`conversation`). New attempts share exactly 11 visible
+(`presentation`), and Conversations (`conversation`). New attempts share exactly 10 visible
 metrics. What You Said contains Answered the Prompt, Specificity, Structure, Conciseness, Word
-Choice, and Grammar. How You Sounded contains Pace, Time to First Word, Paused Time, Articulation,
-and Energy. A mode alters their weights and acoustic thresholds, but it cannot become an unrelated
+Choice, and Grammar. How You Sounded contains Pace, Paused Time, Articulation, and Energy. A mode
+alters their weights and acoustic thresholds, but it cannot become an unrelated
 scoring system.
 
 It is for people who can write clearly but stall, pad, or circle when speaking. The interface must
@@ -52,21 +52,36 @@ Routes should stay focused on routing and request orchestration. Keep scoring an
 The attempt lifecycle is `uploading -> transcribing -> scoring -> done | failed | timed_out`. Audio is saved before transcription. Each network boundary has its own timeout, terminal failure state, and retry path. Retrying uses the existing attempt and reads stored audio server-side.
 
 A single `getUserMedia` stream feeds `MediaRecorder`, RMS amplitude sampling every 50ms, and pitch sampling every 50ms. Preserve the recorder and StrictMode guards: duplicate chunks can produce malformed audio and duplicate audio playback.
+Preparation is `2 + 0.4 * prompt word count` seconds, rounded to milliseconds and clamped from 3
+through 8 seconds, so it varies with prompt length.
+The stream is opened before the countdown, but the recorder and signal sampler start only after the
+countdown completes. Preparation audio is not stored or scored.
 
 Transcription uses Deepgram `nova-2` with punctuation and filler words enabled. Do not turn on smart formatting because the application needs the original disfluencies. `nova-3` must not replace it without checking filler behavior on real recordings.
 
-New attempts use rubric `v3` and payload `v3.score.1`. The two sections are always worth 50 points.
+New attempts use rubric `v3` and payload `v3.score.2`. Historical `v3.score.1` payloads retain their
+original five-metric How You Sounded section and remain authoritative. The two sections are always worth 50 points.
 DeepSeek evaluates only the six content metrics as normalized components under a strict schema.
 DeepSeek owns context-aware fillers and the other semantic Conciseness findings. Code retains only
 clear false starts and restarts within Conciseness, validates exact UTF-16 evidence, and prevents
-overlap between structural and AI findings. The five audio metrics are pure over stored
+overlap between structural and AI findings. The four current audio metrics are pure over stored
 capture evidence and the final Deepgram word array:
 
 - Pace is articulation rate: timed words divided by active speaking time after detected silence is removed.
-- Time to First Word is the first final word timestamp from recording start, with RMS onset used only as corroboration.
-- Paused Time adds only mode-configured disruptive interword silence; the score uses cumulative duration, never pause count.
+- Paused Time combines excessive beginning hesitation and excessive interword pauses. It uses the same hardened first-word onset as Pace, allows more time at the beginning and natural sentence boundaries than mid-thought, adds only duration beyond each allowance, and never counts trailing silence.
 - Articulation uses the proportion of eligible words with low final recognition confidence, gated by confidence coverage and audio signal separation. It does not use accent labels or native similarity.
 - Energy uses robust semitone pitch spread inside recognized-word windows after octave correction. Loudness is not scored.
+
+Paused Time considers interword gaps from 350 milliseconds upward. For each gap it adds
+`max(0, measured duration - contextual allowance)` to the total. Beginning silence uses the natural
+boundary allowance. The total component keeps the existing cumulative paused-time curve.
+
+| Mode         | Beginning or natural boundary | Mid-thought | Very long | Full score through |  Zero at |
+| ------------ | ----------------------------: | ----------: | --------: | -----------------: | -------: |
+| Practice     |                      1,100 ms |      650 ms |  3,000 ms |             750 ms | 8,000 ms |
+| Interview    |                      1,000 ms |      600 ms |  2,750 ms |             500 ms | 6,500 ms |
+| Presentation |                      1,200 ms |      750 ms |  3,250 ms |           1,000 ms | 7,500 ms |
+| Conversation |                        900 ms |      550 ms |  2,750 ms |             500 ms | 6,000 ms |
 
 Any required metric that is missing, malformed, or insufficient makes the composite score
 unavailable. Partial output never becomes a trustworthy zero or passing result. General Practice is

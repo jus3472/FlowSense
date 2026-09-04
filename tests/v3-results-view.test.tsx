@@ -6,8 +6,8 @@ import type { AnchorHTMLAttributes, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { V3ResultsView } from '@/components/results/v3-results-view'
 import type { StructuredLessonResultModel } from '@/lib/curriculum/result'
-import { V3_METRIC_LABELS } from '@/lib/scoring/v3/contracts'
-import { v3Snapshot } from './helpers/result-snapshots'
+import { V3_METRIC_IDS, V3_METRIC_LABELS } from '@/lib/scoring/v3/contracts'
+import { legacyV3Snapshot, v3Snapshot } from './helpers/result-snapshots'
 
 vi.mock('next/link', () => ({
   default: function MockLink({
@@ -60,7 +60,7 @@ const curriculumResult: StructuredLessonResultModel = {
 }
 
 describe('V3ResultsView', () => {
-  it('renders the required result sections and all eleven metrics in exact order', () => {
+  it('renders the required result sections and all ten current metrics in exact order', () => {
     const { container } = render(<V3ResultsView {...props} payload={v3Snapshot()} />)
     const headings = Array.from(container.querySelectorAll('h1, h2')).map((heading) =>
       heading.textContent?.trim(),
@@ -78,14 +78,22 @@ describe('V3ResultsView', () => {
     expect(screen.queryByText('Your prompt')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Overall score' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Recommendation' })).not.toBeInTheDocument()
-    for (const label of Object.values(V3_METRIC_LABELS)) {
+    for (const metric of V3_METRIC_IDS) {
+      const label = V3_METRIC_LABELS[metric]
       expect(screen.getByRole('heading', { name: label })).toBeInTheDocument()
     }
+    expect(screen.queryByRole('heading', { name: 'Time to First Word' })).not.toBeInTheDocument()
     expect(screen.getByLabelText('Play Your answer')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Try Again' })).toHaveAttribute(
       'href',
       '/record?retry=attempt-1',
     )
+  })
+
+  it('renders a stored v3.score.1 snapshot with its historical first-word metric', () => {
+    render(<V3ResultsView {...props} payload={legacyV3Snapshot()} />)
+
+    expect(screen.getByRole('heading', { name: 'Time to First Word' })).toBeInTheDocument()
   })
 
   it('shows partial score states without a fabricated overall or recommendation', () => {

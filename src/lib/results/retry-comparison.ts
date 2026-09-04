@@ -1,10 +1,10 @@
 import { SKILL_CATEGORIES, type SkillCategory } from '@/lib/practice/contracts'
+import { v3MetricIds, v3MetricResult } from '@/lib/results/v3'
 import type { V2ScorePayload } from '@/lib/scoring/v2/assemble'
 import {
-  V3_METRIC_IDS,
   V3_METRIC_LABELS,
-  type V3MetricId,
-  type V3ScorePayload,
+  type StoredV3MetricId,
+  type StoredV3ScorePayload,
 } from '@/lib/scoring/v3/contracts'
 
 /** A display hint only. It never suppresses numeric stored-result evidence. */
@@ -12,7 +12,7 @@ export const RETRY_COMPARISON_NOISE_POINTS = 2
 export const MAX_RETRY_CHAIN_LENGTH = 8
 
 export interface RetryComparisonRow {
-  category: SkillCategory | V3MetricId | 'overall'
+  category: SkillCategory | StoredV3MetricId | 'overall'
   label: string
   currentPoints: number
   previousPoints: number
@@ -119,20 +119,10 @@ export function compareRetryResults(
   return { rows }
 }
 
-function v3Metric(payload: V3ScorePayload, metric: V3MetricId) {
-  return metric in payload.sections.what_you_said.metrics
-    ? payload.sections.what_you_said.metrics[
-        metric as keyof typeof payload.sections.what_you_said.metrics
-      ]
-    : payload.sections.how_you_sounded.metrics[
-        metric as keyof typeof payload.sections.how_you_sounded.metrics
-      ]
-}
-
 /** Compares only exact v3 score/rubric/mode snapshots. */
 export function compareV3RetryResults(
-  current: V3ScorePayload,
-  previous: V3ScorePayload | null,
+  current: StoredV3ScorePayload,
+  previous: StoredV3ScorePayload | null,
 ): RetryComparison | null {
   if (
     !previous ||
@@ -157,9 +147,9 @@ export function compareV3RetryResults(
     })
   }
 
-  for (const metric of V3_METRIC_IDS) {
-    const currentMetric = v3Metric(current, metric)
-    const previousMetric = v3Metric(previous, metric)
+  for (const metric of v3MetricIds(current)) {
+    const currentMetric = v3MetricResult(current, metric)
+    const previousMetric = v3MetricResult(previous, metric)
     if (
       currentMetric.status !== 'scored' ||
       previousMetric.status !== 'scored' ||

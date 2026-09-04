@@ -35,7 +35,7 @@ const v3Statuses = (prefix: 'v3_score' | 'v3_content', status: string) =>
 function v3Row(overrides: Record<string, unknown> = {}) {
   return {
     completed_at: '2026-09-03T03:00:00.000Z',
-    score_payload_version: 'v3.score.1',
+    score_payload_version: 'v3.score.2',
     score_rubric_version: 'v3',
     content_payload_version: 'v3.content-evaluator.1',
     content_status: 'checked',

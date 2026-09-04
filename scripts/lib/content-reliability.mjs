@@ -1,4 +1,4 @@
-export const CURRENT_SCORE_PAYLOAD_VERSION = 'v3.score.1'
+export const CURRENT_SCORE_PAYLOAD_VERSION = 'v3.score.2'
 export const CURRENT_RUBRIC_VERSION = 'v3'
 export const CURRENT_CONTENT_PAYLOAD_VERSION = 'v3.content-evaluator.1'
 export const V2_SCORE_PAYLOAD_VERSION = 'v2.score.1'

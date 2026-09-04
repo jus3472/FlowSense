@@ -4,6 +4,7 @@ import { aggregateV3Progress } from '@/lib/progress/v3-aggregation'
 import { V3_METRIC_IDS } from '@/lib/scoring/v3/contracts'
 import {
   legacySectionSnapshot,
+  legacyV3Snapshot,
   progressAttempt,
   v2Snapshot,
   v3Snapshot,
@@ -17,19 +18,23 @@ describe('v3 progress aggregation', () => {
       [
         progressAttempt('earlier-v3', '2026-08-24T12:00:00.000Z', v3Snapshot({ component: 0.4 })),
         progressAttempt('later-v3', '2026-08-25T12:00:00.000Z', v3Snapshot({ component: 0.8 })),
+        progressAttempt('legacy-v3', '2026-08-23T18:00:00.000Z', legacyV3Snapshot()),
         progressAttempt('v2', '2026-08-23T12:00:00.000Z', v2Snapshot()),
         progressAttempt('legacy', '2026-08-22T12:00:00.000Z', legacySectionSnapshot),
       ],
       { now: NOW },
     )
 
-    expect(result.cohort).toEqual({ scoreVersion: 'v3.score.1', rubricVersion: 'v3' })
+    expect(result.cohort).toEqual({ scoreVersion: 'v3.score.2', rubricVersion: 'v3' })
     expect(result.counts).toMatchObject({
-      validV3: 2,
+      validV3: 3,
       selectedCohort: 2,
       earlierV2: 1,
       legacy: 1,
     })
+    expect(result.counts.excludedIncompatible).toBe(3)
+    expect(result.metricIds).toEqual(V3_METRIC_IDS)
+    expect(result.windows.all.metrics.time_to_first_word.points).toEqual([])
     expect(result.windows.all.overall.points.map((point) => point.attemptId)).toEqual([
       'earlier-v3',
       'later-v3',
@@ -80,5 +85,29 @@ describe('v3 progress aggregation', () => {
 
     expect(result.counts).toMatchObject({ validV3: 2, selectedCohort: 1, excludedMode: 1 })
     expect(result.windows.all.overall.points.map((point) => point.attemptId)).toEqual(['interview'])
+  })
+
+  it('retains the historical first-word series when v3.score.1 is the selected cohort', () => {
+    const result = aggregateV3Progress(
+      [
+        progressAttempt(
+          'legacy-a',
+          '2026-08-24T12:00:00.000Z',
+          legacyV3Snapshot({ component: 0.4 }),
+        ),
+        progressAttempt(
+          'legacy-b',
+          '2026-08-25T12:00:00.000Z',
+          legacyV3Snapshot({ component: 0.8 }),
+        ),
+      ],
+      { now: NOW },
+    )
+
+    expect(result.cohort?.scoreVersion).toBe('v3.score.1')
+    expect(result.metricIds).toContain('time_to_first_word')
+    expect(
+      result.windows.all.metrics.time_to_first_word.points.map((point) => point.value),
+    ).toEqual([40, 80])
   })
 })

@@ -5,6 +5,7 @@ import {
   V3_SCORE_PAYLOAD_VERSION,
   WHAT_YOU_SAID_METRICS,
   type HowYouSoundedMetricId,
+  type LegacyHowYouSoundedMetricId,
   type WhatYouSaidMetricId,
 } from '@/lib/scoring/v3/contracts'
 
@@ -14,6 +15,15 @@ export interface V3ModeScoringConfig {
   sections: {
     what_you_said: Readonly<Record<WhatYouSaidMetricId, number>>
     how_you_sounded: Readonly<Record<HowYouSoundedMetricId, number>>
+  }
+}
+
+export interface V3LegacyModeScoringConfig {
+  version: typeof V3_RUBRIC_VERSION
+  mode: PracticeMode
+  sections: {
+    what_you_said: Readonly<Record<WhatYouSaidMetricId, number>>
+    how_you_sounded: Readonly<Record<LegacyHowYouSoundedMetricId, number>>
   }
 }
 
@@ -81,7 +91,7 @@ export const V3_MODE_CONFIGS: Readonly<Record<PracticeMode, V3ModeScoringConfig>
       word_choice: 7,
       grammar: 7,
     },
-    { pace: 12, time_to_first_word: 5, paused_time: 10, articulation: 13, energy: 10 },
+    { pace: 12, paused_time: 15, articulation: 13, energy: 10 },
   ),
   interview: config(
     'interview',
@@ -93,7 +103,7 @@ export const V3_MODE_CONFIGS: Readonly<Record<PracticeMode, V3ModeScoringConfig>
       word_choice: 6,
       grammar: 5,
     },
-    { pace: 10, time_to_first_word: 6, paused_time: 9, articulation: 15, energy: 10 },
+    { pace: 10, paused_time: 15, articulation: 15, energy: 10 },
   ),
   presentation: config(
     'presentation',
@@ -105,7 +115,7 @@ export const V3_MODE_CONFIGS: Readonly<Record<PracticeMode, V3ModeScoringConfig>
       word_choice: 7,
       grammar: 6,
     },
-    { pace: 12, time_to_first_word: 3, paused_time: 9, articulation: 11, energy: 15 },
+    { pace: 12, paused_time: 12, articulation: 11, energy: 15 },
   ),
   conversation: config(
     'conversation',
@@ -117,9 +127,53 @@ export const V3_MODE_CONFIGS: Readonly<Record<PracticeMode, V3ModeScoringConfig>
       word_choice: 8,
       grammar: 8,
     },
-    { pace: 11, time_to_first_word: 4, paused_time: 10, articulation: 15, energy: 10 },
+    { pace: 11, paused_time: 14, articulation: 15, energy: 10 },
   ),
 })
+
+function legacyConfig(
+  mode: PracticeMode,
+  whatYouSaid: Record<WhatYouSaidMetricId, number>,
+  howYouSounded: Record<LegacyHowYouSoundedMetricId, number>,
+): V3LegacyModeScoringConfig {
+  return Object.freeze({
+    version: V3_RUBRIC_VERSION,
+    mode,
+    sections: Object.freeze({
+      what_you_said: Object.freeze({ ...whatYouSaid }),
+      how_you_sounded: Object.freeze({ ...howYouSounded }),
+    }),
+  })
+}
+
+/** Exact immutable weights used to validate and render v3.score.1 snapshots. */
+export const V3_LEGACY_MODE_CONFIGS: Readonly<Record<PracticeMode, V3LegacyModeScoringConfig>> =
+  Object.freeze({
+    practice: legacyConfig('practice', V3_MODE_CONFIGS.practice.sections.what_you_said, {
+      pace: 12,
+      time_to_first_word: 5,
+      paused_time: 10,
+      articulation: 13,
+      energy: 10,
+    }),
+    interview: legacyConfig('interview', V3_MODE_CONFIGS.interview.sections.what_you_said, {
+      pace: 10,
+      time_to_first_word: 6,
+      paused_time: 9,
+      articulation: 15,
+      energy: 10,
+    }),
+    presentation: legacyConfig(
+      'presentation',
+      V3_MODE_CONFIGS.presentation.sections.what_you_said,
+      { pace: 12, time_to_first_word: 3, paused_time: 9, articulation: 11, energy: 15 },
+    ),
+    conversation: legacyConfig(
+      'conversation',
+      V3_MODE_CONFIGS.conversation.sections.what_you_said,
+      { pace: 11, time_to_first_word: 4, paused_time: 10, articulation: 15, energy: 10 },
+    ),
+  })
 
 export const V3_SCORING_DEFINITION = Object.freeze({
   scorePayloadVersion: V3_SCORE_PAYLOAD_VERSION,

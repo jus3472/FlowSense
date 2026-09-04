@@ -7,15 +7,15 @@ import { Card } from '@/components/ui/card'
 import type { StructuredLessonResultModel } from '@/lib/curriculum/result'
 import type { RetryComparison } from '@/lib/results/retry-comparison'
 import {
-  V3_SECTION_VIEWS,
   v3EvidenceViews,
   v3MeasurementDetails,
   v3MetricResult,
   v3MetricStatus,
   v3PrimaryMeasurement,
+  v3SectionViews,
   v3TranscriptSegments,
 } from '@/lib/results/v3'
-import { V3_METRIC_LABELS, type V3ScorePayload } from '@/lib/scoring/v3/contracts'
+import { V3_METRIC_LABELS, type StoredV3ScorePayload } from '@/lib/scoring/v3/contracts'
 
 interface V3ResultsViewProps {
   attemptId: string
@@ -25,7 +25,7 @@ interface V3ResultsViewProps {
   durationMs: number
   audioUrl: string | null
   audioUnavailable?: boolean
-  payload: V3ScorePayload
+  payload: StoredV3ScorePayload
   comparison?: RetryComparison | null
   previousAttemptId?: string | null
   curriculumResult?: StructuredLessonResultModel | null
@@ -55,6 +55,7 @@ export function V3ResultsView({
 }: V3ResultsViewProps) {
   const complete = payload.total_earned_points !== null
   const transcriptSegments = v3TranscriptSegments(transcript, payload)
+  const sectionViews = v3SectionViews(payload)
 
   return (
     <div className="flex flex-col gap-8 pb-12">
@@ -143,7 +144,7 @@ export function V3ResultsView({
 
       <TranscriptPanel heading="Transcript" segments={transcriptSegments} />
 
-      {V3_SECTION_VIEWS.map((section) => {
+      {sectionViews.map((section) => {
         const storedSection = payload.sections[section.id]
         return (
           <section

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { decodeStoredSectionSnapshot } from '@/lib/results/snapshot'
-import { legacySectionSnapshot, v2Snapshot, v3Snapshot } from './helpers/result-snapshots'
+import {
+  legacySectionSnapshot,
+  legacyV3Snapshot,
+  v2Snapshot,
+  v3Snapshot,
+} from './helpers/result-snapshots'
 
 function withFluencyFields(fields: Record<string, unknown>): unknown {
   const snapshot = v2Snapshot()
@@ -39,6 +44,10 @@ describe('stored result snapshot decoder', () => {
 
   it('recognizes only strict complete and partial v3 snapshots', () => {
     expect(decodeStoredSectionSnapshot(v3Snapshot())).toMatchObject({ kind: 'v3' })
+    expect(decodeStoredSectionSnapshot(legacyV3Snapshot())).toMatchObject({
+      kind: 'v3',
+      payload: { version: 'v3.score.1' },
+    })
     expect(decodeStoredSectionSnapshot(v3Snapshot({ notCheckedMetric: 'grammar' }))).toMatchObject({
       kind: 'v3',
     })

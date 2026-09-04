@@ -16,7 +16,7 @@ import {
   type SkillCategory,
 } from '@/lib/practice/contracts'
 import { cn } from '@/lib/utils'
-import { V3_METRIC_IDS, V3_METRIC_LABELS } from '@/lib/scoring/v3/contracts'
+import { V3_METRIC_LABELS } from '@/lib/scoring/v3/contracts'
 
 const labels: Record<PracticeMode | SkillCategory, string> = {
   practice: 'Practice',
@@ -79,14 +79,13 @@ export function ProgressDashboard({
   const v3RetryComparisons = dashboard?.v3RetryComparisons ?? []
   const window = progress?.windows.all ?? null
   const v3Window = v3Progress?.windows.all ?? null
+  const v3MetricIds = v3Progress?.metricIds ?? []
   const hasV3 = (v3Progress?.counts.selectedCohort ?? 0) > 0
   const hasV2 = (progress?.counts.selectedCohort ?? 0) > 0
   const strongest = window ? selectCategory(window.categories, true) : null
   const needs = window ? selectCategory(window.categories, false) : null
-  const strongestV3 = v3Window
-    ? selectProgressDimension(V3_METRIC_IDS, v3Window.metrics, true)
-    : null
-  const needsV3 = v3Window ? selectProgressDimension(V3_METRIC_IDS, v3Window.metrics, false) : null
+  const strongestV3 = v3Window ? selectProgressDimension(v3MetricIds, v3Window.metrics, true) : null
+  const needsV3 = v3Window ? selectProgressDimension(v3MetricIds, v3Window.metrics, false) : null
   const hasLimitedSeries =
     window !== null &&
     (window.overall.state === 'insufficient_data' ||
@@ -101,7 +100,7 @@ export function ProgressDashboard({
   const hasLimitedV3Series =
     v3Window !== null &&
     (v3Window.overall.state === 'insufficient_data' ||
-      V3_METRIC_IDS.some((metric) => v3Window.metrics[metric].state === 'insufficient_data'))
+      v3MetricIds.some((metric) => v3Window.metrics[metric].state === 'insufficient_data'))
 
   return (
     <div className="flex flex-col gap-8 pb-12">
@@ -181,7 +180,7 @@ export function ProgressDashboard({
             </section>
 
             <section aria-label="Current metric trends" className="grid gap-3 sm:grid-cols-2">
-              {V3_METRIC_IDS.map((metric) => (
+              {v3MetricIds.map((metric) => (
                 <div key={metric} className="bg-surface rounded-card p-4">
                   <h3 className="text-muted text-sm">{V3_METRIC_LABELS[metric]}</h3>
                   <ProgressTrend

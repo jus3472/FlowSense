@@ -6,7 +6,7 @@ import {
   type MetricResult,
 } from '@/lib/scoring/mechanical'
 import type { V2ScorePayload } from '@/lib/scoring/v2/assemble'
-import type { V3ScorePayload } from '@/lib/scoring/v3/contracts'
+import type { StoredV3ScorePayload } from '@/lib/scoring/v3/contracts'
 import { decodeStoredSectionSnapshot, type LegacySectionSnapshot } from '@/lib/results/snapshot'
 import type { AttemptMetrics } from '@/lib/types/metrics'
 import type { AttemptView } from '@/lib/results/types'
@@ -27,7 +27,7 @@ export interface StoredAttemptResultInput {
 export type ReadAttemptResult =
   | { kind: 'legacy'; attempt: AttemptView }
   | { kind: 'v2'; payload: V2ScorePayload }
-  | { kind: 'v3'; payload: V3ScorePayload }
+  | { kind: 'v3'; payload: StoredV3ScorePayload }
   | { kind: 'incomplete' }
   | {
       kind: 'unsupported_version'

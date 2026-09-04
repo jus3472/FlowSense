@@ -13,6 +13,10 @@ const v3Progression = readFileSync(
   'supabase/migrations/20260903000100_v3_progression_compatibility.sql',
   'utf8',
 )
+const v3Score2Progression = readFileSync(
+  'supabase/migrations/20260904000100_v3_score_2_progression_compatibility.sql',
+  'utf8',
+)
 
 const NAMESPACE = 'c8f6a2e4-2d9b-5a1c-8e73-1f4b6d9a2057'
 
@@ -253,6 +257,19 @@ describe('curriculum schema and stable seed', () => {
     expect(v3Progression).toContain(
       'create or replace function public.raise_lesson_progress_from_attempt()',
     )
+  })
+
+  it('adds v3.score.2 as a separate exact progression shape', () => {
+    expect(v3Score2Progression).toContain('rename to is_valid_v3_score_1_payload_for_attempt')
+    expect(v3Score2Progression).toContain(
+      'create or replace function public.is_valid_v3_score_2_payload_for_attempt',
+    )
+    expect(v3Score2Progression).toContain("payload ->> 'version' is distinct from 'v3.score.2'")
+    expect(v3Score2Progression).toContain('section_count <> 2 or metric_count <> 10')
+    expect(v3Score2Progression).toContain("array['pace', 'paused_time', 'articulation', 'energy']")
+    expect(v3Score2Progression).toContain("when 'v3.score.1' then")
+    expect(v3Score2Progression).toContain("when 'v3.score.2' then")
+    expect(v3Score2Progression).not.toContain("'time_to_first_word', 'paused_time'")
   })
 
   it('maps legacy focus areas in canonical order and gives future users General Speaking', () => {
