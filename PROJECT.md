@@ -63,8 +63,9 @@ New attempts use rubric `v3` and payload `v3.score.2`. Historical `v3.score.1` p
 original five-metric How You Sounded section and remain authoritative. The two sections are always worth 50 points.
 DeepSeek evaluates only the six content metrics as normalized components under a strict schema.
 DeepSeek owns context-aware fillers and the other semantic Conciseness findings. Code retains only
-clear false starts and restarts within Conciseness, validates exact UTF-16 evidence, and prevents
-overlap between structural and AI findings. The four current audio metrics are pure over stored
+clear false starts and restarts within Conciseness, validates exact UTF-16 evidence, requires an
+explicit occurrence for repeated quotes, supports multiple exact spans for one repeated idea, and
+prevents overlap between structural and AI findings. The four current audio metrics are pure over stored
 capture evidence and the final Deepgram word array:
 
 - Pace is articulation rate: timed words divided by active speaking time after detected silence is removed.

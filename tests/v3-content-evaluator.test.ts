@@ -1,4 +1,4 @@
-import { CONTENT_PROVIDER_UNAVAILABLE_MESSAGE, type ContentModel } from '@/lib/deepseek/provider'
+import { ContentProviderFailure, type ContentModel } from '@/lib/deepseek/provider'
 import {
   V3_CONTENT_EVALUATOR_VERSION,
   type V3ContentEvaluatorProvider,
@@ -8,6 +8,8 @@ import { v3ContentEvaluatorFromModel } from '@/lib/scoring/v3/content/adapter'
 import {
   parseV3ContentResponse,
   runV3ContentEvaluation,
+  V3_CONTENT_CHECK_INVALID_MESSAGE,
+  V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE,
   V3ContentParseError,
 } from '@/lib/scoring/v3/content/evaluate'
 import { legacyContentEvidenceInput, v3ContentEvidenceInput } from '@/lib/scoring/v3/content/input'
@@ -17,6 +19,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { wordsFrom } from './helpers/transcript'
 
 const TRANSCRIPT = 'Um I led the launch. The result was clear and useful.'
+const REAL_ATTEMPT_TRANSCRIPT =
+  "One place I really like to spend time in is my car. I really like my car because it has a great speaker, and so I can play music. It's a quiet place where I could think. I also just like driving a lot, find it very fun, and that's about it."
 
 function metric(overrides: Record<string, unknown> = {}) {
   return { component: 1, explanation: 'You complete this metric.', findings: [], ...overrides }
@@ -33,8 +37,22 @@ function finding(
     quote,
     start,
     end: quote === null ? null : (start as number) + quote.length,
+    occurrence: quote === null ? null : 1,
+    supporting_spans: [],
     observation: 'This phrase shows the issue.',
     suggestion: 'Use a specific alternative.',
+  }
+}
+
+function repeatedIdeaFinding(transcript: string, quotes: readonly [string, string]) {
+  return {
+    ...finding('repeated_idea', null, transcript),
+    supporting_spans: quotes.map((quote) => ({
+      quote,
+      start: transcript.indexOf(quote),
+      end: transcript.indexOf(quote) + quote.length,
+      occurrence: 1,
+    })),
   }
 }
 
@@ -71,6 +89,24 @@ async function evaluateTranscript(transcript: string, conciseness: ReturnType<ty
 }
 
 describe('v3 content evaluator contract', () => {
+  it('scores all six metrics for the real-attempt transcript shape', async () => {
+    const complete = vi.fn().mockResolvedValue(response())
+    const evaluated = await runV3ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt:
+        'Describe a place where you like to spend time. Include two details someone could picture.',
+      transcript: REAL_ATTEMPT_TRANSCRIPT,
+      ...v3ContentEvidenceInput(REAL_ATTEMPT_TRANSCRIPT, wordsFrom(REAL_ATTEMPT_TRANSCRIPT)),
+    })
+
+    expect(evaluated.status).toBe('checked')
+    expect(Object.values(evaluated.metrics)).toHaveLength(6)
+    expect(Object.values(evaluated.metrics).every((result) => result.status === 'scored')).toBe(
+      true,
+    )
+  })
+
   it('returns exactly six normalized What You Said metrics', () => {
     const parsed = parseV3ContentResponse(
       response({
@@ -139,7 +175,9 @@ describe('v3 content evaluator contract', () => {
 
   it('rejects offset repair when the quote is ambiguous', () => {
     const transcript = 'work can clarify work.'
-    expect(() =>
+    const ambiguousFinding = finding('vague_wording', 'work', transcript)
+    delete ambiguousFinding.occurrence
+    try {
       parseV3ContentResponse(
         response({
           word_choice: metric({
@@ -147,7 +185,7 @@ describe('v3 content evaluator contract', () => {
             explanation: 'You repeat one broad word.',
             findings: [
               {
-                ...finding('vague_wording', 'work', transcript),
+                ...ambiguousFinding,
                 start: 2,
                 end: 6,
               },
@@ -155,8 +193,67 @@ describe('v3 content evaluator contract', () => {
           }),
         }),
         { transcript },
+      )
+      expect.unreachable('Expected ambiguous evidence to fail closed.')
+    } catch (error) {
+      expect(error).toMatchObject({ reason: 'ambiguous_evidence', metric: 'word_choice' })
+    }
+  })
+
+  it('uses an explicit occurrence to repair an ambiguous quote without guessing', () => {
+    const transcript = 'work can clarify work.'
+    const parsed = parseV3ContentResponse(
+      response({
+        word_choice: metric({
+          component: 0.8,
+          explanation: 'You use one broad word.',
+          findings: [
+            {
+              ...finding('vague_wording', 'work', transcript),
+              start: 0,
+              end: 0,
+              occurrence: 2,
+            },
+          ],
+        }),
+      }),
+      { transcript },
+    )
+
+    expect(parsed.metrics.word_choice.evidence[0]).toMatchObject({ start: 17, end: 21 })
+  })
+
+  it('rejects a malformed occurrence even when the quote and offsets match', () => {
+    expect(() =>
+      parseV3ContentResponse(
+        response({
+          word_choice: metric({
+            component: 0.8,
+            findings: [{ ...finding('vague_wording', 'useful'), occurrence: 0 }],
+          }),
+        }),
+        { transcript: TRANSCRIPT },
       ),
-    ).toThrow(/did not match the transcript/)
+    ).toThrow(/invalid occurrence/)
+
+    expect(() =>
+      parseV3ContentResponse(
+        response({
+          word_choice: metric({
+            component: 0.8,
+            findings: [
+              {
+                ...finding('vague_wording', 'useful'),
+                start: 0,
+                end: 0,
+                occurrence: 2,
+              },
+            ],
+          }),
+        }),
+        { transcript: TRANSCRIPT },
+      ),
+    ).toThrow(/locators were inconsistent/)
   })
 
   it('allows response-level repetition without a fabricated contiguous quote', () => {
@@ -176,6 +273,63 @@ describe('v3 content evaluator contract', () => {
       quote: null,
       evidence: [],
     })
+  })
+
+  it('normalizes separate exact spans for one repeated idea', () => {
+    const first = 'One place I really like to spend time in is my car.'
+    const second = 'I really like my car because it has a great speaker'
+    const parsed = parseV3ContentResponse(
+      response({
+        conciseness: metric({
+          component: 0.82,
+          explanation: 'You repeat that you like your car.',
+          findings: [repeatedIdeaFinding(REAL_ATTEMPT_TRANSCRIPT, [first, second])],
+        }),
+      }),
+      { transcript: REAL_ATTEMPT_TRANSCRIPT },
+    )
+
+    expect(parsed.metrics.conciseness.details[0]).toMatchObject({
+      kind: 'repeated_idea',
+      quote: null,
+    })
+    expect(parsed.metrics.conciseness.details[0]?.evidence.map((item) => item.quote)).toEqual([
+      first,
+      second,
+    ])
+  })
+
+  it('rejects whole-response filler evidence and invented supporting spans', () => {
+    expect(() =>
+      parseV3ContentResponse(
+        response({
+          conciseness: metric({
+            component: 0.8,
+            findings: [finding('filler', null)],
+          }),
+        }),
+        { transcript: TRANSCRIPT },
+      ),
+    ).toThrow(/invalid whole-response evidence/)
+
+    const repeated = repeatedIdeaFinding(REAL_ATTEMPT_TRANSCRIPT, [
+      'One place I really like to spend time in is my car.',
+      'I really like my car because it has a great speaker',
+    ])
+    repeated.supporting_spans[1] = {
+      quote: 'invented supporting text',
+      start: 0,
+      end: 24,
+      occurrence: 1,
+    }
+    expect(() =>
+      parseV3ContentResponse(
+        response({
+          conciseness: metric({ component: 0.8, findings: [repeated] }),
+        }),
+        { transcript: REAL_ATTEMPT_TRANSCRIPT },
+      ),
+    ).toThrow(/did not match the transcript/)
   })
 
   it.each([
@@ -332,6 +486,38 @@ describe('v3 content evaluator contract', () => {
       expect(evaluated.metrics.conciseness.details[0]?.kind).toBe('filler')
     })
 
+    it('accepts a closer as contextual filler without hardcoding it', async () => {
+      const { evaluated, evidenceInput } = await evaluateTranscript(
+        REAL_ATTEMPT_TRANSCRIPT,
+        metric({
+          component: 0.86,
+          explanation: 'You end with a phrase that adds no useful meaning here.',
+          findings: [finding('filler', "and that's about it", REAL_ATTEMPT_TRANSCRIPT)],
+        }),
+      )
+
+      expect(evidenceInput.mechanicallyOwned).toEqual([])
+      expect(evaluated.metrics.conciseness).toMatchObject({
+        component: 0.86,
+        measurements: { filler_count: 1 },
+      })
+      expect(evaluated.metrics.conciseness.evidence[0]?.quote).toBe("and that's about it")
+    })
+
+    it('keeps just and meaningful uses of like uncharged unless the model finds an issue', async () => {
+      const { evaluated, evidenceInput } = await evaluateTranscript(
+        REAL_ATTEMPT_TRANSCRIPT,
+        metric(),
+      )
+
+      expect(evidenceInput.mechanicallyOwned).toEqual([])
+      expect(evaluated.metrics.conciseness).toMatchObject({
+        component: 1,
+        measurements: { filler_count: 0 },
+        details: [],
+      })
+    })
+
     it('assigns a filler finding only to Conciseness', async () => {
       const transcript = 'Um, I led the launch.'
       const { evaluated } = await evaluateTranscript(
@@ -453,7 +639,7 @@ describe('v3 content evaluator contract', () => {
     expect(complete).toHaveBeenCalledTimes(2)
     expect(evaluated.status).toBe('not_checked')
     expect(evaluated.calls).toBe(2)
-    expect(evaluated.warnings).toEqual([CONTENT_PROVIDER_UNAVAILABLE_MESSAGE])
+    expect(evaluated.warnings).toEqual([V3_CONTENT_CHECK_INVALID_MESSAGE])
     expect(evaluated.diagnostic).toMatchObject({
       category: 'provider_invalid_response',
       code: 'schema_invalid',
@@ -503,6 +689,28 @@ describe('v3 content evaluator contract', () => {
     })
     expect(evaluated.status).toBe('checked')
     expect(evaluated.calls).toBe(2)
+    expect(complete.mock.calls[1]?.[0].retryInstruction).toContain('failed validation')
+  })
+
+  it('uses outage copy only for an actual provider availability failure', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const complete = vi
+      .fn<V3ContentEvaluatorProvider['complete']>()
+      .mockRejectedValue(new ContentProviderFailure('timeout', 'test-model'))
+    const evaluated = await runV3ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: 'Describe your role.',
+      transcript: TRANSCRIPT,
+    })
+    warn.mockRestore()
+
+    expect(evaluated.status).toBe('not_checked')
+    expect(evaluated.warnings).toEqual([V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE])
+    expect(evaluated.diagnostic).toMatchObject({
+      category: 'provider_unavailable',
+      code: 'timeout',
+    })
   })
 
   it('keeps the adapter vendor-neutral and requests only visible content metrics', async () => {
@@ -533,6 +741,21 @@ describe('v3 content evaluator contract', () => {
     expect(request?.system).toContain('filler words or phrases')
     expect(request?.system).toContain('not from a fixed vocabulary list')
     expect(request?.system).toContain('A word such as "like" or "honestly" is not a filler')
+    expect(request?.system).toContain('Repeated wording is not filler')
+    expect(request?.system).toContain('supporting_spans')
+    const user = JSON.parse(request?.user ?? '{}') as {
+      allowed_finding_kinds?: { conciseness?: unknown }
+      response_shape?: {
+        metrics?: { conciseness?: { findings?: Array<Record<string, unknown>> } }
+      }
+    }
+    expect(user.allowed_finding_kinds?.conciseness).toContain('repeated_idea')
+    expect(user.response_shape?.metrics?.conciseness?.findings?.[0]).toMatchObject({
+      kind: 'filler',
+      quote: 'exact transcript words',
+      occurrence: 1,
+      supporting_spans: [],
+    })
     expect(request?.system).not.toContain('executive presence')
   })
 })

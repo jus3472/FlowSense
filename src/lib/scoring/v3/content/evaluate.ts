@@ -1,5 +1,4 @@
 import {
-  CONTENT_PROVIDER_UNAVAILABLE_MESSAGE,
   ContentProviderFailure,
   isRetryableContentProviderFailure,
   reportContentProviderFailure,
@@ -62,8 +61,12 @@ const CLAIM_PRECEDENCE = [
   'word_choice',
 ] as const satisfies readonly WhatYouSaidMetricId[]
 const MAX_FINDINGS_PER_METRIC = 8
+const MAX_SUPPORTING_SPANS = 4
 const MAX_EXPLANATION_LENGTH = 500
 const MAX_DETAIL_LENGTH = 500
+
+export const V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE = 'The content check could not be completed.'
+export const V3_CONTENT_CHECK_INVALID_MESSAGE = 'Some content checks could not be completed.'
 
 export const STRUCTURAL_CONCISENESS_REDUCTION: Readonly<Record<MechanicalConcisenessKind, number>> =
   Object.freeze({ false_start: 0.06 })
@@ -83,6 +86,8 @@ export class V3ContentParseError extends Error {
 
 const CONTENT_VALIDATION_REASONS = new Set([
   'whole_response_evidence_invalid',
+  'ambiguous_evidence',
+  'evidence_locator_inconsistent',
   'evidence_not_in_transcript',
   'evidence_overlaps_unreliable',
   'evidence_overlaps_mechanical',
@@ -124,20 +129,53 @@ function validSpan(span: V3TranscriptSpan, transcript: string): boolean {
   )
 }
 
+type SpanResolution =
+  | { span: V3TranscriptSpan; reason: null }
+  | {
+      span: null
+      reason: 'ambiguous_evidence' | 'evidence_locator_inconsistent' | 'evidence_not_in_transcript'
+    }
+
+function quoteOffsets(transcript: string, quote: string): number[] {
+  const offsets: number[] = []
+  let located = transcript.indexOf(quote)
+  while (located >= 0) {
+    offsets.push(located)
+    located = transcript.indexOf(quote, located + 1)
+  }
+  return offsets
+}
+
 function resolvedTranscriptSpan(
   start: unknown,
   end: unknown,
   quote: string,
   transcript: string,
-): V3TranscriptSpan | null {
+  occurrence: unknown,
+): SpanResolution {
+  const offsets = quoteOffsets(transcript, quote)
+  if (offsets.length === 0) return { span: null, reason: 'evidence_not_in_transcript' }
+  const selectedOccurrence =
+    Number.isInteger(occurrence) && (occurrence as number) >= 1 ? (occurrence as number) : null
   const supplied = { start, end } as V3TranscriptSpan
   if (validSpan(supplied, transcript) && transcript.slice(supplied.start, supplied.end) === quote) {
-    return supplied
+    if (selectedOccurrence !== null && offsets[selectedOccurrence - 1] !== supplied.start) {
+      return { span: null, reason: 'evidence_locator_inconsistent' }
+    }
+    return { span: supplied, reason: null }
   }
 
-  const located = transcript.indexOf(quote)
-  if (located < 0 || transcript.indexOf(quote, located + 1) >= 0) return null
-  return { start: located, end: located + quote.length }
+  if (offsets.length === 1) {
+    if (selectedOccurrence !== null && selectedOccurrence !== 1) {
+      return { span: null, reason: 'evidence_locator_inconsistent' }
+    }
+    return { span: { start: offsets[0]!, end: offsets[0]! + quote.length }, reason: null }
+  }
+  if (selectedOccurrence === null || selectedOccurrence > offsets.length) {
+    return { span: null, reason: 'ambiguous_evidence' }
+  }
+  const located = offsets[selectedOccurrence - 1]!
+  return { span: { start: located, end: located + quote.length }, reason: null }
 }
 
 function validMechanicalSpan(span: V3MechanicallyOwnedSpan, transcript: string): boolean {
@@ -239,6 +277,26 @@ function reportFinalDiagnostic(
   })
 }
 
+function retryInstructionFor(error: V3ContentParseError): string {
+  const metric = error.metric ? ` for ${error.metric}` : ''
+  if (error.reason === 'ambiguous_evidence') {
+    return `The previous response used ambiguous transcript evidence${metric}. Set occurrence to the intended one-based occurrence, or copy a longer exact quote that occurs once. For a repeated idea across separated text, use null primary evidence and two or more exact supporting_spans.`
+  }
+  if (error.reason === 'evidence_not_in_transcript') {
+    return `The previous response used evidence${metric} that did not match the transcript. Copy exact transcript text. Do not estimate offsets; expand each quote until it occurs once so offsets can be safely repaired.`
+  }
+  if (error.reason === 'whole_response_evidence_invalid') {
+    return `The previous response used an invalid evidence shape${metric}. Use null primary evidence only for allowed whole-response findings or a repeated_idea with two or more exact supporting_spans. Every filler needs one exact contiguous quote.`
+  }
+  return `The previous response failed validation${metric}. Return only a corrected object that exactly follows response_shape and allowed_finding_kinds.`
+}
+
+function warningFor(diagnostic: V3ContentFailureDiagnostic): string {
+  return diagnostic.category === 'provider_unavailable'
+    ? V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE
+    : V3_CONTENT_CHECK_INVALID_MESSAGE
+}
+
 interface ParseContext {
   transcript: string
   mechanicallyOwned: readonly V3MechanicallyOwnedSpan[]
@@ -246,54 +304,52 @@ interface ParseContext {
   claimed: V3TranscriptSpan[]
 }
 
-function parseFinding(
+function claimedEvidence(
   value: unknown,
   metric: WhatYouSaidMetricId,
   context: ParseContext,
-): V3MetricDetail {
+): V3ScoreEvidence {
   if (
     !isRecord(value) ||
-    !exactKeys(value, ['kind', 'quote', 'start', 'end', 'observation', 'suggestion'])
+    (!exactKeys(value, ['quote', 'start', 'end']) &&
+      !exactKeys(value, ['quote', 'start', 'end', 'occurrence']))
   ) {
-    throw new V3ContentParseError('schema_invalid', `${metric} contained a malformed finding.`)
-  }
-  const kind = boundedText(value.kind)
-  const observation = boundedText(value.observation)
-  const suggestion = nullableBoundedText(value.suggestion)
-  if (!kind || !FINDING_KINDS[metric].includes(kind) || !observation || suggestion === undefined) {
-    throw new V3ContentParseError('schema_invalid', `${metric} contained a malformed finding.`)
-  }
-
-  if (value.quote === null) {
-    const responseLevelRepetition = metric === 'conciseness' && kind === 'repeated_idea'
-    if (
-      (!NULL_EVIDENCE_METRICS.has(metric) && !responseLevelRepetition) ||
-      value.start !== null ||
-      value.end !== null
-    ) {
-      throw new V3ContentParseError(
-        'schema_invalid',
-        `${metric} contained invalid whole-response evidence.`,
-        'whole_response_evidence_invalid',
-        metric,
-      )
-    }
-    return { kind, source: 'ai', quote: null, observation, suggestion, evidence: [] }
-  }
-
-  const quote = boundedText(value.quote)
-  const span = quote
-    ? resolvedTranscriptSpan(value.start, value.end, quote, context.transcript)
-    : null
-  if (!quote || !span) {
     throw new V3ContentParseError(
       'schema_invalid',
-      `${metric} evidence did not match the transcript.`,
+      `${metric} contained malformed supporting evidence.`,
       'evidence_not_in_transcript',
       metric,
     )
   }
-  const evidenceSpan = span
+  if (
+    'occurrence' in value &&
+    (!Number.isInteger(value.occurrence) || (value.occurrence as number) < 1)
+  ) {
+    throw new V3ContentParseError(
+      'schema_invalid',
+      `${metric} evidence contained an invalid occurrence.`,
+      'evidence_locator_inconsistent',
+      metric,
+    )
+  }
+  const quote = boundedText(value.quote)
+  const resolution = quote
+    ? resolvedTranscriptSpan(value.start, value.end, quote, context.transcript, value.occurrence)
+    : { span: null, reason: 'evidence_not_in_transcript' as const }
+  if (!quote || !resolution.span) {
+    const reason = resolution.reason ?? 'evidence_not_in_transcript'
+    throw new V3ContentParseError(
+      'schema_invalid',
+      reason === 'ambiguous_evidence'
+        ? `${metric} evidence was ambiguous in the transcript.`
+        : reason === 'evidence_locator_inconsistent'
+          ? `${metric} evidence locators were inconsistent.`
+          : `${metric} evidence did not match the transcript.`,
+      reason,
+      metric,
+    )
+  }
+  const evidenceSpan = resolution.span
   if (context.unreliable.some((candidate) => overlaps(candidate, evidenceSpan))) {
     throw new V3ContentParseError(
       'schema_invalid',
@@ -313,21 +369,137 @@ function parseFinding(
   if (context.claimed.some((candidate) => overlaps(candidate, evidenceSpan))) {
     throw new V3ContentParseError(
       'schema_invalid',
-      `${metric} attempted to reuse speech owned by another metric.`,
+      `${metric} attempted to reuse speech owned by another metric or finding.`,
       'evidence_overlaps_metric',
       metric,
     )
   }
   context.claimed.push(evidenceSpan)
-  const evidence: V3ScoreEvidence = {
+  return {
     source: 'transcript',
     start: evidenceSpan.start,
     end: evidenceSpan.end,
     coordinate: { space: 'transcript', unit: 'utf16_code_unit' },
     quote,
-    detail: observation,
+    detail: '',
   }
-  return { kind, source: 'ai', quote, observation, suggestion, evidence: [evidence] }
+}
+
+function parseFinding(
+  value: unknown,
+  metric: WhatYouSaidMetricId,
+  context: ParseContext,
+): V3MetricDetail {
+  const legacyKeys = ['kind', 'quote', 'start', 'end', 'observation', 'suggestion'] as const
+  const currentKeys = [
+    'kind',
+    'quote',
+    'start',
+    'end',
+    'supporting_spans',
+    'observation',
+    'suggestion',
+  ] as const
+  const occurrenceKeys = [
+    'kind',
+    'quote',
+    'start',
+    'end',
+    'occurrence',
+    'supporting_spans',
+    'observation',
+    'suggestion',
+  ] as const
+  if (
+    !isRecord(value) ||
+    (!exactKeys(value, legacyKeys) &&
+      !exactKeys(value, currentKeys) &&
+      !exactKeys(value, occurrenceKeys))
+  ) {
+    throw new V3ContentParseError('schema_invalid', `${metric} contained a malformed finding.`)
+  }
+  const kind = boundedText(value.kind)
+  const observation = boundedText(value.observation)
+  const suggestion = nullableBoundedText(value.suggestion)
+  if (!kind || !FINDING_KINDS[metric].includes(kind) || !observation || suggestion === undefined) {
+    throw new V3ContentParseError('schema_invalid', `${metric} contained a malformed finding.`)
+  }
+
+  const supportingSpans = 'supporting_spans' in value ? value.supporting_spans : []
+  if (!Array.isArray(supportingSpans) || supportingSpans.length > MAX_SUPPORTING_SPANS) {
+    throw new V3ContentParseError(
+      'schema_invalid',
+      `${metric} contained malformed supporting evidence.`,
+      'whole_response_evidence_invalid',
+      metric,
+    )
+  }
+
+  if (value.quote === null) {
+    const responseLevelRepetition = metric === 'conciseness' && kind === 'repeated_idea'
+    if (
+      (!NULL_EVIDENCE_METRICS.has(metric) && !responseLevelRepetition) ||
+      value.start !== null ||
+      value.end !== null ||
+      ('occurrence' in value && value.occurrence !== null)
+    ) {
+      throw new V3ContentParseError(
+        'schema_invalid',
+        `${metric} contained invalid whole-response evidence.`,
+        'whole_response_evidence_invalid',
+        metric,
+      )
+    }
+    if (supportingSpans.length > 0 && (!responseLevelRepetition || supportingSpans.length < 2)) {
+      throw new V3ContentParseError(
+        'schema_invalid',
+        `${metric} contained invalid noncontiguous evidence.`,
+        'whole_response_evidence_invalid',
+        metric,
+      )
+    }
+    const evidence = supportingSpans.map((span) => ({
+      ...claimedEvidence(span, metric, context),
+      detail: observation,
+    }))
+    return { kind, source: 'ai', quote: null, observation, suggestion, evidence }
+  }
+
+  const quote = boundedText(value.quote)
+  if (supportingSpans.length > 0) {
+    throw new V3ContentParseError(
+      'schema_invalid',
+      `${metric} mixed contiguous and noncontiguous evidence.`,
+      'whole_response_evidence_invalid',
+      metric,
+    )
+  }
+  const evidence = claimedEvidence(
+    {
+      quote,
+      start: value.start,
+      end: value.end,
+      ...('occurrence' in value ? { occurrence: value.occurrence } : {}),
+    },
+    metric,
+    context,
+  )
+  if (!quote) {
+    throw new V3ContentParseError(
+      'schema_invalid',
+      `${metric} evidence did not match the transcript.`,
+      'evidence_not_in_transcript',
+      metric,
+    )
+  }
+  return {
+    kind,
+    source: 'ai',
+    quote,
+    observation,
+    suggestion,
+    evidence: [{ ...evidence, detail: observation }],
+  }
 }
 
 function parseMetric(
@@ -541,6 +713,7 @@ export async function runV3ContentEvaluation(
   ).filter((span) => !unreliableTranscriptSpans.some((candidate) => overlaps(candidate, span)))
 
   let calls = 0
+  let retryInstruction: string | undefined
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       calls += 1
@@ -552,6 +725,7 @@ export async function runV3ContentEvaluation(
         mechanicallyOwned,
         unreliableTranscriptSpans,
         timeoutMs: input.timeoutMs,
+        retryInstruction,
       })
       return {
         ...parseV3ContentResponse(raw, {
@@ -567,14 +741,17 @@ export async function runV3ContentEvaluation(
         error instanceof V3ContentParseError
           ? new ContentProviderFailure(error.code, input.provider.name)
           : reportContentProviderFailure(error, input.provider.name)
-      if (attempt === 0 && isRetryableContentProviderFailure(failure)) continue
+      if (attempt === 0 && isRetryableContentProviderFailure(failure)) {
+        if (error instanceof V3ContentParseError) retryInstruction = retryInstructionFor(error)
+        continue
+      }
       const diagnostic = diagnosticFor(error, failure)
       reportFinalDiagnostic(input, calls, diagnostic)
       return {
-        ...notChecked(input.provider.name, CONTENT_PROVIDER_UNAVAILABLE_MESSAGE, calls),
+        ...notChecked(input.provider.name, warningFor(diagnostic), calls),
         diagnostic,
       }
     }
   }
-  return notChecked(input.provider.name, CONTENT_PROVIDER_UNAVAILABLE_MESSAGE, calls)
+  return notChecked(input.provider.name, V3_CONTENT_CHECK_INVALID_MESSAGE, calls)
 }

@@ -178,4 +178,52 @@ describe('v3 result presentation helpers', () => {
       label: 'Conciseness: This opening functions as unnecessary filler.',
     })
   })
+
+  it('renders each validated span for one noncontiguous Conciseness observation', () => {
+    const transcript = 'I like my car. I enjoy spending time in my car.'
+    const detail = 'These two spans repeat the same idea.'
+    const payload = v3Snapshot({
+      component: 0.82,
+      evidenceMetric: 'conciseness',
+      evidence: [
+        {
+          source: 'transcript',
+          start: 0,
+          end: 13,
+          coordinate: { space: 'transcript', unit: 'utf16_code_unit' },
+          quote: 'I like my car',
+          detail,
+        },
+        {
+          source: 'transcript',
+          start: 15,
+          end: 46,
+          coordinate: { space: 'transcript', unit: 'utf16_code_unit' },
+          quote: 'I enjoy spending time in my car',
+          detail,
+        },
+      ],
+    })
+
+    const conciseness = payload.sections.what_you_said.metrics.conciseness
+    const withGroupedFinding = {
+      ...conciseness,
+      details: [
+        {
+          kind: 'repeated_idea',
+          source: 'ai' as const,
+          quote: null,
+          observation: detail,
+          suggestion: 'State the idea once.',
+          evidence: conciseness.evidence,
+        },
+      ],
+    }
+    expect(v3EvidenceViews(withGroupedFinding).map((item) => item.text)).toEqual([detail])
+    expect(
+      v3TranscriptSegments(transcript, payload)
+        .filter((segment) => segment.type === 'highlight')
+        .map((segment) => segment.text),
+    ).toEqual(['I like my car', 'I enjoy spending time in my car'])
+  })
 })

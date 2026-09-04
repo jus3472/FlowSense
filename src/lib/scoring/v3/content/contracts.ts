@@ -29,6 +29,8 @@ export interface V3ContentEvaluatorRequest {
   mechanicallyOwned: readonly V3MechanicallyOwnedSpan[]
   unreliableTranscriptSpans: readonly V3TranscriptSpan[]
   timeoutMs?: number
+  /** Bounded validator guidance included only on the single retry. */
+  retryInstruction?: string
 }
 
 export interface V3ContentEvaluatorProvider {

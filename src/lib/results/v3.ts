@@ -185,11 +185,18 @@ function evidenceText(evidence: V3ScoreEvidence): string {
 }
 
 export function v3EvidenceViews(result: V3PersistedMetricScore): V3EvidenceView[] {
+  const multiSpanObservations = new Set(
+    result.details
+      .filter((detail) => detail.quote === null && detail.evidence.length > 1)
+      .map((detail) => detail.observation),
+  )
   const lines = [
     ...result.details.map((detail) =>
       detail.quote ? `“${detail.quote}” ${detail.observation}` : detail.observation,
     ),
-    ...result.evidence.map(evidenceText),
+    ...result.evidence
+      .filter((evidence) => !multiSpanObservations.has(evidence.detail))
+      .map(evidenceText),
   ]
   return [...new Set(lines)].map((text, index) => ({ key: `${index}:${text}`, text }))
 }
