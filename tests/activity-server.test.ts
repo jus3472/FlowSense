@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { legacySectionSnapshot, v2Snapshot } from './helpers/result-snapshots'
+import { legacySectionSnapshot, v2Snapshot, v3Snapshot } from './helpers/result-snapshots'
 
 vi.mock('server-only', () => ({}))
 
@@ -69,6 +69,14 @@ beforeEach(() => vi.restoreAllMocks())
 
 describe('recordPracticeActivityDay', () => {
   it.each([
+    [
+      'new-schema below the lesson threshold',
+      attempt({ sectionScores: v3Snapshot({ component: 0.6 }) }),
+    ],
+    [
+      'new-schema provider neutral',
+      attempt({ score: null, sectionScores: v3Snapshot({ unavailableMetric: 'energy' }) }),
+    ],
     ['below the lesson threshold', attempt({ sectionScores: v2Snapshot({ component: 0.6 }) })],
     ['above the lesson threshold', attempt({ sectionScores: v2Snapshot({ component: 0.9 }) })],
     [

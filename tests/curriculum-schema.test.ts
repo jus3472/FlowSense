@@ -9,6 +9,10 @@ const backfill = readFileSync(
   'utf8',
 )
 const activity = readFileSync('supabase/migrations/20260828000400_practice_activity.sql', 'utf8')
+const v3Progression = readFileSync(
+  'supabase/migrations/20260903000100_v3_progression_compatibility.sql',
+  'utf8',
+)
 
 const NAMESPACE = 'c8f6a2e4-2d9b-5a1c-8e73-1f4b6d9a2057'
 
@@ -213,6 +217,42 @@ describe('curriculum schema and stable seed', () => {
     expect(schema).toContain('practice_paths_enforce_identity')
     expect(schema).toContain('practice_chapters_enforce_identity')
     expect(schema).toContain('practice_lessons_enforce_identity')
+  })
+
+  it('adds an exact v3 progression cohort without weakening the v2 boundary', () => {
+    expect(v3Progression).toContain(
+      'create or replace function public.is_valid_v3_score_payload_for_attempt',
+    )
+    expect(v3Progression).toContain("payload ->> 'version' is distinct from 'v3.score.1'")
+    expect(v3Progression).toContain("payload ->> 'rubric_version' is distinct from 'v3'")
+    expect(v3Progression).toContain('section_count <> 2 or metric_count <> 11')
+    expect(v3Progression).toContain('section_max_sum <> 50')
+    expect(v3Progression).toContain("when 'v2' then public.is_valid_v2_score_payload_for_attempt(")
+    expect(v3Progression).toContain("when 'v3' then public.is_valid_v3_score_payload_for_attempt(")
+    for (const metric of [
+      'answered_prompt',
+      'specificity',
+      'structure',
+      'conciseness',
+      'word_choice',
+      'grammar',
+      'pace',
+      'time_to_first_word',
+      'paused_time',
+      'articulation',
+      'energy',
+    ]) {
+      expect(v3Progression).toContain(`'${metric}'`)
+    }
+    expect(v3Progression).toMatch(
+      /revoke all privileges on function public\.is_valid_v3_score_payload_for_attempt\([\s\S]*?from public, anon, authenticated, service_role;/,
+    )
+    expect(v3Progression).toMatch(
+      /grant execute on function public\.is_valid_v3_score_payload_for_attempt\([\s\S]*?to service_role;/,
+    )
+    expect(v3Progression).toContain(
+      'create or replace function public.raise_lesson_progress_from_attempt()',
+    )
   })
 
   it('maps legacy focus areas in canonical order and gives future users General Speaking', () => {

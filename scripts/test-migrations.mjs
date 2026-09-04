@@ -283,6 +283,7 @@ async function assertGrantHardening(label) {
     'replace_profile_path_preferences',
     'raise_lesson_progress_from_attempt',
     'is_valid_v2_score_payload_for_attempt',
+    'is_valid_v3_score_payload_for_attempt',
     'enforce_lesson_progress_integrity',
     'enforce_practice_path_identity',
     'enforce_practice_chapter_identity',
@@ -1082,6 +1083,183 @@ function malformedV2Payloads(mode, score) {
   ]
 }
 
+const V3_MODE_WEIGHTS = {
+  practice: {
+    what_you_said: {
+      answered_prompt: 10,
+      specificity: 9,
+      structure: 9,
+      conciseness: 8,
+      word_choice: 7,
+      grammar: 7,
+    },
+    how_you_sounded: {
+      pace: 12,
+      time_to_first_word: 5,
+      paused_time: 10,
+      articulation: 13,
+      energy: 10,
+    },
+  },
+  interview: {
+    what_you_said: {
+      answered_prompt: 12,
+      specificity: 11,
+      structure: 10,
+      conciseness: 6,
+      word_choice: 6,
+      grammar: 5,
+    },
+    how_you_sounded: {
+      pace: 10,
+      time_to_first_word: 6,
+      paused_time: 9,
+      articulation: 15,
+      energy: 10,
+    },
+  },
+  presentation: {
+    what_you_said: {
+      answered_prompt: 9,
+      specificity: 9,
+      structure: 12,
+      conciseness: 7,
+      word_choice: 7,
+      grammar: 6,
+    },
+    how_you_sounded: {
+      pace: 12,
+      time_to_first_word: 3,
+      paused_time: 9,
+      articulation: 11,
+      energy: 15,
+    },
+  },
+  conversation: {
+    what_you_said: {
+      answered_prompt: 9,
+      specificity: 8,
+      structure: 7,
+      conciseness: 10,
+      word_choice: 8,
+      grammar: 8,
+    },
+    how_you_sounded: {
+      pace: 11,
+      time_to_first_word: 4,
+      paused_time: 10,
+      articulation: 15,
+      energy: 10,
+    },
+  },
+}
+
+function structuredV3ScorePayload(mode, score) {
+  const weights = V3_MODE_WEIGHTS[mode]
+  assert(weights, `unsupported v3 score mode: ${mode}`)
+  const maximums = { ...weights.what_you_said, ...weights.how_you_sounded }
+  const allocated = allocateScore(maximums, score)
+  const allMetrics = Object.fromEntries(
+    Object.entries(maximums).map(([metric, maximum]) => {
+      const earned = allocated[metric]
+      return [
+        metric,
+        {
+          metric,
+          status: 'scored',
+          component: earned / maximum,
+          earned_points: earned,
+          max_points: maximum,
+          explanation: `You have measured ${metric} evidence.`,
+          measurements: {},
+          evidence: [],
+          details: [],
+          warnings: [],
+        },
+      ]
+    }),
+  )
+  const buildSection = (sectionName, sectionWeights) => {
+    const metrics = Object.fromEntries(
+      Object.keys(sectionWeights).map((metric) => [metric, allMetrics[metric]]),
+    )
+    return {
+      section: sectionName,
+      status: 'scored',
+      earned_points: Object.values(metrics).reduce(
+        (total, metric) => total + metric.earned_points,
+        0,
+      ),
+      max_points: 50,
+      metrics,
+    }
+  }
+  const ordered = Object.values(allMetrics)
+  const strongest = ordered.reduce((selected, candidate) =>
+    candidate.component > selected.component ? candidate : selected,
+  )
+  const weakest = [...ordered]
+    .reverse()
+    .reduce((selected, candidate) =>
+      candidate.component < selected.component ? candidate : selected,
+    )
+  return {
+    version: 'v3.score.1',
+    rubric_version: 'v3',
+    mode,
+    total_earned_points: score,
+    total_max_points: 100,
+    sections: {
+      what_you_said: buildSection('what_you_said', weights.what_you_said),
+      how_you_sounded: buildSection('how_you_sounded', weights.how_you_sounded),
+    },
+    recommendation: {
+      strongest_metric: strongest.metric,
+      weakest_metric: weakest.metric,
+      text:
+        strongest.metric === weakest.metric
+          ? strongest.explanation
+          : `${strongest.explanation} ${weakest.explanation}`,
+    },
+    warnings: [],
+  }
+}
+
+function malformedV3Payloads(mode, score) {
+  const wrongWeight = cloneJson(structuredV3ScorePayload(mode, score))
+  wrongWeight.sections.how_you_sounded.metrics.energy.max_points += 1
+
+  const hiddenMetric = cloneJson(structuredV3ScorePayload(mode, score))
+  hiddenMetric.sections.what_you_said.metrics.hidden = {
+    ...hiddenMetric.sections.what_you_said.metrics.grammar,
+    metric: 'hidden',
+    max_points: 0,
+    earned_points: 0,
+    component: 0,
+  }
+
+  const missingMetricField = cloneJson(structuredV3ScorePayload(mode, score))
+  delete missingMetricField.sections.what_you_said.metrics.structure.component
+
+  const incoherentSection = cloneJson(structuredV3ScorePayload(mode, score))
+  incoherentSection.sections.how_you_sounded.earned_points -= 1
+
+  const incoherentStatus = cloneJson(structuredV3ScorePayload(mode, score))
+  incoherentStatus.sections.how_you_sounded.status = 'unavailable'
+
+  const extraTopLevelField = cloneJson(structuredV3ScorePayload(mode, score))
+  extraTopLevelField.hidden_score = 100
+
+  return [
+    wrongWeight,
+    hiddenMetric,
+    missingMetricField,
+    incoherentSection,
+    incoherentStatus,
+    extraTopLevelField,
+  ]
+}
+
 function activityV2Payload(mode, score, neutralCategory = null) {
   const payload = structuredScorePayload(mode, score ?? 0)
   const categories = Object.fromEntries(
@@ -1577,6 +1755,121 @@ async function assertCurriculumSecurity(label) {
   await client.query('delete from public.attempts where id = $1', [incomplete.rows[0].id])
 }
 
+async function assertV3Progression(label) {
+  for (const mode of Object.keys(V3_MODE_WEIGHTS)) {
+    const payload = structuredV3ScorePayload(mode, 83)
+    const valid = await client.query(
+      `select public.is_valid_v3_score_payload_for_attempt(
+         $1::jsonb, $2, 83, true
+       ) as valid`,
+      [JSON.stringify(payload), mode],
+    )
+    assert(valid.rows[0]?.valid === true, `${label}: ${mode} v3 weights were rejected`)
+  }
+
+  const lessons = await client.query(`
+    select lesson.id, lesson.prompt_id, path.mode
+    from public.practice_lessons as lesson
+    join public.practice_chapters as chapter on chapter.id = lesson.chapter_id
+    join public.practice_paths as path on path.id = chapter.path_id
+    where path.slug = 'general-speaking'
+    order by chapter.position, lesson.position
+    limit 2 offset 1
+  `)
+  const target = lessons.rows[0]
+  const malformedTarget = lessons.rows[1]
+  assert(target && malformedTarget, `${label}: v3 progress test lessons are missing`)
+
+  const insertAttempt = async ({ userId, lesson, rubricVersion, score, payload, finishedAt }) =>
+    client.query(
+      `insert into public.attempts (
+         user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
+         prompt_difficulty, rubric_version, status, finished_at, score, section_scores
+       ) values ($1, $2, $3, 'Versioned progression snapshot', $4, 'library', 'beginner',
+         $5, 'done', $6::timestamptz, $7, $8::jsonb)
+       returning id`,
+      [
+        userId,
+        lesson.prompt_id,
+        lesson.id,
+        lesson.mode,
+        rubricVersion,
+        finishedAt,
+        score,
+        JSON.stringify(payload),
+      ],
+    )
+
+  await insertAttempt({
+    userId: USERS.owner,
+    lesson: target,
+    rubricVersion: 'v2',
+    score: 72,
+    payload: structuredScorePayload(target.mode, 72),
+    finishedAt: '2026-09-03T10:00:00Z',
+  })
+  const v3Attempt = await insertAttempt({
+    userId: USERS.owner,
+    lesson: target,
+    rubricVersion: 'v3',
+    score: 81,
+    payload: structuredV3ScorePayload(target.mode, 81),
+    finishedAt: '2026-09-03T10:01:00Z',
+  })
+  await insertAttempt({
+    userId: USERS.owner,
+    lesson: target,
+    rubricVersion: 'v3',
+    score: 70,
+    payload: structuredV3ScorePayload(target.mode, 70),
+    finishedAt: '2026-09-03T10:02:00Z',
+  })
+  const progress = await client.query(
+    `select best_score, best_attempt_id from public.lesson_progress
+     where user_id = $1 and lesson_id = $2`,
+    [USERS.owner, target.id],
+  )
+  assert(
+    progress.rows[0]?.best_score === 81 &&
+      progress.rows[0]?.best_attempt_id === v3Attempt.rows[0]?.id,
+    `${label}: exact v2/v3 progression or monotonicity changed`,
+  )
+
+  const rejectedAttemptIds = []
+  const mixedPayloads = [
+    ['v2', structuredV3ScorePayload(malformedTarget.mode, 90)],
+    ['v3', structuredScorePayload(malformedTarget.mode, 90)],
+  ]
+  for (const [index, [rubricVersion, payload]] of mixedPayloads.entries()) {
+    const attempt = await insertAttempt({
+      userId: USERS.other,
+      lesson: malformedTarget,
+      rubricVersion,
+      score: 90,
+      payload,
+      finishedAt: `2026-09-03T10:${String(index + 3).padStart(2, '0')}:00Z`,
+    })
+    rejectedAttemptIds.push(attempt.rows[0].id)
+  }
+  for (const [index, payload] of malformedV3Payloads(malformedTarget.mode, 90).entries()) {
+    const attempt = await insertAttempt({
+      userId: USERS.other,
+      lesson: malformedTarget,
+      rubricVersion: 'v3',
+      score: 90,
+      payload,
+      finishedAt: `2026-09-03T11:${String(index).padStart(2, '0')}:00Z`,
+    })
+    rejectedAttemptIds.push(attempt.rows[0].id)
+  }
+  const rejectedProgress = await client.query(
+    `select count(*)::integer as count from public.lesson_progress
+     where best_attempt_id = any($1::uuid[])`,
+    [rejectedAttemptIds],
+  )
+  assert(rejectedProgress.rows[0]?.count === 0, `${label}: mixed or malformed v3 raised progress`)
+}
+
 async function reapplyCurriculumData(migrations, label) {
   const seed = migrations.find(({ name }) => name === 'curriculum_seed')
   const backfill = migrations.find(({ name }) => name === 'path_preferences_backfill')
@@ -1639,6 +1932,7 @@ async function runFresh(migrations) {
   await assertNoteFeedbackSecurity('fresh')
   await assertCurriculumCoverage('fresh')
   await assertCurriculumSecurity('fresh')
+  await assertV3Progression('fresh')
   await assertActivitySecurity('fresh')
   await reapplyCurriculumData(migrations, 'fresh')
   await assertGrantHardening('fresh')
@@ -1801,6 +2095,7 @@ async function runUpgrade(migrations) {
   await assertNoteFeedbackSecurity('upgrade')
   await assertCurriculumCoverage('upgrade')
   await assertCurriculumSecurity('upgrade')
+  await assertV3Progression('upgrade')
   await assertActivitySecurity('upgrade')
   await assertGrantHardening('upgrade')
   console.log('pass original-four upgrade chain')
@@ -1811,7 +2106,8 @@ async function runPreCurriculumUpgrade(migrations) {
   const preCurriculum = migrations.slice(0, 9)
   const curriculum = migrations.slice(9, 12)
   const phase5 = migrations.slice(12, 13)
-  const hardening = migrations.slice(13)
+  const hardening = migrations.slice(13, 14)
+  const v3Progression = migrations.slice(14)
   assert(
     preCurriculum.at(-1)?.name === 'note_feedback_write_boundary',
     'pre-curriculum boundary must include all nine production migrations',
@@ -1829,6 +2125,11 @@ async function runPreCurriculumUpgrade(migrations) {
     JSON.stringify(hardening.map(({ name }) => name)) ===
       JSON.stringify(['curriculum_grant_hardening']),
     'expected exactly one curriculum grant-hardening migration',
+  )
+  assert(
+    JSON.stringify(v3Progression.map(({ name }) => name)) ===
+      JSON.stringify(['v3_progression_compatibility']),
+    'expected exactly one additive v3 progression migration',
   )
 
   await applyAll(preCurriculum)
@@ -2006,6 +2307,8 @@ async function runPreCurriculumUpgrade(migrations) {
   await applyAll(phase5)
   await assertActivitySecurity('pre-curriculum')
   await applyAll(hardening)
+  await applyAll(v3Progression)
+  await assertV3Progression('pre-curriculum')
   await assertGrantHardening('pre-curriculum')
   console.log('pass nine-migration pre-curriculum upgrade chain')
 }
@@ -2014,7 +2317,8 @@ async function runPrePhase5Upgrade(migrations) {
   await bootstrapSupabaseSurface()
   const prePhase5 = migrations.slice(0, 12)
   const phase5 = migrations.slice(12, 13)
-  const hardening = migrations.slice(13)
+  const hardening = migrations.slice(13, 14)
+  const v3Progression = migrations.slice(14)
   assert(
     prePhase5.at(-1)?.name === 'path_preferences_backfill',
     'pre-Phase-5 boundary must include the curriculum preference backfill',
@@ -2027,6 +2331,11 @@ async function runPrePhase5Upgrade(migrations) {
     JSON.stringify(hardening.map(({ name }) => name)) ===
       JSON.stringify(['curriculum_grant_hardening']),
     'pre-Phase-5 upgrade must end with curriculum grant hardening',
+  )
+  assert(
+    JSON.stringify(v3Progression.map(({ name }) => name)) ===
+      JSON.stringify(['v3_progression_compatibility']),
+    'pre-Phase-5 upgrade must end with additive v3 progression support',
   )
 
   await applyAll(prePhase5)
@@ -2094,7 +2403,9 @@ async function runPrePhase5Upgrade(migrations) {
   assert(afterDelete.rows[0]?.count === 2, 'pre-Phase-5: attempt deletion erased activity')
   await assertActivitySecurity('pre-Phase-5')
   await applyAll(hardening)
+  await applyAll(v3Progression)
   await assertCurriculumSecurity('pre-Phase-5')
+  await assertV3Progression('pre-Phase-5')
   await assertGrantHardening('pre-Phase-5')
   console.log('pass exact pre-Phase-5 upgrade chain')
 }
@@ -2102,7 +2413,8 @@ async function runPrePhase5Upgrade(migrations) {
 async function runGrantHardeningUpgrade(migrations) {
   await bootstrapSupabaseSurface()
   const currentProduction = migrations.slice(0, 13)
-  const hardening = migrations.slice(13)
+  const hardening = migrations.slice(13, 14)
+  const v3Progression = migrations.slice(14)
   assert(
     currentProduction.at(-1)?.name === 'practice_activity',
     'grant-hardening upgrade must start from the exact 13-migration state',
@@ -2111,6 +2423,11 @@ async function runGrantHardeningUpgrade(migrations) {
     JSON.stringify(hardening.map(({ name }) => name)) ===
       JSON.stringify(['curriculum_grant_hardening']),
     'grant-hardening upgrade must apply only the new security migration',
+  )
+  assert(
+    JSON.stringify(v3Progression.map(({ name }) => name)) ===
+      JSON.stringify(['v3_progression_compatibility']),
+    'grant-hardening upgrade must be followed by v3 progression compatibility',
   )
 
   await seedAuthUser(USERS.missingProfile, 'Hardening Upgrade General')
@@ -2121,12 +2438,15 @@ async function runGrantHardeningUpgrade(migrations) {
   await assertProductionGrantMismatchFixture('grant-hardening upgrade')
 
   await applyAll(hardening)
+  await applyAll(v3Progression)
   await assertCurriculumCoverage('grant-hardening upgrade')
   await assertCurriculumSecurity('grant-hardening upgrade')
+  await assertV3Progression('grant-hardening upgrade')
   await assertActivitySecurity('grant-hardening upgrade')
   await assertGrantHardening('grant-hardening upgrade')
 
   await applyAll(hardening)
+  await applyAll(v3Progression)
   await assertGrantHardening('grant-hardening reapplied')
   console.log('pass exact 13-migration Production grant-hardening upgrade')
 }
@@ -2135,8 +2455,8 @@ try {
   await client.connect()
   const migrations = loadMigrations()
   assert(
-    migrations.length === 14,
-    'Expected nine production, three curriculum, one Phase 5, and one hardening migration.',
+    migrations.length === 15,
+    'Expected nine production, three curriculum, one Phase 5, one hardening, and one v3 migration.',
   )
   await runFresh(migrations)
   await runUpgrade(migrations)

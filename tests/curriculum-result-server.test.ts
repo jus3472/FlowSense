@@ -205,6 +205,40 @@ describe('structured lesson result server identity', () => {
     })
   })
 
+  it('accepts an exact v3 attempt and snapshot identity', async () => {
+    const setup = fakeClient()
+    const pathLoader = vi.fn(async () => ({ status: 'ready' as const, data: topology() }))
+
+    const outcome = await loadStructuredLessonResultForUser(
+      setup.client,
+      USER_ID,
+      resultInput({ rubricVersion: 'v3', snapshotRubricVersion: 'v3' }),
+      pathLoader as CurriculumPathLoader,
+    )
+
+    expect(outcome).toMatchObject({
+      status: 'ready',
+      data: { state: 'passed', currentScore: 84, currentStars: 2 },
+    })
+  })
+
+  it('does not mix v2 attempt identity with a v3 snapshot', async () => {
+    const setup = fakeClient()
+    const pathLoader = vi.fn(async () => ({ status: 'ready' as const, data: topology() }))
+
+    const outcome = await loadStructuredLessonResultForUser(
+      setup.client,
+      USER_ID,
+      resultInput({ rubricVersion: 'v2', snapshotRubricVersion: 'v3' }),
+      pathLoader as CurriculumPathLoader,
+    )
+
+    expect(outcome).toMatchObject({
+      status: 'ready',
+      data: { state: 'neutral', currentScore: null, currentStars: 0 },
+    })
+  })
+
   it.each([
     { label: 'prompt', override: { promptId: 'wrong-prompt' } },
     { label: 'attempt mode', override: { practiceMode: 'interview' } },

@@ -127,9 +127,10 @@ export async function loadStructuredLessonResultForUser(
     (candidate) => candidate.lesson.id === input.lessonId,
   )
   if (!lessonProgress) return failure('topology')
+  const supportedRubric = input.rubricVersion === 'v2' || input.rubricVersion === 'v3'
   const scoringIdentityMatches =
-    input.rubricVersion === 'v2' &&
-    input.snapshotRubricVersion === 'v2' &&
+    supportedRubric &&
+    input.snapshotRubricVersion === input.rubricVersion &&
     input.practiceMode === input.snapshotMode &&
     input.practiceMode === topology.data.path.mode &&
     input.promptId === lessonProgress.lesson.promptId
