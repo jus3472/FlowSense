@@ -138,6 +138,18 @@ describe('structured lesson result thresholds', () => {
     })
     expect(result.primaryAction.href).toContain('/lessons/general-speaking-beginner-02-')
   })
+
+  it('uses the canonical retry label after the current attempt earns three stars', () => {
+    const result = model({ currentScore: 92, progress: [] })
+
+    expect(result).toMatchObject({
+      state: 'passed',
+      currentStars: 3,
+      bestScore: null,
+      primaryAction: { label: 'Continue' },
+      secondaryAction: { label: 'Try Again' },
+    })
+  })
 })
 
 describe('structured lesson durable bests', () => {

@@ -84,12 +84,13 @@ function passedActions(
   path: CurriculumPathProgress,
   lesson: CurriculumLessonProgress,
   attemptId: string,
+  currentStars: Stars,
 ): Pick<StructuredLessonResultModel, 'primaryAction' | 'secondaryAction'> {
   const practiceAgain = retryAction(
     path.path.slug,
     lesson.lesson.slug,
     attemptId,
-    lesson.stars < 3 ? 'Retry for 3 stars' : 'Practice Again',
+    currentStars < 3 && lesson.stars < 3 ? 'Retry for 3 stars' : 'Try Again',
   )
   if (lesson.nextLesson) {
     return {
@@ -131,10 +132,11 @@ export function buildStructuredLessonResult(input: {
   if (!chapter) return null
 
   const currentScore = validatedStructuredResultScore(input.currentScore, input.snapshotScore)
+  const currentStars = starsForScore(currentScore)
   const state = resultState(currentScore)
   const actions =
     state === 'passed'
-      ? passedActions(input.path, lesson, input.attemptId)
+      ? passedActions(input.path, lesson, input.attemptId, currentStars)
       : {
           primaryAction: retryAction(input.path.path.slug, lesson.lesson.slug, input.attemptId),
           secondaryAction: null,
@@ -144,7 +146,7 @@ export function buildStructuredLessonResult(input: {
     attemptId: input.attemptId,
     state,
     currentScore,
-    currentStars: starsForScore(currentScore),
+    currentStars,
     bestScore: lesson.bestScore,
     bestStars: lesson.stars,
     bestAttemptId: lesson.bestAttemptId,

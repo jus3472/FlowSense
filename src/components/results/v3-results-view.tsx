@@ -35,22 +35,9 @@ function sectionScore(value: number | null): string {
   return value === null ? 'Unavailable / 50' : `${value} / 50`
 }
 
-function titleCase(value: string): string {
-  return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
-}
-
 function lessonStateTitle(result: StructuredLessonResultModel): string {
   if (result.state === 'neutral') return 'Result unavailable'
   return result.state === 'passed' ? 'Lesson complete' : 'Lesson not passed'
-}
-
-function progressionMessage(result: StructuredLessonResultModel): string {
-  if (result.pathComplete) return `You passed every lesson in ${result.path.title}.`
-  if (!result.nextLesson) return 'Your path progress is up to date.'
-  if (result.nextLesson.level !== result.chapter.level) {
-    return `${titleCase(result.nextLesson.level)} lesson 1 is available.`
-  }
-  return `Lesson ${result.nextLesson.position} is available.`
 }
 
 export function V3ResultsView({
@@ -71,12 +58,16 @@ export function V3ResultsView({
 
   return (
     <div className="flex flex-col gap-8 pb-12">
-      <section aria-labelledby="overall-score-heading" className="flex flex-col gap-4">
+      <header className="flex flex-col gap-1">
+        <h1 className="prompt-display text-foreground text-2xl break-words">{promptText}</h1>
+        {additionalContext ? (
+          <p className="text-muted text-xs">Context: {additionalContext}</p>
+        ) : null}
+      </header>
+
+      <section aria-label="Result summary" className="flex flex-col gap-4">
         <Card className="flex flex-col gap-4">
           <div>
-            <h1 id="overall-score-heading" className="text-muted text-sm">
-              Overall score
-            </h1>
             {complete ? (
               <p className="numeric text-foreground text-4xl font-semibold">
                 {payload.total_earned_points}
@@ -87,21 +78,6 @@ export function V3ResultsView({
             )}
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="bg-surface-sunken rounded-card p-4">
-              <p className="text-muted text-sm">What You Said</p>
-              <p className="numeric text-foreground mt-1 text-lg font-semibold">
-                {sectionScore(payload.sections.what_you_said.earned_points)}
-              </p>
-            </div>
-            <div className="bg-surface-sunken rounded-card p-4">
-              <p className="text-muted text-sm">How You Sounded</p>
-              <p className="numeric text-foreground mt-1 text-lg font-semibold">
-                {sectionScore(payload.sections.how_you_sounded.earned_points)}
-              </p>
-            </div>
-          </div>
-
           {curriculumResult ? (
             <div className="border-border flex flex-col gap-3 border-t pt-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -109,7 +85,6 @@ export function V3ResultsView({
                   <h2 className="text-foreground text-lg font-semibold">
                     {lessonStateTitle(curriculumResult)}
                   </h2>
-                  <p className="text-muted mt-1 text-sm">{curriculumResult.lesson.title}</p>
                 </div>
                 {curriculumResult.currentStars > 0 ? (
                   <CurriculumStars stars={curriculumResult.currentStars} />
@@ -139,22 +114,16 @@ export function V3ResultsView({
                 <p className="text-muted text-sm">Need 70 to continue.</p>
               ) : null}
               {curriculumResult.state === 'passed' ? (
-                <div className="flex flex-col gap-1">
-                  {curriculumResult.pathComplete ? (
-                    <p className="text-foreground font-medium">Path complete</p>
-                  ) : null}
-                  <p className="text-muted text-sm">{progressionMessage(curriculumResult)}</p>
-                </div>
+                curriculumResult.pathComplete ? (
+                  <p className="text-foreground font-medium">Path complete</p>
+                ) : null
               ) : null}
             </div>
           ) : null}
         </Card>
       </section>
 
-      <section aria-labelledby="recommendation-heading" className="flex flex-col gap-3">
-        <h2 id="recommendation-heading" className="text-foreground text-xl font-semibold">
-          Recommendation
-        </h2>
+      <section aria-label="Recommendation" className="flex flex-col gap-3">
         <Card>
           {payload.recommendation ? (
             <div className="flex flex-col gap-2">
@@ -170,13 +139,6 @@ export function V3ResultsView({
             </p>
           )}
         </Card>
-        <div className="flex flex-col gap-1">
-          <p className="text-muted text-xs">Your prompt</p>
-          <p className="text-foreground text-sm">{promptText}</p>
-          {additionalContext ? (
-            <p className="text-muted text-xs">Context: {additionalContext}</p>
-          ) : null}
-        </div>
       </section>
 
       <TranscriptPanel heading="Transcript" segments={transcriptSegments} />

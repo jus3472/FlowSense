@@ -66,15 +66,18 @@ describe('V3ResultsView', () => {
       heading.textContent?.trim(),
     )
     expect(headings).toEqual([
-      'Overall score',
-      'Recommendation',
+      props.promptText,
       'Transcript',
       'What You Said',
       'How You Sounded',
       'Recording',
     ])
-    expect(screen.getAllByText('What You Said')).toHaveLength(2)
-    expect(screen.getAllByText('How You Sounded')).toHaveLength(2)
+    expect(screen.getAllByText('What You Said')).toHaveLength(1)
+    expect(screen.getAllByText('How You Sounded')).toHaveLength(1)
+    expect(screen.getByRole('heading', { name: props.promptText, level: 1 })).toBeInTheDocument()
+    expect(screen.queryByText('Your prompt')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Overall score' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Recommendation' })).not.toBeInTheDocument()
     for (const label of Object.values(V3_METRIC_LABELS)) {
       expect(screen.getByRole('heading', { name: label })).toBeInTheDocument()
     }
@@ -104,7 +107,7 @@ describe('V3ResultsView', () => {
     )
   })
 
-  it('keeps deduction evidence clickable and places lesson state after the overall score', () => {
+  it('keeps deduction evidence clickable and uses the cleaned structured result hierarchy', () => {
     const payload = v3Snapshot({
       evidenceMetric: 'word_choice',
       evidence: [
@@ -121,13 +124,14 @@ describe('V3ResultsView', () => {
     const { container } = render(
       <V3ResultsView {...props} payload={payload} curriculumResult={curriculumResult} />,
     )
-    const overall = screen.getByRole('heading', { name: 'Overall score' })
-    expect(overall.compareDocumentPosition(screen.getByText('Start clearly'))).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    )
+    const prompt = screen.getByText(props.promptText)
+    const score = screen.getByRole('region', { name: 'Result summary' }).querySelector('.numeric')
+    if (!score) throw new Error('Missing visible score.')
+    expect(prompt.compareDocumentPosition(score)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
     expect(screen.getByRole('heading', { name: 'Lesson complete' })).toBeInTheDocument()
     expect(screen.getByText(/Best:/)).toHaveTextContent('Best: 80')
-    expect(screen.getByText('Lesson 2 is available.')).toBeInTheDocument()
+    expect(screen.queryByText('Start clearly')).not.toBeInTheDocument()
+    expect(screen.queryByText('Lesson 2 is available.')).not.toBeInTheDocument()
     const mark = screen.getByRole('button', { name: /vague\. Word Choice:/ })
     fireEvent.click(mark)
     expect(screen.getByRole('tooltip')).toHaveTextContent(

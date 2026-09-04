@@ -358,6 +358,22 @@ begin
 end;
 $$;
 
+-- Replay exact completed v3 snapshots that landed while the previous trigger
+-- understood only v2. The no-op column assignment fires the shared trigger, so
+-- historical repair uses the same payload, lesson identity, tie, and monotonic
+-- best-score checks as a newly completed attempt.
+update public.attempts as attempt
+set section_scores = attempt.section_scores
+where attempt.lesson_id is not null
+  and attempt.status = 'done'
+  and attempt.rubric_version = 'v3'
+  and public.is_valid_v3_score_payload_for_attempt(
+    attempt.section_scores,
+    attempt.practice_mode,
+    attempt.score,
+    true
+  );
+
 revoke all privileges on function public.is_valid_v3_score_payload_for_attempt(
   jsonb,
   text,

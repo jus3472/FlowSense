@@ -1812,10 +1812,21 @@ async function assertV3Progression(label) {
     userId: USERS.owner,
     lesson: target,
     rubricVersion: 'v3',
-    score: 81,
-    payload: structuredV3ScorePayload(target.mode, 81),
+    score: 92,
+    payload: structuredV3ScorePayload(target.mode, 92),
     finishedAt: '2026-09-03T10:01:00Z',
   })
+  const progressAfter92 = await client.query(
+    `select best_score, best_attempt_id from public.lesson_progress
+     where user_id = $1 and lesson_id = $2`,
+    [USERS.owner, target.id],
+  )
+  assert(
+    progressAfter92.rows[0]?.best_score === 92 &&
+      progressAfter92.rows[0]?.best_attempt_id === v3Attempt.rows[0]?.id,
+    `${label}: a complete 92-point v3 attempt did not become the durable best`,
+  )
+
   await insertAttempt({
     userId: USERS.owner,
     lesson: target,
@@ -1824,15 +1835,34 @@ async function assertV3Progression(label) {
     payload: structuredV3ScorePayload(target.mode, 70),
     finishedAt: '2026-09-03T10:02:00Z',
   })
-  const progress = await client.query(
+  const progressAfterLowerRetry = await client.query(
     `select best_score, best_attempt_id from public.lesson_progress
      where user_id = $1 and lesson_id = $2`,
     [USERS.owner, target.id],
   )
   assert(
-    progress.rows[0]?.best_score === 81 &&
-      progress.rows[0]?.best_attempt_id === v3Attempt.rows[0]?.id,
-    `${label}: exact v2/v3 progression or monotonicity changed`,
+    progressAfterLowerRetry.rows[0]?.best_score === 92 &&
+      progressAfterLowerRetry.rows[0]?.best_attempt_id === v3Attempt.rows[0]?.id,
+    `${label}: a lower v3 retry reduced the durable best`,
+  )
+
+  const higherRetry = await insertAttempt({
+    userId: USERS.owner,
+    lesson: target,
+    rubricVersion: 'v3',
+    score: 95,
+    payload: structuredV3ScorePayload(target.mode, 95),
+    finishedAt: '2026-09-03T10:03:00Z',
+  })
+  const progressAfterHigherRetry = await client.query(
+    `select best_score, best_attempt_id from public.lesson_progress
+     where user_id = $1 and lesson_id = $2`,
+    [USERS.owner, target.id],
+  )
+  assert(
+    progressAfterHigherRetry.rows[0]?.best_score === 95 &&
+      progressAfterHigherRetry.rows[0]?.best_attempt_id === higherRetry.rows[0]?.id,
+    `${label}: a higher v3 retry did not replace the durable best`,
   )
 
   const rejectedAttemptIds = []
@@ -2438,7 +2468,53 @@ async function runGrantHardeningUpgrade(migrations) {
   await assertProductionGrantMismatchFixture('grant-hardening upgrade')
 
   await applyAll(hardening)
+  const existingLesson = await client.query(`
+    select lesson.id, lesson.prompt_id, path.mode
+    from public.practice_lessons as lesson
+    join public.practice_chapters as chapter on chapter.id = lesson.chapter_id
+    join public.practice_paths as path on path.id = chapter.path_id
+    where path.slug = 'general-speaking'
+    order by chapter.position, lesson.position
+    limit 1
+  `)
+  const target = existingLesson.rows[0]
+  assert(target, 'grant-hardening upgrade: v3 replay lesson is missing')
+  const existingV3 = await client.query(
+    `insert into public.attempts (
+       user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
+       prompt_difficulty, rubric_version, status, finished_at, score, section_scores
+     ) values ($1, $2, $3, 'Pre-migration v3 result', $4, 'library', 'beginner',
+       'v3', 'done', '2026-09-03T09:59:00Z', 92, $5::jsonb)
+     returning id`,
+    [
+      USERS.missingProfile,
+      target.prompt_id,
+      target.id,
+      target.mode,
+      JSON.stringify(structuredV3ScorePayload(target.mode, 92)),
+    ],
+  )
+  const beforeV3Compatibility = await client.query(
+    `select count(*)::integer as count from public.lesson_progress
+     where user_id = $1 and lesson_id = $2`,
+    [USERS.missingProfile, target.id],
+  )
+  assert(
+    beforeV3Compatibility.rows[0]?.count === 0,
+    'grant-hardening upgrade: the v2-only trigger unexpectedly accepted v3',
+  )
+
   await applyAll(v3Progression)
+  const replayedV3 = await client.query(
+    `select best_score, best_attempt_id from public.lesson_progress
+     where user_id = $1 and lesson_id = $2`,
+    [USERS.missingProfile, target.id],
+  )
+  assert(
+    replayedV3.rows[0]?.best_score === 92 &&
+      replayedV3.rows[0]?.best_attempt_id === existingV3.rows[0]?.id,
+    'grant-hardening upgrade: the pending migration did not replay an existing valid v3 result',
+  )
   await assertCurriculumCoverage('grant-hardening upgrade')
   await assertCurriculumSecurity('grant-hardening upgrade')
   await assertV3Progression('grant-hardening upgrade')
