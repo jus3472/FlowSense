@@ -8,6 +8,7 @@ import {
   V3_CONTENT_EVALUATOR_VERSION,
   type MechanicalConcisenessKind,
   type V3ContentEvaluation,
+  type V3ContentFailureDiagnostic,
   type V3ContentEvaluationInput,
   type V3ContentMetricResult,
   type V3MechanicallyOwnedSpan,
@@ -71,11 +72,22 @@ export class V3ContentParseError extends Error {
   constructor(
     readonly code: 'malformed_json' | 'schema_invalid',
     message: string,
+    readonly reason: string = code,
+    readonly metric: WhatYouSaidMetricId | null = null,
   ) {
     super(message)
     this.name = 'V3ContentParseError'
   }
 }
+
+const CONTENT_VALIDATION_REASONS = new Set([
+  'whole_response_evidence_invalid',
+  'evidence_not_in_transcript',
+  'evidence_overlaps_unreliable',
+  'evidence_overlaps_mechanical',
+  'evidence_overlaps_metric',
+  'no_answer_double_count',
+])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -109,6 +121,22 @@ function validSpan(span: V3TranscriptSpan, transcript: string): boolean {
     span.end <= transcript.length &&
     (span.confidence === undefined || inUnitInterval(span.confidence))
   )
+}
+
+function resolvedTranscriptSpan(
+  start: unknown,
+  end: unknown,
+  quote: string,
+  transcript: string,
+): V3TranscriptSpan | null {
+  const supplied = { start, end } as V3TranscriptSpan
+  if (validSpan(supplied, transcript) && transcript.slice(supplied.start, supplied.end) === quote) {
+    return supplied
+  }
+
+  const located = transcript.indexOf(quote)
+  if (located < 0 || transcript.indexOf(quote, located + 1) >= 0) return null
+  return { start: located, end: located + quote.length }
 }
 
 function validMechanicalSpan(span: V3MechanicallyOwnedSpan, transcript: string): boolean {
@@ -161,6 +189,55 @@ function notChecked(provider: string | null, warning: string, calls: number): V3
   }
 }
 
+function diagnosticFor(
+  error: unknown,
+  failure: ContentProviderFailure,
+): V3ContentFailureDiagnostic {
+  if (error instanceof V3ContentParseError) {
+    return {
+      category: CONTENT_VALIDATION_REASONS.has(error.reason)
+        ? 'content_validation_failed'
+        : 'provider_invalid_response',
+      code: error.code,
+      reason: error.reason,
+      metric: error.metric,
+    }
+  }
+  const code = failure.diagnostic.code
+  if (
+    code === 'authentication_error' ||
+    code === 'configuration_error' ||
+    code === 'network_failure' ||
+    code === 'rate_limit' ||
+    code === 'server_error' ||
+    code === 'timeout'
+  ) {
+    return { category: 'provider_unavailable', code, reason: null, metric: null }
+  }
+  if (
+    code === 'empty_response' ||
+    code === 'malformed_json' ||
+    code === 'schema_invalid' ||
+    code === 'truncated_response'
+  ) {
+    return { category: 'provider_invalid_response', code, reason: null, metric: null }
+  }
+  return { category: 'internal_error', code, reason: null, metric: null }
+}
+
+function reportFinalDiagnostic(
+  input: V3ContentEvaluationInput,
+  calls: number,
+  diagnostic: V3ContentFailureDiagnostic,
+): void {
+  console.warn('[v3-content]', {
+    attemptId: input.diagnosticAttemptId ?? null,
+    provider: input.provider.name,
+    calls,
+    ...diagnostic,
+  })
+}
+
 interface ParseContext {
   transcript: string
   mechanicallyOwned: readonly V3MechanicallyOwnedSpan[]
@@ -187,44 +264,57 @@ function parseFinding(
   }
 
   if (value.quote === null) {
-    if (!NULL_EVIDENCE_METRICS.has(metric) || value.start !== null || value.end !== null) {
+    const responseLevelRepetition = metric === 'conciseness' && kind === 'repeated_idea'
+    if (
+      (!NULL_EVIDENCE_METRICS.has(metric) && !responseLevelRepetition) ||
+      value.start !== null ||
+      value.end !== null
+    ) {
       throw new V3ContentParseError(
         'schema_invalid',
         `${metric} contained invalid whole-response evidence.`,
+        'whole_response_evidence_invalid',
+        metric,
       )
     }
     return { kind, source: 'ai', quote: null, observation, suggestion, evidence: [] }
   }
 
   const quote = boundedText(value.quote)
-  const span = { start: value.start, end: value.end }
-  if (
-    !quote ||
-    !validSpan(span as V3TranscriptSpan, context.transcript) ||
-    context.transcript.slice(span.start as number, span.end as number) !== quote
-  ) {
+  const span = quote
+    ? resolvedTranscriptSpan(value.start, value.end, quote, context.transcript)
+    : null
+  if (!quote || !span) {
     throw new V3ContentParseError(
       'schema_invalid',
       `${metric} evidence did not match the transcript.`,
+      'evidence_not_in_transcript',
+      metric,
     )
   }
-  const evidenceSpan = span as V3TranscriptSpan
+  const evidenceSpan = span
   if (context.unreliable.some((candidate) => overlaps(candidate, evidenceSpan))) {
     throw new V3ContentParseError(
       'schema_invalid',
       `${metric} evidence overlapped unreliable transcription.`,
+      'evidence_overlaps_unreliable',
+      metric,
     )
   }
   if (context.mechanicallyOwned.some((candidate) => overlaps(candidate, evidenceSpan))) {
     throw new V3ContentParseError(
       'schema_invalid',
       `${metric} attempted to reuse mechanically owned speech.`,
+      'evidence_overlaps_mechanical',
+      metric,
     )
   }
   if (context.claimed.some((candidate) => overlaps(candidate, evidenceSpan))) {
     throw new V3ContentParseError(
       'schema_invalid',
       `${metric} attempted to reuse speech owned by another metric.`,
+      'evidence_overlaps_metric',
+      metric,
     )
   }
   context.claimed.push(evidenceSpan)
@@ -245,14 +335,29 @@ function parseMetric(
   context: ParseContext,
 ): V3ContentMetricResult {
   if (!isRecord(value) || !exactKeys(value, ['component', 'explanation', 'findings'])) {
-    throw new V3ContentParseError('schema_invalid', `${metric} was missing or malformed.`)
+    throw new V3ContentParseError(
+      'schema_invalid',
+      `${metric} was missing or malformed.`,
+      'metric_shape_invalid',
+      metric,
+    )
   }
   const explanation = boundedText(value.explanation, MAX_EXPLANATION_LENGTH)
   if (!inUnitInterval(value.component) || !explanation || !Array.isArray(value.findings)) {
-    throw new V3ContentParseError('schema_invalid', `${metric} was missing or malformed.`)
+    throw new V3ContentParseError(
+      'schema_invalid',
+      `${metric} was missing or malformed.`,
+      'metric_shape_invalid',
+      metric,
+    )
   }
   if (value.findings.length > MAX_FINDINGS_PER_METRIC) {
-    throw new V3ContentParseError('schema_invalid', `${metric} returned too many findings.`)
+    throw new V3ContentParseError(
+      'schema_invalid',
+      `${metric} returned too many findings.`,
+      'too_many_findings',
+      metric,
+    )
   }
   const details = value.findings.map((finding) => parseFinding(finding, metric, context))
   if (
@@ -262,6 +367,8 @@ function parseMetric(
     throw new V3ContentParseError(
       'schema_invalid',
       `${metric} component and findings were inconsistent.`,
+      'component_findings_inconsistent',
+      metric,
     )
   }
   return {
@@ -341,7 +448,11 @@ export function parseV3ContentResponse(
   try {
     payload = JSON.parse(raw)
   } catch {
-    throw new V3ContentParseError('malformed_json', 'The v3 content response was not JSON.')
+    throw new V3ContentParseError(
+      'malformed_json',
+      'The v3 content response was not JSON.',
+      'malformed_json',
+    )
   }
   if (
     !isRecord(payload) ||
@@ -353,6 +464,7 @@ export function parseV3ContentResponse(
     throw new V3ContentParseError(
       'schema_invalid',
       'The v3 content response did not match the required envelope.',
+      'envelope_invalid',
     )
   }
 
@@ -386,6 +498,7 @@ export function parseV3ContentResponse(
     throw new V3ContentParseError(
       'schema_invalid',
       'A missing answer was assigned to more than one whole-response metric.',
+      'no_answer_double_count',
     )
   }
   parsed.conciseness = applyMechanicalConciseness(parsed.conciseness, mechanicallyOwned)
@@ -403,11 +516,19 @@ export async function runV3ContentEvaluation(
   input: V3ContentEvaluationInput,
 ): Promise<V3ContentEvaluation> {
   if (input.prompt.trim().length === 0 || input.transcript.trim().length === 0) {
-    return notChecked(
-      input.provider.name,
-      'A prompt and transcript are required for the content evaluation.',
-      0,
-    )
+    return {
+      ...notChecked(
+        input.provider.name,
+        'A prompt and transcript are required for the content evaluation.',
+        0,
+      ),
+      diagnostic: {
+        category: 'input_invalid',
+        code: 'missing_input',
+        reason: null,
+        metric: null,
+      },
+    }
   }
   const unreliableTranscriptSpans = (input.unreliableTranscriptSpans ?? []).filter((span) =>
     validSpan(span, input.transcript),
@@ -442,13 +563,15 @@ export async function runV3ContentEvaluation(
     } catch (error) {
       const failure =
         error instanceof V3ContentParseError
-          ? reportContentProviderFailure(
-              new ContentProviderFailure(error.code, input.provider.name),
-              input.provider.name,
-            )
+          ? new ContentProviderFailure(error.code, input.provider.name)
           : reportContentProviderFailure(error, input.provider.name)
       if (attempt === 0 && isRetryableContentProviderFailure(failure)) continue
-      return notChecked(input.provider.name, CONTENT_PROVIDER_UNAVAILABLE_MESSAGE, calls)
+      const diagnostic = diagnosticFor(error, failure)
+      reportFinalDiagnostic(input, calls, diagnostic)
+      return {
+        ...notChecked(input.provider.name, CONTENT_PROVIDER_UNAVAILABLE_MESSAGE, calls),
+        diagnostic,
+      }
     }
   }
   return notChecked(input.provider.name, CONTENT_PROVIDER_UNAVAILABLE_MESSAGE, calls)

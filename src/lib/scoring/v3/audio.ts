@@ -267,8 +267,12 @@ export interface PaceMeasurements {
 export interface TimeToFirstWordMeasurements {
   seconds: number | null
   transcript_ms: number | null
+  /** Earliest threshold crossing, retained for diagnostics but never scored directly. */
   amplitude_onset_ms: number | null
+  anchored_acoustic_onset_ms: number | null
+  selected_onset_ms: number | null
   rms_corroborated: boolean | null
+  source: 'anchored_acoustic' | 'transcript' | null
   origin: 'recording_start'
 }
 
@@ -331,6 +335,19 @@ const ENERGY_TEMPORAL_BINS = 3
 const MIN_COVERED_ENERGY_BINS = 2
 const MIN_TIMELINE_DENSITY = 0.7
 const MAX_CAPTURE_DURATION_MS = 120_000
+const FIRST_WORD_LOOKBACK_MS = 600
+const FIRST_WORD_AFTER_ANCHOR_MS = 150
+const FIRST_WORD_MAX_ONSET_LEAD_MS = 300
+const MIN_ANCHORED_AMPLITUDE_FRAMES = 3
+const MIN_ANCHORED_PITCH_FRAMES = 2
+
+interface FirstWordTiming {
+  transcript_ms: number
+  raw_amplitude_onset_ms: number | null
+  anchored_acoustic_onset_ms: number | null
+  selected_onset_ms: number
+  source: 'anchored_acoustic' | 'transcript'
+}
 
 function lowerBetter(value: number, fullThrough: number, zeroAt: number): number {
   if (!Number.isFinite(value) || value < 0) return 0
@@ -516,6 +533,81 @@ function pitchIssue(capture: CaptureMetrics): string | null {
   return null
 }
 
+/**
+ * Selects a defensible speech onset without treating an isolated click, breath,
+ * or unrelated background sound as the first word. Deepgram supplies the
+ * semantic anchor. A nearby sustained RMS run may sharpen that boundary only
+ * when voiced pitch corroborates the same run.
+ */
+function selectFirstWordTiming(
+  capture: CaptureMetrics,
+  firstWord: TranscriptWord,
+  pauseAnalysis: PauseAnalysis | null,
+  pitchIsValid: boolean,
+): FirstWordTiming {
+  const transcriptMs = firstWord.start * 1000
+  const rawAmplitudeOnsetMs = pauseAnalysis?.speech_onset_ms ?? null
+  if (!pauseAnalysis || !pitchIsValid) {
+    return {
+      transcript_ms: transcriptMs,
+      raw_amplitude_onset_ms: rawAmplitudeOnsetMs,
+      anchored_acoustic_onset_ms: null,
+      selected_onset_ms: transcriptMs,
+      source: 'transcript',
+    }
+  }
+
+  const intervalMs = capture.sample_interval_ms
+  const candidates = capture.amplitude.filter(
+    (sample) =>
+      sample.t_ms >= Math.max(0, transcriptMs - FIRST_WORD_LOOKBACK_MS) &&
+      sample.t_ms <= transcriptMs + FIRST_WORD_AFTER_ANCHOR_MS &&
+      sample.rms >= pauseAnalysis.speech_threshold,
+  )
+  const runs: (typeof candidates)[] = []
+  for (const sample of candidates) {
+    const current = runs.at(-1)
+    const previous = current?.at(-1)
+    if (!current || !previous || sample.t_ms - previous.t_ms > intervalMs * 2) {
+      runs.push([sample])
+    } else {
+      current.push(sample)
+    }
+  }
+
+  const maximumAnchorGapMs = Math.max(100, intervalMs * 2)
+  const qualifyingRuns = runs.filter((run) => {
+    const first = run[0]
+    const last = run.at(-1)
+    if (!first || !last) return false
+    if (run.length < MIN_ANCHORED_AMPLITUDE_FRAMES) return false
+    if (last.t_ms < transcriptMs - maximumAnchorGapMs) return false
+    if (first.t_ms < transcriptMs - FIRST_WORD_MAX_ONSET_LEAD_MS) return false
+    if (last.t_ms - first.t_ms < intervalMs * 2) return false
+    const nearbyPitchFrames = capture.pitch.filter(
+      (sample) => sample.t_ms >= first.t_ms - intervalMs && sample.t_ms <= last.t_ms + intervalMs,
+    )
+    const onsetPitchFrames = nearbyPitchFrames.filter(
+      (sample) => sample.t_ms <= first.t_ms + Math.max(150, intervalMs * 3),
+    )
+    return nearbyPitchFrames.length >= MIN_ANCHORED_PITCH_FRAMES && onsetPitchFrames.length > 0
+  })
+  const anchoredRun = qualifyingRuns.at(-1)
+  const anchoredAcousticOnsetMs = anchoredRun?.[0]?.t_ms ?? null
+  const selectedOnsetMs =
+    anchoredAcousticOnsetMs === null
+      ? transcriptMs
+      : Math.min(transcriptMs, anchoredAcousticOnsetMs)
+
+  return {
+    transcript_ms: transcriptMs,
+    raw_amplitude_onset_ms: rawAmplitudeOnsetMs,
+    anchored_acoustic_onset_ms: anchoredAcousticOnsetMs,
+    selected_onset_ms: selectedOnsetMs,
+    source: anchoredAcousticOnsetMs === null ? 'transcript' : 'anchored_acoustic',
+  }
+}
+
 function lowConfidence(value: TranscriptWord, threshold: number): boolean {
   return typeof value.confidence === 'number' && value.confidence < threshold
 }
@@ -539,6 +631,7 @@ function prepare(input: AudioEvaluationInput): {
   tokens: Token[]
   excludedDiscourseIndices: ReadonlySet<number>
   pauseAnalysis: PauseAnalysis | null
+  firstWordTiming: FirstWordTiming | null
 } {
   const capture = input.capture ?? null
   if (!capture || !validDuration(capture)) {
@@ -552,6 +645,7 @@ function prepare(input: AudioEvaluationInput): {
       tokens: [],
       excludedDiscourseIndices: new Set(),
       pauseAnalysis: null,
+      firstWordTiming: null,
     }
   }
 
@@ -578,6 +672,10 @@ function prepare(input: AudioEvaluationInput): {
     !wordsIssue && !transcriptIssue && !levelIssue
       ? analysePauses(capture.amplitude, input.words, capture.duration_ms, fillerIndices)
       : null
+  const firstWordTiming =
+    !wordsIssue && !transcriptIssue && input.words[0]
+      ? selectFirstWordTiming(capture, input.words[0], pauseAnalysis, frequencyIssue === null)
+      : null
 
   return {
     capture,
@@ -589,6 +687,7 @@ function prepare(input: AudioEvaluationInput): {
     tokens,
     excludedDiscourseIndices,
     pauseAnalysis,
+    firstWordTiming,
   }
 }
 
@@ -622,7 +721,12 @@ function evaluatePace(prepared: Prepared, mode: PracticeMode): AudioMetricEvalua
     )
   }
 
-  const excludedSilenceMs = prepared.pauseAnalysis.total_silence_ms
+  const correctedLeadingSilenceMs =
+    prepared.firstWordTiming?.selected_onset_ms ?? prepared.pauseAnalysis.leading_silence_ms
+  const excludedSilenceMs =
+    prepared.pauseAnalysis.total_silence_ms -
+    prepared.pauseAnalysis.leading_silence_ms +
+    correctedLeadingSilenceMs
   const activeSpeakingMs = prepared.capture.duration_ms - excludedSilenceMs
   const wpm = wordCount / (activeSpeakingMs / 60_000)
   if (
@@ -677,16 +781,21 @@ function evaluateTimeToFirstWord(
 ): AudioMetricEvaluations['time_to_first_word'] {
   const issue = prepareIssue(prepared, false)
   const firstWord = prepared.tokens[0]
-  const transcriptMs = firstWord ? firstWord.start * 1000 : null
-  const onsetMs = prepared.amplitudeIssue ? null : (prepared.pauseAnalysis?.speech_onset_ms ?? null)
+  const timing = prepared.firstWordTiming
+  const transcriptMs = timing?.transcript_ms ?? (firstWord ? firstWord.start * 1000 : null)
+  const rawAmplitudeOnsetMs = timing?.raw_amplitude_onset_ms ?? null
+  const anchoredAcousticOnsetMs = timing?.anchored_acoustic_onset_ms ?? null
   const empty: TimeToFirstWordMeasurements = {
     seconds: null,
     transcript_ms: transcriptMs,
-    amplitude_onset_ms: onsetMs,
+    amplitude_onset_ms: rawAmplitudeOnsetMs,
+    anchored_acoustic_onset_ms: anchoredAcousticOnsetMs,
+    selected_onset_ms: timing?.selected_onset_ms ?? null,
     rms_corroborated: null,
+    source: timing?.source ?? null,
     origin: 'recording_start',
   }
-  if (issue || !prepared.capture || !firstWord || transcriptMs === null) {
+  if (issue || !prepared.capture || !firstWord || transcriptMs === null || !timing) {
     return unavailable(
       'time_to_first_word',
       'Your time to first word could not be measured from this recording.',
@@ -696,44 +805,56 @@ function evaluateTimeToFirstWord(
   }
 
   const tolerance = AUDIO_THRESHOLDS_BY_MODE[mode].time_to_first_word.corroboration_tolerance_ms
-  const corroborated = onsetMs === null ? null : Math.abs(transcriptMs - onsetMs) <= tolerance
+  const corroborated =
+    anchoredAcousticOnsetMs === null
+      ? null
+      : Math.abs(transcriptMs - anchoredAcousticOnsetMs) <= tolerance
   const warnings: string[] = []
   if (prepared.amplitudeIssue) {
-    warnings.push(`RMS onset did not corroborate the word timestamp. ${prepared.amplitudeIssue}`)
-  } else if (onsetMs === null) {
-    warnings.push('RMS onset was unavailable, so the final word timestamp was used alone.')
-  } else if (!corroborated) {
-    warnings.push('RMS onset and the first final word timestamp did not closely agree.')
+    warnings.push(`Acoustic onset was unavailable. ${prepared.amplitudeIssue}`)
+  } else if (prepared.pitchIssue) {
+    warnings.push(`Voiced onset was unavailable. ${prepared.pitchIssue}`)
   }
 
-  const component = timeToFirstWordComponent(transcriptMs, mode)
-  const seconds = transcriptMs / 1000
+  const selectedOnsetMs = timing.selected_onset_ms
+  const component = timeToFirstWordComponent(selectedOnsetMs, mode)
+  const seconds = selectedOnsetMs / 1000
+  const evidenceEndMs = Math.max(
+    selectedOnsetMs,
+    Math.min(prepared.capture.duration_ms, prepared.capture.sample_interval_ms),
+  )
   return {
     id: 'time_to_first_word',
     status: 'scored',
     component,
-    explanation: `You began your first recognized word after ${seconds.toFixed(1)} seconds.`,
+    explanation: `You began speaking after ${seconds.toFixed(1)} seconds.`,
     measurements: {
       seconds,
       transcript_ms: transcriptMs,
-      amplitude_onset_ms: onsetMs,
+      amplitude_onset_ms: rawAmplitudeOnsetMs,
+      anchored_acoustic_onset_ms: anchoredAcousticOnsetMs,
+      selected_onset_ms: selectedOnsetMs,
       rms_corroborated: corroborated,
+      source: timing.source,
       origin: 'recording_start',
     },
     evidence: [
       {
         source: 'transcript_and_audio_timeline',
         start: 0,
-        end: transcriptMs,
+        end: evidenceEndMs,
         coordinate: 'audio_millisecond',
         quote: firstWord.raw,
-        detail: 'Measured from recording start to the first final transcript word.',
+        detail:
+          timing.source === 'anchored_acoustic'
+            ? 'Measured from recording start using sustained voiced onset near the first recognized word.'
+            : 'Measured from recording start to the first final transcript word.',
       },
     ],
     deductions: deductions(
       'time_to_first_word',
       component,
-      `${seconds.toFixed(1)} seconds before the first recognized word.`,
+      `${seconds.toFixed(1)} seconds before you began speaking.`,
     ),
     warnings,
   }

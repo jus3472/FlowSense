@@ -51,6 +51,22 @@ export interface V3ContentEvaluation {
   metrics: Readonly<Record<WhatYouSaidMetricId, V3ContentMetricResult>>
   warnings: readonly string[]
   calls: number
+  /** Bounded development metadata. Never render this as user-facing copy. */
+  diagnostic?: V3ContentFailureDiagnostic | null
+}
+
+export type V3ContentFailureCategory =
+  | 'input_invalid'
+  | 'provider_unavailable'
+  | 'provider_invalid_response'
+  | 'content_validation_failed'
+  | 'internal_error'
+
+export interface V3ContentFailureDiagnostic {
+  category: V3ContentFailureCategory
+  code: string
+  reason: string | null
+  metric: WhatYouSaidMetricId | null
 }
 
 export interface V3ContentEvaluationInput {
@@ -61,4 +77,6 @@ export interface V3ContentEvaluationInput {
   mechanicallyOwned?: readonly V3MechanicallyOwnedSpan[]
   unreliableTranscriptSpans?: readonly V3TranscriptSpan[]
   timeoutMs?: number
+  /** Safe correlation id for bounded server diagnostics. */
+  diagnosticAttemptId?: string
 }

@@ -115,6 +115,10 @@ describe('v3 audio threshold policy', () => {
 
     expect(oneSevenSecondPause).toBe(sevenOneSecondPauses)
   })
+
+  it('keeps the initial practice energy calibration stable for the real-attempt spread', () => {
+    expect(Math.round(energyComponent(1.8257362749701238, 'practice') * 10)).toBe(4)
+  })
 })
 
 describe('evaluateAudioMetrics', () => {
@@ -171,7 +175,7 @@ describe('evaluateAudioMetrics', () => {
     expect(quiet.measurements.words_per_minute).toBe(steady.measurements.words_per_minute)
   })
 
-  it('anchors first word to recorder time and uses RMS only as corroboration', () => {
+  it('ignores an early click and anchors first word to nearby voiced speech', () => {
     const words = withConfidence(transcript).map((word) => ({
       ...word,
       start: word.start + 1.5,
@@ -192,8 +196,147 @@ describe('evaluateAudioMetrics', () => {
     expect(metric.measurements.transcript_ms).toBe(2_000)
     expect(metric.measurements.seconds).toBe(2)
     expect(metric.measurements.amplitude_onset_ms).toBe(500)
-    expect(metric.measurements.rms_corroborated).toBe(false)
-    expect(metric.warnings).toHaveLength(1)
+    expect(metric.measurements.anchored_acoustic_onset_ms).toBe(2_000)
+    expect(metric.measurements.selected_onset_ms).toBe(2_000)
+    expect(metric.measurements.source).toBe('anchored_acoustic')
+    expect(metric.measurements.rms_corroborated).toBe(true)
+    expect(metric.warnings).toEqual([])
+  })
+
+  it.each([
+    { label: 'immediate speech', shiftSeconds: 0, expectedMs: 500 },
+    { label: 'a natural delay', shiftSeconds: 2, expectedMs: 2_500 },
+    { label: 'a long hesitation', shiftSeconds: 7, expectedMs: 7_500 },
+  ])('measures $label from recording start', ({ shiftSeconds, expectedMs }) => {
+    const words = withConfidence(transcript).map((word) => ({
+      ...word,
+      start: word.start + shiftSeconds,
+      end: word.end + shiftSeconds,
+    }))
+    const metric = evaluation(transcript, words, captureFor(words)).metrics.time_to_first_word
+
+    expect(metric.status).toBe('scored')
+    expect(metric.measurements.selected_onset_ms).toBe(expectedMs)
+    expect(metric.measurements.seconds).toBe(expectedMs / 1_000)
+  })
+
+  it('requires voiced evidence at acoustic onset instead of treating a breath as speech', () => {
+    const words = withConfidence(transcript).map((word) => ({
+      ...word,
+      start: word.start + 1.5,
+      end: word.end + 1.5,
+    }))
+    const durationMs = 9_000
+    const capture = captureFor(words, {
+      duration_ms: durationMs,
+      amplitude: amplitudeTimeline(durationMs, [
+        { from_ms: 1_700, to_ms: 1_950, rms: 0.12 },
+        ...wordSegments(words),
+      ]),
+      pitch: pitchAcrossWords(words),
+    })
+    const metric = evaluation(transcript, words, capture).metrics.time_to_first_word
+
+    expect(metric.status).toBe('scored')
+    expect(metric.measurements.amplitude_onset_ms).toBe(1_700)
+    expect(metric.measurements.anchored_acoustic_onset_ms).toBeNull()
+    expect(metric.measurements.selected_onset_ms).toBe(2_000)
+    expect(metric.measurements.source).toBe('transcript')
+  })
+
+  it('sharpens the transcript boundary when sustained voiced onset closely agrees', () => {
+    const words = withConfidence(transcript).map((word) => ({
+      ...word,
+      start: word.start + 1.5,
+      end: word.end + 1.5,
+    }))
+    const durationMs = 9_000
+    const pitch = [
+      { t_ms: 1_850, hz: 120 },
+      { t_ms: 1_900, hz: 122 },
+      { t_ms: 1_950, hz: 121 },
+      ...pitchAcrossWords(words),
+    ]
+    const capture = captureFor(words, {
+      duration_ms: durationMs,
+      amplitude: amplitudeTimeline(durationMs, [
+        { from_ms: 1_850, to_ms: 2_100, rms: 0.12 },
+        ...wordSegments(words),
+      ]),
+      pitch,
+    })
+    const metric = evaluation(transcript, words, capture).metrics.time_to_first_word
+
+    expect(metric.status).toBe('scored')
+    expect(metric.measurements.transcript_ms).toBe(2_000)
+    expect(metric.measurements.anchored_acoustic_onset_ms).toBe(1_850)
+    expect(metric.measurements.selected_onset_ms).toBe(1_850)
+    expect(metric.measurements.source).toBe('anchored_acoustic')
+  })
+
+  it('falls back to the transcript anchor when voiced audio disagrees substantially', () => {
+    const words = withConfidence(transcript).map((word) => ({
+      ...word,
+      start: word.start + 1.5,
+      end: word.end + 1.5,
+    }))
+    const durationMs = 9_000
+    const backgroundPitch = Array.from({ length: 7 }, (_value, index) => ({
+      t_ms: 1_100 + index * 50,
+      hz: 115 + (index % 2),
+    }))
+    const capture = captureFor(words, {
+      duration_ms: durationMs,
+      amplitude: amplitudeTimeline(durationMs, [{ from_ms: 1_100, to_ms: 1_400, rms: 0.12 }]),
+      pitch: backgroundPitch,
+    })
+    const metric = evaluation(transcript, words, capture).metrics.time_to_first_word
+
+    expect(metric.status).toBe('scored')
+    expect(metric.measurements.amplitude_onset_ms).toBe(1_100)
+    expect(metric.measurements.selected_onset_ms).toBe(2_000)
+    expect(metric.measurements.source).toBe('transcript')
+  })
+
+  it('uses the same robust onset for first-word timing and pace on the real-attempt shape', () => {
+    const words = withConfidence(transcript).map((word) => ({
+      ...word,
+      start: word.start + 2.7,
+      end: word.end + 2.7,
+    }))
+    const durationMs = Math.ceil(words.at(-1)!.end * 1_000 + 1_000)
+    const amplitude = amplitudeTimeline(durationMs, [
+      { from_ms: 650, to_ms: 700, rms: 0.12 },
+      { from_ms: 1_100, to_ms: 1_450, rms: 0.12 },
+      { from_ms: 2_900, to_ms: words[0]!.end * 1_000, rms: 0.12 },
+      ...wordSegments(words),
+    ])
+    const earlyPitch = Array.from({ length: 8 }, (_value, index) => ({
+      t_ms: 1_100 + index * 50,
+      hz: 118 + (index % 2),
+    }))
+    const onsetPitch = Array.from({ length: 6 }, (_value, index) => ({
+      t_ms: 2_900 + index * 50,
+      hz: 120 + (index % 2),
+    }))
+    const capture = captureFor(words, {
+      duration_ms: durationMs,
+      amplitude,
+      pitch: [...earlyPitch, ...onsetPitch, ...pitchAcrossWords(words)],
+    })
+    const result = evaluation(transcript, words, capture)
+    const firstWord = result.metrics.time_to_first_word
+    const pace = result.metrics.pace
+
+    expect(firstWord.status).toBe('scored')
+    expect(firstWord.measurements.transcript_ms).toBeCloseTo(3_200)
+    expect(firstWord.measurements.amplitude_onset_ms).toBe(650)
+    expect(firstWord.measurements.selected_onset_ms).toBe(2_900)
+    expect(firstWord.measurements.seconds).toBe(2.9)
+    expect(pace.status).toBe('scored')
+    const expectedExcludedMs = 2_900 + (durationMs - words.at(-1)!.end * 1_000)
+    expect(pace.measurements.excluded_silence_ms).toBeCloseTo(expectedExcludedMs)
+    expect(pace.measurements.active_speaking_ms).toBeCloseTo(durationMs - expectedExcludedMs)
   })
 
   it('counts only unnatural interword pause duration and excludes edge silence', () => {

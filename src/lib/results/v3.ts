@@ -116,9 +116,20 @@ function measurementLabel(key: string): string {
   return key.replaceAll('_', ' ')
 }
 
+const INTERNAL_MEASUREMENT_KEYS = new Set([
+  'transcript_ms',
+  'amplitude_onset_ms',
+  'anchored_acoustic_onset_ms',
+  'selected_onset_ms',
+  'rms_corroborated',
+  'source',
+  'origin',
+])
+
 export function v3MeasurementDetails(result: V3PersistedMetricScore): string[] {
   if (!result.measurements) return []
   return Object.entries(result.measurements).flatMap(([key, value]) => {
+    if (INTERNAL_MEASUREMENT_KEYS.has(key)) return []
     if (value === null) return []
     if (typeof value === 'boolean') return [`${measurementLabel(key)}: ${value ? 'yes' : 'no'}`]
     if (typeof value === 'number') {

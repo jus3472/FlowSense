@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   v3EvidenceViews,
+  v3MeasurementDetails,
   v3MetricStatus,
   v3PrimaryMeasurement,
   v3TranscriptSegments,
@@ -90,5 +91,24 @@ describe('v3 result presentation helpers', () => {
       description: 'The evidence needed for this metric was unavailable.',
     })
     expect(v3PrimaryMeasurement('energy', unavailable)).toBeNull()
+  })
+
+  it('keeps first-word corroboration diagnostics out of the user-facing detail list', () => {
+    const metric = v3Snapshot({
+      evidenceMetric: 'time_to_first_word',
+      measurements: {
+        seconds: 2.9,
+        transcript_ms: 3_200,
+        amplitude_onset_ms: 650,
+        anchored_acoustic_onset_ms: 2_900,
+        selected_onset_ms: 2_900,
+        rms_corroborated: true,
+        source: 'anchored_acoustic',
+        origin: 'recording_start',
+      },
+    }).sections.how_you_sounded.metrics.time_to_first_word
+
+    expect(v3PrimaryMeasurement('time_to_first_word', metric)).toBe('2.9 sec')
+    expect(v3MeasurementDetails(metric)).toEqual(['seconds: 2.90'])
   })
 })

@@ -96,6 +96,72 @@ describe('v3 content evaluator contract', () => {
     expect(parsed.metrics.word_choice.evidence[0]).toMatchObject({ start: 10, end: 15 })
   })
 
+  it('repairs incorrect offsets only when the exact quote is unique', () => {
+    const parsed = parseV3ContentResponse(
+      response({
+        word_choice: metric({
+          component: 0.8,
+          explanation: 'You use one broad word.',
+          findings: [
+            {
+              ...finding('vague_wording', 'useful'),
+              start: 0,
+              end: 6,
+            },
+          ],
+        }),
+      }),
+      { transcript: TRANSCRIPT },
+    )
+
+    expect(parsed.metrics.word_choice.evidence[0]).toMatchObject({
+      start: TRANSCRIPT.indexOf('useful'),
+      end: TRANSCRIPT.indexOf('useful') + 'useful'.length,
+      quote: 'useful',
+    })
+  })
+
+  it('rejects offset repair when the quote is ambiguous', () => {
+    const transcript = 'work can clarify work.'
+    expect(() =>
+      parseV3ContentResponse(
+        response({
+          word_choice: metric({
+            component: 0.8,
+            explanation: 'You repeat one broad word.',
+            findings: [
+              {
+                ...finding('vague_wording', 'work', transcript),
+                start: 2,
+                end: 6,
+              },
+            ],
+          }),
+        }),
+        { transcript },
+      ),
+    ).toThrow(/did not match the transcript/)
+  })
+
+  it('allows response-level repetition without a fabricated contiguous quote', () => {
+    const parsed = parseV3ContentResponse(
+      response({
+        conciseness: metric({
+          component: 0.8,
+          explanation: 'You repeat the same idea in separate sentences.',
+          findings: [finding('repeated_idea', null)],
+        }),
+      }),
+      { transcript: TRANSCRIPT },
+    )
+
+    expect(parsed.metrics.conciseness.details[0]).toMatchObject({
+      kind: 'repeated_idea',
+      quote: null,
+      evidence: [],
+    })
+  })
+
   it.each([
     ['missing metric', JSON.stringify({ version: V3_CONTENT_EVALUATOR_VERSION, metrics: {} })],
     ['extra metric', response({ hidden_quality: metric() })],
@@ -211,7 +277,43 @@ describe('v3 content evaluator contract', () => {
     expect(evaluated.status).toBe('not_checked')
     expect(evaluated.calls).toBe(2)
     expect(evaluated.warnings).toEqual([CONTENT_PROVIDER_UNAVAILABLE_MESSAGE])
+    expect(evaluated.diagnostic).toMatchObject({
+      category: 'provider_invalid_response',
+      code: 'schema_invalid',
+      reason: 'envelope_invalid',
+    })
     expect(Object.values(evaluated.metrics).every((metric) => metric.component === null)).toBe(true)
+  })
+
+  it('classifies transcript-evidence rejection separately from provider availability', async () => {
+    const complete = vi.fn().mockResolvedValue(
+      response({
+        word_choice: metric({
+          component: 0.8,
+          findings: [
+            {
+              ...finding('vague_wording', 'invented'),
+              start: 0,
+              end: 8,
+            },
+          ],
+        }),
+      }),
+    )
+    const evaluated = await runV3ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: 'Describe your role.',
+      transcript: TRANSCRIPT,
+    })
+
+    expect(evaluated.status).toBe('not_checked')
+    expect(evaluated.diagnostic).toEqual({
+      category: 'content_validation_failed',
+      code: 'schema_invalid',
+      reason: 'evidence_not_in_transcript',
+      metric: 'word_choice',
+    })
   })
 
   it('returns the complete second response after a malformed first response', async () => {
