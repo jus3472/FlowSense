@@ -7,9 +7,11 @@ appears, a countdown runs, and the user answers aloud for up to 60 seconds. The 
 response out of 100, never a permanent rating of the person.
 
 The primary modes are General Practice (`practice`), Interviews (`interview`), Presentations
-(`presentation`), and Conversations (`conversation`). They share the same top-level skill
-categories: fluency, clarity, vocabulary, grammar, structure, and delivery. A mode can alter the
-weights and add mode-specific feedback or checks, but it cannot become an unrelated scoring system.
+(`presentation`), and Conversations (`conversation`). New attempts share exactly 11 visible
+metrics. What You Said contains Answered the Prompt, Specificity, Structure, Conciseness, Word
+Choice, and Grammar. How You Sounded contains Pace, Time to First Word, Paused Time, Articulation,
+and Energy. A mode alters their weights and acoustic thresholds, but it cannot become an unrelated
+scoring system.
 
 It is for people who can write clearly but stall, pad, or circle when speaking. The interface must
 not assume a professional setting, a native speaker, or a particular age. It never judges accent or
@@ -53,21 +55,37 @@ A single `getUserMedia` stream feeds `MediaRecorder`, RMS amplitude sampling eve
 
 Transcription uses Deepgram `nova-2` with punctuation and filler words enabled. Do not turn on smart formatting because the application needs the original disfluencies. `nova-3` must not replace it without checking filler behavior on real recordings.
 
+New attempts use rubric `v3` and payload `v3.score.1`. The two sections are always worth 50 points.
+DeepSeek evaluates only the six content metrics as normalized components under a strict schema.
+Code owns fillers, false starts, and closers within Conciseness, validates exact UTF-16 evidence,
+and prevents overlap between mechanical and AI findings. The five audio metrics are pure over stored
+capture evidence and the final Deepgram word array:
+
+- Pace is articulation rate: timed words divided by active speaking time after detected silence is removed.
+- Time to First Word is the first final word timestamp from recording start, with RMS onset used only as corroboration.
+- Paused Time adds only mode-configured disruptive interword silence; the score uses cumulative duration, never pause count.
+- Articulation uses the proportion of eligible words with low final recognition confidence, gated by confidence coverage and audio signal separation. It does not use accent labels or native similarity.
+- Energy uses robust semitone pitch spread inside recognized-word windows after octave correction. Loudness is not scored.
+
+Any required metric that is missing, malformed, or insufficient makes the composite score
+unavailable. Partial output never becomes a trustworthy zero or passing result. General Practice is
+the default weight configuration for Free Practice and Custom Prompt unless another mode is selected.
+
 The following 50/50, ten-metric score is the current legacy v1 implementation retained during the
 v2 transition. It does not define the v2 category architecture:
 
-| Section | Check or metric | Points |
-| --- | --- | ---: |
-| What you said | Answered the question | 14 |
-| What you said | Explained your reasoning | 12 |
-| What you said | Word choice | 12 |
-| What you said | Logical order | 7 |
-| What you said | No repetition | 5 |
-| How you sounded | Filler words | 18 |
-| How you sounded | Mid-sentence pauses | 14 |
-| How you sounded | Energy | 8 |
-| How you sounded | Pace | 6 |
-| How you sounded | Time to first word | 4 |
+| Section         | Check or metric          | Points |
+| --------------- | ------------------------ | -----: |
+| What you said   | Answered the question    |     14 |
+| What you said   | Explained your reasoning |     12 |
+| What you said   | Word choice              |     12 |
+| What you said   | Logical order            |      7 |
+| What you said   | No repetition            |      5 |
+| How you sounded | Filler words             |     18 |
+| How you sounded | Mid-sentence pauses      |     14 |
+| How you sounded | Energy                   |      8 |
+| How you sounded | Pace                     |      6 |
+| How you sounded | Time to first word       |      4 |
 
 The legacy v1 mechanical scores are pure functions over the stored capture timelines and Deepgram
 word array. Points use `round(max_points * component_score)`. Pace uses speaking time, not wall-clock
@@ -90,18 +108,21 @@ Supabase owns authentication, Postgres, and private recording storage. The main 
 - `attempts`: prompt snapshot, audio path, transcript, duration, score, sections, metrics, and content result. `prompt_text` is intentionally denormalized so later edits do not rewrite history.
 - `note_feedback`: disputes against content findings. Disputes are reapplied when results are read; they do not overwrite the stored model result.
 
-Scoring metrics and content results are JSONB by design. Every new v2-scored attempt must record
-its rubric and score version alongside its stored result snapshots. Legacy attempts may have null or
-legacy metadata; their stored snapshots remain authoritative. Later rubric, model, or mode changes
-must not overwrite or silently reinterpret a past result. New shapes must remain compatible with
-historical `attempts` data. RLS applies to every user table and the private `recordings` bucket. Add
-explicit insert policies when adding a table or storage path.
+Scoring metrics and content results are JSONB by design. Every new v3-scored attempt must record its
+rubric and score version alongside its stored result snapshots. Historical v1 and v2 attempts may
+have null or older metadata; their stored snapshots remain authoritative. Later rubric, model, or
+mode changes must not overwrite, mix, or silently reinterpret a past result. New shapes must remain
+compatible with historical `attempts` data. RLS applies to every user table and the private
+`recordings` bucket. Add explicit insert policies when adding a table or storage path.
 
 Only `src/lib/env/server.ts` may read server secrets, including the optional `AZURE_SPEECH_KEY`. The lint configuration and tests enforce this boundary. Never add secrets to a client component, a public environment variable, documentation examples, or committed local files. Azure pronunciation evidence is guarded to documented short-audio formats and is never a deduction.
 
 ## Results and Interface
 
-The results page order is score, transcript, What you said, How you sounded, collapsed tighter version, collapsed statistics, player, and one primary action. The score bar is a literal proportion of 100, not a gauge or target.
+For v3 results the page order is overall and two section scores, a short metric-grounded
+recommendation, transcript, What You Said, How You Sounded, and the recording player. Historical v1
+and v2 results retain their schema-specific renderer. The score bar is a literal proportion of 100,
+not a gauge or target.
 
 Amber transcript marks mean exactly one thing: the marked speech cost points. Whole-response checks such as Answered the question and Logical order do not create transcript marks. Each content finding is shown once: a quoted finding must not repeat in its grouped span list. The statistics count shown to users must visibly match the units in the displayed list.
 
@@ -135,7 +156,7 @@ failure codes are unavailable because those bounded diagnostics are logged but n
 
 - A prior public repository committed an environment file. Treat those keys as compromised and rotate them.
 - Content calibration needs broader real-recording coverage across deliberately varied responses.
-- Pace thresholds were set on native conversational English and can be less representative for some second-language speakers.
+- Initial mode-specific pace, pause, onset, recognition-confidence, and pitch-spread thresholds need calibration across broader real-device recordings and speaking styles.
 - Browser backgrounding can throttle capture sampling. Timeline timestamps preserve the evidence, but an AudioWorklet would remove the issue.
 - Browser-reported audio duration is unreliable for recorded blobs. Use measured `duration_ms` for playback and score calculations.
 
@@ -143,6 +164,6 @@ failure codes are unavailable because those bounded diagnostics are logged but n
 
 Do not add vocabulary training, vocabulary-level or status judgments, accent judgments,
 self-correction penalties, clause-level abandonment detection, relative personal baselines,
-weighted-average scoring, free-form rewrites, user comparisons, benchmarks, gauge-style score bars,
+free-form rewrites, user comparisons, benchmarks, gauge-style score bars,
 pricing, plans, or usage limits. These directions conflict with the product's measurement-first
 model or were previously rejected after testing.

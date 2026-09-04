@@ -5,20 +5,21 @@ a time in General Practice, Interviews, Presentations, or Conversations. A promp
 built-in library or is custom, the user answers aloud for up to 60 seconds, and the result measures
 that response out of 100.
 
-Each mode uses the same top-level skill categories: fluency, clarity, vocabulary, grammar,
-structure, and delivery. Modes can adjust weights and add mode-specific feedback or checks, but
-they remain one measurement system rather than unrelated scoring systems. Results describe the
-response, never a permanent rating of the person. Feedback is concrete and measurement-first, and a
-speech span can cost points under only one check or metric.
+New attempts use one scoring system with a transparent 50/50 split. What You Said measures Answered the Prompt,
+Specificity, Structure, Conciseness, Word Choice, and Grammar. How You Sounded measures Pace, Time
+to First Word, Paused Time, Articulation, and Energy. Modes change the points assigned to those same
+11 metrics, not the scoring ontology. Results describe the response, never a permanent rating of the
+person. Feedback is concrete and measurement-first, and a speech span can cost points under only one
+check or metric.
 
 Grammar and vocabulary feedback is supported when it identifies a concrete, response-level choice
 that affects clarity or effectiveness. It is not vocabulary training, a vocabulary-level assessment,
 or a status judgment. FlowSense never judges accent. Any future pronunciation feedback must measure
 intelligibility or phoneme accuracy, never whether someone sounds native.
 
-Every new v2-scored attempt must store a rubric and score version. Legacy attempts may have null or
-legacy metadata; their stored snapshots remain authoritative, including the prompt, transcript,
-capture data, and scoring results, and must not be rewritten by later rubric changes.
+Every new v3-scored attempt must store a rubric and score version. Legacy v1 and v2 attempts may
+have older or null metadata; their stored snapshots remain authoritative, including the prompt,
+transcript, capture data, and scoring results, and must not be rewritten by later rubric changes.
 
 ## Documentation
 
@@ -45,10 +46,10 @@ Required application variables:
 - `DEEPGRAM_API_KEY`
 - `DEEPSEEK_API_KEY`
 
-Optional server-only pronunciation evidence uses `AZURE_SPEECH_ENDPOINT`,
-`AZURE_SPEECH_KEY`, and `AZURE_SPEECH_LOCALE`. The guarded adapter accepts only Azure's
-documented 16 kHz PCM WAV and OGG Opus short-audio inputs up to 30 seconds; other recordings
-remain not checked and no pronunciation deductions are applied.
+Optional server-only pronunciation evidence for historical v2 scoring uses
+`AZURE_SPEECH_ENDPOINT`, `AZURE_SPEECH_KEY`, and `AZURE_SPEECH_LOCALE`. New v3 attempts do not
+use Azure in their score. Their Articulation metric uses final Deepgram word confidence, guarded by
+stored audio signal and evidence-coverage checks, and never measures accent conformity.
 
 `SUPABASE_DB_URL` is local-only and required only for database migrations and inspection scripts.
 
