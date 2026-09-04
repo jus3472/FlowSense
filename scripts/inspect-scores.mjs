@@ -69,6 +69,40 @@ for (const row of rows) {
   console.log(`${row.id}   ${new Date(row.created_at).toISOString()}`)
   console.log(`prompt: ${row.prompt_text}`)
   console.log(line())
+
+  if (sections.version === 'v3.score.1' && sections.rubric_version === 'v3') {
+    console.log(`OVERALL ${row.score === null ? 'unavailable' : `${row.score} / 100`}`)
+    if (sections.recommendation?.text) {
+      console.log(`  recommendation: ${sections.recommendation.text}`)
+    }
+    for (const [sectionId, heading] of [
+      ['what_you_said', 'WHAT YOU SAID'],
+      ['how_you_sounded', 'HOW YOU SOUNDED'],
+    ]) {
+      const section = sections.sections?.[sectionId] ?? {}
+      console.log(`\n${heading}`)
+      console.log(
+        `  ${section.earned_points === null ? '--' : section.earned_points} / ${section.max_points ?? 50}`,
+      )
+      for (const metric of Object.values(section.metrics ?? {})) {
+        const points = metric.earned_points === null ? '--' : metric.earned_points
+        const measurement = Object.entries(metric.measurements ?? {})
+          .map(([name, value]) => `${name}=${value}`)
+          .join(', ')
+        console.log(
+          `  ${pad(metric.metric)} ${String(points).padStart(2)} / ${metric.max_points}  ${metric.status}`,
+        )
+        if (measurement) console.log(`  ${' '.repeat(22)}     ${measurement}`)
+        if (metric.explanation) console.log(`  ${' '.repeat(22)}     ${metric.explanation}`)
+      }
+    }
+    if ((sections.warnings ?? []).length > 0) {
+      console.log('\nWARNINGS')
+      for (const warning of sections.warnings) console.log(`  ${warning}`)
+    }
+    continue
+  }
+
   console.log(`CLARITY ${row.score} / 100`)
   console.log(
     `  content  ${String(sections.content?.earned ?? 0).padStart(2)} / ${sections.content?.max ?? 50}  ${bar(sections.content?.earned ?? 0, sections.content?.max ?? 50)}`,
