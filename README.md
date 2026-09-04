@@ -71,7 +71,7 @@ stored audio signal and evidence-coverage checks, and never measures accent conf
 | `npm run inspect:scores`              | Inspect scored attempt breakdowns           |
 | `npm run inspect:content-reliability` | Inspect aggregate content-provider health   |
 | `npm run inspect:rewrites`            | Audit stored tightened rewrites             |
-| `npm run check:scoring-calibration`   | Run generated v2 scoring calibration corpus |
+| `npm run check:scoring-calibration`   | Run local scoring calibration corpora       |
 
 `npm run inspect:rewrites -- --write` updates stored rewrites and can call the content provider
 when a retry is necessary. Run it deliberately.
@@ -91,9 +91,9 @@ screenshots, videos, and the HTML report are written to ignored Playwright outpu
 
 ## Scoring calibration
 
-`npm run check:scoring-calibration` runs two primary generated, local-only v2 corpora plus the existing
-Delivery-next calibration evidence. The exact snapshot corpus prints `PASS` or `DRIFT` and exits
-nonzero on implementation drift. The reviewed range corpus reads
+`npm run check:scoring-calibration` runs two primary generated, local-only v2 corpora, the existing
+Delivery-next calibration evidence, and deterministic v3 Energy fixtures. The exact snapshot corpus
+prints `PASS` or `DRIFT` and exits nonzero on implementation drift. The reviewed range corpus reads
 `fixtures/scoring/phase1-calibration.json` and compares normalized category scores from 0 through 100
 with reviewed ranges:
 
@@ -117,6 +117,10 @@ evaluator change, update the exact versioned expectations manually in
 The unclear-pronunciation and intelligible second-language-accent fixtures carry normalized
 evidence only, with `eligibleForDeductions=false`. They do not assess native similarity or deduct
 for an intelligible accent.
+
+The v3 Energy fixtures cover monotone, restrained-natural, naturally expressive, exaggerated-pitch,
+and rhythmically robotic signal patterns. They validate reviewed composite ranges without reading
+recordings or making provider calls.
 
 ## Database and deployment
 

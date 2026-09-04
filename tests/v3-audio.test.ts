@@ -82,8 +82,14 @@ describe('v3 audio threshold policy', () => {
         paceComponent(155, mode),
         pausedTimeComponent(2_000, mode),
         articulationComponent(0.2, mode),
-        energyComponent(2, mode),
+        energyComponent({
+          pitch_range: 0.5,
+          pitch_variation: 0.5,
+          non_monotony: 0.5,
+          rhythm_cadence: 0.5,
+        }),
       ]) {
+        expect(component).not.toBeNull()
         expect(component).toBeGreaterThanOrEqual(0)
         expect(component).toBeLessThanOrEqual(1)
       }
@@ -94,7 +100,14 @@ describe('v3 audio threshold policy', () => {
       pausedTimeComponent(2_000, 'conversation'),
     )
     expect(pausedTimeComponent(-1, 'practice')).toBe(0)
-    expect(energyComponent(Number.NaN, 'practice')).toBe(0)
+    expect(
+      energyComponent({
+        pitch_range: Number.NaN,
+        pitch_variation: 0.5,
+        non_monotony: 0.5,
+        rhythm_cadence: 0.5,
+      }),
+    ).toBeNull()
   })
 
   it('gives excessive paused time a natural full-score plateau', () => {
@@ -113,10 +126,6 @@ describe('v3 audio threshold policy', () => {
 
     expect(oneSevenSecondPause).toBe(sevenOneSecondPauses)
   })
-
-  it('keeps the initial practice energy calibration stable for the real-attempt spread', () => {
-    expect(Math.round(energyComponent(1.8257362749701238, 'practice') * 10)).toBe(4)
-  })
 })
 
 describe('evaluateAudioMetrics', () => {
@@ -126,7 +135,7 @@ describe('evaluateAudioMetrics', () => {
   it('returns four explicit, independently scored metric records', () => {
     const result = evaluation(transcript)
 
-    expect(result.version).toBe('v3.audio.2')
+    expect(result.version).toBe('v3.audio.3')
     expect(Object.keys(result.metrics)).toEqual(AUDIO_METRIC_IDS)
     for (const metric of Object.values(result.metrics)) {
       expect(metric.status).toBe('scored')
@@ -135,6 +144,15 @@ describe('evaluateAudioMetrics', () => {
       expect(metric.component!).toBeLessThanOrEqual(1)
       expect(metric.explanation.length).toBeGreaterThan(0)
     }
+    expect(result.metrics.energy.measurements).toMatchObject({
+      pitch_range_component: expect.any(Number),
+      pitch_variation_component: expect.any(Number),
+      non_monotony_component: expect.any(Number),
+      rhythm_cadence_component: expect.any(Number),
+    })
+    expect(result.metrics.energy.explanation).not.toMatch(
+      /MAD|percentile|voiced frame|autocorrelation|temporal bin/i,
+    )
   })
 
   it('computes pace from recording time minus validated pause time', () => {
@@ -421,6 +439,25 @@ describe('evaluateAudioMetrics', () => {
     expect(longTail.component).toBe(shortTail.component)
   })
 
+  it('keeps a long interword pause owned by Paused Time instead of Energy', () => {
+    const ordinaryWords = withConfidence(transcript)
+    const delayedWords = ordinaryWords.map((word, index) =>
+      index < 6 ? word : { ...word, start: word.start + 4, end: word.end + 4 },
+    )
+    const ordinary = evaluation(transcript, ordinaryWords, captureFor(ordinaryWords))
+    const delayed = evaluation(transcript, delayedWords, captureFor(delayedWords))
+
+    expect(delayed.metrics.paused_time.component).toBeLessThan(
+      ordinary.metrics.paused_time.component!,
+    )
+    expect(delayed.metrics.energy.status).toBe('scored')
+    expect(delayed.metrics.energy.component).toBeCloseTo(ordinary.metrics.energy.component!, 10)
+    expect(delayed.metrics.energy.measurements.cadence_log_spread).toBeCloseTo(
+      ordinary.metrics.energy.measurements.cadence_log_spread!,
+      10,
+    )
+  })
+
   it('excludes filler, false-start, and closer token spans from articulation', () => {
     const discourseTranscript =
       'Um, I I clearly explained the detailed project schedule and final outcome, you know.'
@@ -467,7 +504,8 @@ describe('evaluateAudioMetrics', () => {
     const metric = evaluation(transcript, words, captureFor(words, { pitch })).metrics.energy
 
     expect(metric.status).toBe('scored')
-    expect(metric.measurements.pitch_spread_semitones).toBe(0)
+    expect(metric.measurements.pitch_range_semitones).toBe(0)
+    expect(metric.measurements.pitch_variation_semitones).toBe(0)
     expect(metric.component).toBe(0)
   })
 
@@ -495,8 +533,11 @@ describe('evaluateAudioMetrics', () => {
     expect(steady.status).toBe('scored')
     expect(varying.status).toBe('scored')
     expect(varying.component).toBe(steady.component)
-    expect(varying.measurements.pitch_spread_semitones).toBe(
-      steady.measurements.pitch_spread_semitones,
+    expect(varying.measurements.pitch_range_semitones).toBe(
+      steady.measurements.pitch_range_semitones,
+    )
+    expect(varying.measurements.pitch_variation_semitones).toBe(
+      steady.measurements.pitch_variation_semitones,
     )
   })
 
@@ -513,6 +554,17 @@ describe('evaluateAudioMetrics', () => {
     expect(metric.measurements.voiced_frame_count).toBe(60)
     expect(metric.measurements.covered_temporal_bin_count).toBe(1)
     expect(metric.component).toBeNull()
+  })
+
+  it('requires enough timed words for cadence rather than fabricating a subcomponent', () => {
+    const shortTranscript = 'I explained one clear choice today.'
+    const words = withConfidence(shortTranscript)
+    const metric = evaluation(shortTranscript, words, captureFor(words)).metrics.energy
+
+    expect(words).toHaveLength(6)
+    expect(metric.status).toBe('unavailable')
+    expect(metric.component).toBeNull()
+    expect(metric.warnings).toContain('At least 8 timed words are required.')
   })
 
   it('fails closed when persisted capture timelines are incomplete', () => {

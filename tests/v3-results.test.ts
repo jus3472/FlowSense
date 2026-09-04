@@ -112,6 +112,42 @@ describe('v3 result presentation helpers', () => {
     expect(v3MeasurementDetails(metric)).toEqual(['seconds: 2.90'])
   })
 
+  it('summarizes composite Energy evidence while preserving historical pitch-spread display', () => {
+    const current = v3Snapshot({
+      evidenceMetric: 'energy',
+      measurements: {
+        pitch_range_semitones: 5.24,
+        pitch_variation_semitones: 2.18,
+        flat_window_proportion: 1 / 3,
+        cadence_log_spread: 0.19,
+        pitch_range_component: 0.93,
+        pitch_variation_component: 0.61,
+        non_monotony_component: 0.86,
+        rhythm_cadence_component: 0.83,
+        voiced_frame_count: 72,
+        temporal_bin_count: 4,
+        covered_temporal_bin_count: 4,
+        monotony_window_count: 6,
+        flat_window_count: 2,
+        cadence_window_count: 8,
+      },
+    }).sections.how_you_sounded.metrics.energy
+    expect(v3PrimaryMeasurement('energy', current)).toBe('67% vocally varied windows')
+    expect(v3MeasurementDetails(current)).toEqual([
+      'central pitch range: 5.2 semitones',
+      'typical pitch variation: 2.2 semitones',
+      'flatter vocal windows: 33%',
+      'active-speech timing: varied',
+    ])
+
+    const historical = v3Snapshot({
+      evidenceMetric: 'energy',
+      measurements: { pitch_spread_semitones: 1.74 },
+    }).sections.how_you_sounded.metrics.energy
+    expect(v3PrimaryMeasurement('energy', historical)).toBe('1.7 semitone pitch spread')
+    expect(v3MeasurementDetails(historical)).toEqual(['pitch spread semitones: 1.74'])
+  })
+
   it('shows validated AI filler counts and transcript evidence under Conciseness', () => {
     const transcript = 'Um, I led the launch.'
     const payload = v3Snapshot({

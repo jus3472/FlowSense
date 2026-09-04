@@ -9,7 +9,7 @@ import { clamp01, median, medianAbsoluteDeviation } from '@/lib/scoring/scale'
 import { buildTokens, normalizeWord, type Token } from '@/lib/scoring/tokens'
 import type { CaptureMetrics } from '@/lib/types/metrics'
 
-export const AUDIO_ANALYSIS_VERSION = 'v3.audio.2' as const
+export const AUDIO_ANALYSIS_VERSION = 'v3.audio.3' as const
 
 export const AUDIO_METRIC_IDS = ['pace', 'paused_time', 'articulation', 'energy'] as const
 
@@ -37,8 +37,23 @@ export interface AudioModeThresholds {
     readonly globally_uncertain_at: number
   }
   readonly energy: {
-    readonly zero_through_semitones: number
-    readonly full_from_semitones: number
+    readonly pitch_range: {
+      readonly zero_through_semitones: number
+      readonly full_from_semitones: number
+    }
+    readonly pitch_variation: {
+      readonly zero_through_semitones: number
+      readonly full_from_semitones: number
+    }
+    readonly non_monotony: {
+      readonly flat_window_through_semitones: number
+      readonly full_through_flat_proportion: number
+      readonly zero_at_flat_proportion: number
+    }
+    readonly rhythm_cadence: {
+      readonly zero_through_log_spread: number
+      readonly full_from_log_spread: number
+    }
   }
 }
 
@@ -47,7 +62,12 @@ function frozenThresholds(value: AudioModeThresholds): AudioModeThresholds {
     pace: Object.freeze(value.pace),
     paused_time: Object.freeze(value.paused_time),
     articulation: Object.freeze(value.articulation),
-    energy: Object.freeze(value.energy),
+    energy: Object.freeze({
+      pitch_range: Object.freeze(value.energy.pitch_range),
+      pitch_variation: Object.freeze(value.energy.pitch_variation),
+      non_monotony: Object.freeze(value.energy.non_monotony),
+      rhythm_cadence: Object.freeze(value.energy.rhythm_cadence),
+    }),
   })
 }
 
@@ -55,7 +75,8 @@ function frozenThresholds(value: AudioModeThresholds): AudioModeThresholds {
  * Mode-specific measurement thresholds. Metric weights live in the scoring definition.
  * Each component is piecewise linear between named anchors so product tuning remains
  * explicit: pace has a natural band, paused time totals only silence beyond contextual
- * allowances, confidence is a low-word proportion, and energy is robust pitch spread.
+ * allowances, confidence is a low-word proportion, and Energy combines four
+ * independently calibrated pitch and active-speech timing signals.
  */
 export const AUDIO_THRESHOLDS_BY_MODE: Readonly<Record<PracticeMode, AudioModeThresholds>> =
   Object.freeze({
@@ -80,7 +101,16 @@ export const AUDIO_THRESHOLDS_BY_MODE: Readonly<Record<PracticeMode, AudioModeTh
         zero_at_low_proportion: 0.45,
         globally_uncertain_at: 0.6,
       },
-      energy: { zero_through_semitones: 1.2, full_from_semitones: 2.8 },
+      energy: {
+        pitch_range: { zero_through_semitones: 2, full_from_semitones: 5.5 },
+        pitch_variation: { zero_through_semitones: 1.2, full_from_semitones: 2.8 },
+        non_monotony: {
+          flat_window_through_semitones: 0.55,
+          full_through_flat_proportion: 0.25,
+          zero_at_flat_proportion: 0.85,
+        },
+        rhythm_cadence: { zero_through_log_spread: 0.04, full_from_log_spread: 0.22 },
+      },
     }),
     interview: frozenThresholds({
       pace: {
@@ -103,7 +133,16 @@ export const AUDIO_THRESHOLDS_BY_MODE: Readonly<Record<PracticeMode, AudioModeTh
         zero_at_low_proportion: 0.4,
         globally_uncertain_at: 0.6,
       },
-      energy: { zero_through_semitones: 1.2, full_from_semitones: 2.8 },
+      energy: {
+        pitch_range: { zero_through_semitones: 2, full_from_semitones: 5.5 },
+        pitch_variation: { zero_through_semitones: 1.2, full_from_semitones: 2.8 },
+        non_monotony: {
+          flat_window_through_semitones: 0.55,
+          full_through_flat_proportion: 0.25,
+          zero_at_flat_proportion: 0.8,
+        },
+        rhythm_cadence: { zero_through_log_spread: 0.04, full_from_log_spread: 0.22 },
+      },
     }),
     presentation: frozenThresholds({
       pace: {
@@ -126,7 +165,16 @@ export const AUDIO_THRESHOLDS_BY_MODE: Readonly<Record<PracticeMode, AudioModeTh
         zero_at_low_proportion: 0.4,
         globally_uncertain_at: 0.6,
       },
-      energy: { zero_through_semitones: 1.4, full_from_semitones: 3 },
+      energy: {
+        pitch_range: { zero_through_semitones: 2.5, full_from_semitones: 6.5 },
+        pitch_variation: { zero_through_semitones: 1.4, full_from_semitones: 3 },
+        non_monotony: {
+          flat_window_through_semitones: 0.65,
+          full_through_flat_proportion: 0.2,
+          zero_at_flat_proportion: 0.8,
+        },
+        rhythm_cadence: { zero_through_log_spread: 0.05, full_from_log_spread: 0.25 },
+      },
     }),
     conversation: frozenThresholds({
       pace: {
@@ -149,7 +197,16 @@ export const AUDIO_THRESHOLDS_BY_MODE: Readonly<Record<PracticeMode, AudioModeTh
         zero_at_low_proportion: 0.45,
         globally_uncertain_at: 0.6,
       },
-      energy: { zero_through_semitones: 1.1, full_from_semitones: 2.6 },
+      energy: {
+        pitch_range: { zero_through_semitones: 1.8, full_from_semitones: 5 },
+        pitch_variation: { zero_through_semitones: 1.1, full_from_semitones: 2.6 },
+        non_monotony: {
+          flat_window_through_semitones: 0.5,
+          full_through_flat_proportion: 0.35,
+          zero_at_flat_proportion: 0.9,
+        },
+        rhythm_cadence: { zero_through_log_spread: 0.03, full_from_log_spread: 0.2 },
+      },
     }),
   })
 
@@ -158,7 +215,10 @@ export function validateAudioModeThresholds(value: AudioModeThresholds): boolean
     ...Object.values(value.pace),
     ...Object.values(value.paused_time),
     ...Object.values(value.articulation),
-    ...Object.values(value.energy),
+    ...Object.values(value.energy.pitch_range),
+    ...Object.values(value.energy.pitch_variation),
+    ...Object.values(value.energy.non_monotony),
+    ...Object.values(value.energy.rhythm_cadence),
   ]
   if (!numbers.every((item) => Number.isFinite(item) && item >= 0)) return false
   const { pace, paused_time: pause, articulation, energy } = value
@@ -174,7 +234,12 @@ export function validateAudioModeThresholds(value: AudioModeThresholds): boolean
     articulation.full_through_low_proportion < articulation.zero_at_low_proportion &&
     articulation.zero_at_low_proportion < articulation.globally_uncertain_at &&
     articulation.globally_uncertain_at <= 1 &&
-    energy.zero_through_semitones < energy.full_from_semitones
+    energy.pitch_range.zero_through_semitones < energy.pitch_range.full_from_semitones &&
+    energy.pitch_variation.zero_through_semitones < energy.pitch_variation.full_from_semitones &&
+    energy.non_monotony.full_through_flat_proportion <
+      energy.non_monotony.zero_at_flat_proportion &&
+    energy.non_monotony.zero_at_flat_proportion <= 1 &&
+    energy.rhythm_cadence.zero_through_log_spread < energy.rhythm_cadence.full_from_log_spread
   )
 }
 
@@ -266,10 +331,20 @@ export interface ArticulationMeasurements {
 }
 
 export interface EnergyMeasurements {
-  pitch_spread_semitones: number | null
+  pitch_range_semitones: number | null
+  pitch_variation_semitones: number | null
+  flat_window_proportion: number | null
+  cadence_log_spread: number | null
+  pitch_range_component: number | null
+  pitch_variation_component: number | null
+  non_monotony_component: number | null
+  rhythm_cadence_component: number | null
   voiced_frame_count: number
   temporal_bin_count: number
   covered_temporal_bin_count: number
+  monotony_window_count: number
+  flat_window_count: number
+  cadence_window_count: number
 }
 
 export interface AudioMetricEvaluations {
@@ -300,10 +375,12 @@ const MIN_SPEECH_FRAMES = 10
 const MIN_SPEECH_LEVEL = 0.002
 const MIN_SPEECH_TO_NOISE_RATIO = 2.5
 const MAX_EVIDENCE_ITEMS = 8
-const MIN_ENERGY_WORDS = 3
-const MIN_VOICED_FRAMES = 40
-const ENERGY_TEMPORAL_BINS = 3
-const MIN_COVERED_ENERGY_BINS = 2
+const MIN_ENERGY_WORDS = 8
+const MIN_VOICED_FRAMES = 48
+const ENERGY_TEMPORAL_BINS = 4
+const MIN_COVERED_ENERGY_BINS = 3
+const ENERGY_MONOTONY_WINDOWS = 6
+const ENERGY_CADENCE_WORD_WINDOW = 3
 const MIN_TIMELINE_DENSITY = 0.7
 const MAX_CAPTURE_DURATION_MS = 120_000
 const FIRST_WORD_LOOKBACK_MS = 600
@@ -357,13 +434,197 @@ export function articulationComponent(lowConfidenceProportion: number, mode: Pra
   )
 }
 
-export function energyComponent(spreadSemitones: number, mode: PracticeMode): number {
-  const threshold = AUDIO_THRESHOLDS_BY_MODE[mode].energy
+/**
+ * Pitch Variation and Non-Monotony receive the most weight because robust pitch
+ * frames directly support them. Range is down-weighted because it correlates
+ * with spread; cadence is down-weighted because word duration also reflects the
+ * words spoken even though Deepgram timing itself is reliable.
+ */
+export const ENERGY_SUBCOMPONENT_WEIGHTS = Object.freeze({
+  pitch_range: 0.2,
+  pitch_variation: 0.3,
+  non_monotony: 0.3,
+  rhythm_cadence: 0.2,
+})
+
+if (
+  Math.abs(
+    Object.values(ENERGY_SUBCOMPONENT_WEIGHTS).reduce((sum, weight) => sum + weight, 0) - 1,
+  ) > Number.EPSILON
+) {
+  throw new Error('Energy subcomponent weights must sum to one.')
+}
+
+export interface EnergySubcomponents {
+  pitch_range: number
+  pitch_variation: number
+  non_monotony: number
+  rhythm_cadence: number
+}
+
+export interface EnergyPitchSignals {
+  semitone_values: readonly number[]
+  pitch_range_semitones: number
+  pitch_variation_semitones: number
+}
+
+export interface EnergyMonotonySignal {
+  window_count: number
+  flat_window_count: number
+  flat_window_proportion: number
+  component: number
+}
+
+export interface EnergyCadenceSignal {
+  window_count: number
+  cadence_log_spread: number
+  component: number
+}
+
+function percentile(values: readonly number[], proportion: number): number {
+  if (values.length === 0) return Number.NaN
+  const sorted = [...values].sort((left, right) => left - right)
+  const position = clamp01(proportion) * (sorted.length - 1)
+  const lowerIndex = Math.floor(position)
+  const upperIndex = Math.ceil(position)
+  const lower = sorted[lowerIndex]!
+  const upper = sorted[upperIndex]!
+  return lower + (upper - lower) * (position - lowerIndex)
+}
+
+/**
+ * Converts octave-corrected pitch to speaker-relative semitones. The 10th-to-90th
+ * percentile span measures the central envelope; scaled MAD measures typical
+ * deviation around the median. These are related but not duplicate statistics.
+ */
+export function energyPitchSignals(hertz: readonly number[]): EnergyPitchSignals | null {
+  if (hertz.length === 0 || hertz.some((value) => !Number.isFinite(value) || value <= 0)) {
+    return null
+  }
+  const corrected = correctOctaves(hertz)
+  const centre = median(corrected)
+  if (!Number.isFinite(centre) || centre <= 0) return null
+  const semitoneValues = corrected.map((value) => 12 * Math.log2(value / centre))
+  const pitchRange = percentile(semitoneValues, 0.9) - percentile(semitoneValues, 0.1)
+  const pitchVariation = medianAbsoluteDeviation(semitoneValues)
+  if (
+    !Number.isFinite(pitchRange) ||
+    pitchRange < 0 ||
+    !Number.isFinite(pitchVariation) ||
+    pitchVariation < 0
+  ) {
+    return null
+  }
+  return {
+    semitone_values: semitoneValues,
+    pitch_range_semitones: pitchRange,
+    pitch_variation_semitones: pitchVariation,
+  }
+}
+
+export function pitchRangeComponent(rangeSemitones: number, mode: PracticeMode): number {
+  const threshold = AUDIO_THRESHOLDS_BY_MODE[mode].energy.pitch_range
   return higherBetter(
-    spreadSemitones,
+    rangeSemitones,
     threshold.zero_through_semitones,
     threshold.full_from_semitones,
   )
+}
+
+export function pitchVariationComponent(variationSemitones: number, mode: PracticeMode): number {
+  const threshold = AUDIO_THRESHOLDS_BY_MODE[mode].energy.pitch_variation
+  return higherBetter(
+    variationSemitones,
+    threshold.zero_through_semitones,
+    threshold.full_from_semitones,
+  )
+}
+
+/**
+ * Splits voiced active speech into equal-count temporal regions. A region is
+ * flat when its local robust spread stays below the mode threshold, so one
+ * isolated global jump cannot make an otherwise flat response look varied.
+ */
+export function energyMonotonySignal(
+  semitoneValues: readonly number[],
+  mode: PracticeMode,
+): EnergyMonotonySignal | null {
+  if (
+    semitoneValues.length < MIN_VOICED_FRAMES ||
+    semitoneValues.some((value) => !Number.isFinite(value))
+  ) {
+    return null
+  }
+  const threshold = AUDIO_THRESHOLDS_BY_MODE[mode].energy.non_monotony
+  const windows = Array.from({ length: ENERGY_MONOTONY_WINDOWS }, (_value, index) => {
+    const start = Math.floor((index * semitoneValues.length) / ENERGY_MONOTONY_WINDOWS)
+    const end = Math.floor(((index + 1) * semitoneValues.length) / ENERGY_MONOTONY_WINDOWS)
+    return semitoneValues.slice(start, end)
+  })
+  const flatWindowCount = windows.filter(
+    (window) => medianAbsoluteDeviation(window) <= threshold.flat_window_through_semitones,
+  ).length
+  const flatWindowProportion = flatWindowCount / windows.length
+  return {
+    window_count: windows.length,
+    flat_window_count: flatWindowCount,
+    flat_window_proportion: flatWindowProportion,
+    component: lowerBetter(
+      flatWindowProportion,
+      threshold.full_through_flat_proportion,
+      threshold.zero_at_flat_proportion,
+    ),
+  }
+}
+
+/**
+ * Measures variation in local active articulation timing. Sliding three-word
+ * windows use word durations only, never interword silence, and log-normalizing
+ * around the median makes the result invariant to uniformly fast or slow speech.
+ */
+export function energyCadenceSignal(
+  words: readonly TranscriptWord[],
+  mode: PracticeMode,
+): EnergyCadenceSignal | null {
+  if (words.length < MIN_ENERGY_WORDS) return null
+  const durations = words.map((word) => (word.end - word.start) * 1_000)
+  if (durations.some((duration) => !Number.isFinite(duration) || duration <= 0)) return null
+  const localDurations: number[] = []
+  for (let index = 0; index <= durations.length - ENERGY_CADENCE_WORD_WINDOW; index += 1) {
+    const window = durations.slice(index, index + ENERGY_CADENCE_WORD_WINDOW)
+    localDurations.push(window.reduce((sum, duration) => sum + duration, 0) / window.length)
+  }
+  const centre = median(localDurations)
+  if (!Number.isFinite(centre) || centre <= 0) return null
+  const relative = localDurations.map((duration) => Math.log2(duration / centre))
+  const cadenceLogSpread = medianAbsoluteDeviation(relative)
+  if (!Number.isFinite(cadenceLogSpread) || cadenceLogSpread < 0) return null
+  const threshold = AUDIO_THRESHOLDS_BY_MODE[mode].energy.rhythm_cadence
+  return {
+    window_count: localDurations.length,
+    cadence_log_spread: cadenceLogSpread,
+    component: higherBetter(
+      cadenceLogSpread,
+      threshold.zero_through_log_spread,
+      threshold.full_from_log_spread,
+    ),
+  }
+}
+
+/** All four required signals are normalized before this fixed weighted sum. */
+export function energyComponent(components: EnergySubcomponents): number | null {
+  const entries = Object.entries(ENERGY_SUBCOMPONENT_WEIGHTS) as [
+    keyof EnergySubcomponents,
+    number,
+  ][]
+  if (
+    entries.some(
+      ([key]) => !Number.isFinite(components[key]) || components[key] < 0 || components[key] > 1,
+    )
+  ) {
+    return null
+  }
+  return clamp01(entries.reduce((sum, [key, weight]) => sum + components[key] * weight, 0))
 }
 
 function unavailable<Id extends AudioMetricId, Measurements>(
@@ -1089,10 +1350,20 @@ function evaluateEnergy(
 ): AudioMetricEvaluations['energy'] {
   const issue = prepareIssue(prepared, false) ?? prepared.pitchIssue
   const empty: EnergyMeasurements = {
-    pitch_spread_semitones: null,
+    pitch_range_semitones: null,
+    pitch_variation_semitones: null,
+    flat_window_proportion: null,
+    cadence_log_spread: null,
+    pitch_range_component: null,
+    pitch_variation_component: null,
+    non_monotony_component: null,
+    rhythm_cadence_component: null,
     voiced_frame_count: 0,
     temporal_bin_count: ENERGY_TEMPORAL_BINS,
     covered_temporal_bin_count: 0,
+    monotony_window_count: ENERGY_MONOTONY_WINDOWS,
+    flat_window_count: 0,
+    cadence_window_count: 0,
   }
   if (issue || !prepared.capture || words.length < MIN_ENERGY_WORDS) {
     const reason = issue ?? `At least ${MIN_ENERGY_WORDS} timed words are required.`
@@ -1107,16 +1378,16 @@ function evaluateEnergy(
   const activePitch = prepared.capture.pitch.filter((sample) =>
     words.some((word) => sample.t_ms >= word.start * 1000 && sample.t_ms <= word.end * 1000),
   )
-  const firstMs = words[0]!.start * 1000
-  const lastMs = words.at(-1)!.end * 1000
-  const spanMs = lastMs - firstMs
   const coveredBins = new Set<number>()
-  if (spanMs > 0) {
-    for (const sample of activePitch) {
+  for (const sample of activePitch) {
+    const wordIndex = words.findIndex(
+      (word) => sample.t_ms >= word.start * 1_000 && sample.t_ms <= word.end * 1_000,
+    )
+    if (wordIndex >= 0) {
       coveredBins.add(
         Math.min(
           ENERGY_TEMPORAL_BINS - 1,
-          Math.floor(((sample.t_ms - firstMs) / spanMs) * ENERGY_TEMPORAL_BINS),
+          Math.floor((wordIndex / words.length) * ENERGY_TEMPORAL_BINS),
         ),
       )
     }
@@ -1135,28 +1406,66 @@ function evaluateEnergy(
     )
   }
 
-  // The v2 correction is a pure signal helper. MAD then limits the effect of
-  // detector outliers without introducing loudness or an accent reference.
-  const corrected = correctOctaves(activePitch.map((sample) => sample.hz))
-  const centre = median(corrected)
-  const semitoneValues = corrected.map((hz) => 12 * Math.log2(hz / centre))
-  const spread = medianAbsoluteDeviation(semitoneValues)
-  if (!Number.isFinite(spread) || spread < 0) {
+  const pitch = energyPitchSignals(activePitch.map((sample) => sample.hz))
+  const monotony = pitch ? energyMonotonySignal(pitch.semitone_values, mode) : null
+  const cadence = energyCadenceSignal(words, mode)
+  if (!pitch || !monotony || !cadence) {
     return unavailable(
       'energy',
       'Your vocal variation could not be measured from this recording.',
       base,
-      'Pitch variation produced an invalid measurement.',
+      'One or more required vocal-variation signals were invalid.',
     )
   }
 
-  const component = energyComponent(spread, mode)
+  const components: EnergySubcomponents = {
+    pitch_range: pitchRangeComponent(pitch.pitch_range_semitones, mode),
+    pitch_variation: pitchVariationComponent(pitch.pitch_variation_semitones, mode),
+    non_monotony: monotony.component,
+    rhythm_cadence: cadence.component,
+  }
+  const component = energyComponent(components)
+  if (component === null) {
+    return unavailable(
+      'energy',
+      'Your vocal variation could not be measured from this recording.',
+      base,
+      'The combined vocal-variation score was invalid.',
+    )
+  }
+  const measurements: EnergyMeasurements = {
+    ...base,
+    pitch_range_semitones: pitch.pitch_range_semitones,
+    pitch_variation_semitones: pitch.pitch_variation_semitones,
+    flat_window_proportion: monotony.flat_window_proportion,
+    cadence_log_spread: cadence.cadence_log_spread,
+    pitch_range_component: components.pitch_range,
+    pitch_variation_component: components.pitch_variation,
+    non_monotony_component: components.non_monotony,
+    rhythm_cadence_component: components.rhythm_cadence,
+    monotony_window_count: monotony.window_count,
+    flat_window_count: monotony.flat_window_count,
+    cadence_window_count: cadence.window_count,
+  }
+  const pitchStrong = (components.pitch_range + components.pitch_variation) / 2 >= 0.65
+  const temporalStrong = (components.non_monotony + components.rhythm_cadence) / 2 >= 0.65
+  const broadlyVaried = Object.values(components).every((value) => value >= 0.6)
+  const explanation =
+    component >= 0.8 && broadlyVaried
+      ? 'You used natural variation in pitch and rhythm throughout most of your response.'
+      : pitchStrong && !temporalStrong
+        ? 'Your pitch varied, but parts of your response stayed fairly flat or even in rhythm.'
+        : !pitchStrong && temporalStrong
+          ? 'Your rhythm varied, but your voice stayed fairly flat through much of your response.'
+          : component >= 0.45
+            ? 'Your voice had some natural variation, with a few flatter or more even stretches.'
+            : 'Your voice stayed fairly flat and even through much of your response.'
   return {
     id: 'energy',
     status: 'scored',
     component,
-    explanation: `Your pitch varied by ${spread.toFixed(2)} semitones during recognized speech.`,
-    measurements: { ...base, pitch_spread_semitones: spread },
+    explanation,
+    measurements,
     evidence: [
       {
         source: 'audio_timeline',
@@ -1164,13 +1473,13 @@ function evaluateEnergy(
         end: activePitch.at(-1)!.t_ms,
         coordinate: 'audio_millisecond',
         quote: null,
-        detail: `${spread.toFixed(2)} semitones across ${activePitch.length} voiced frames in recognized speech.`,
+        detail: `Recognized speech used a ${pitch.pitch_range_semitones.toFixed(1)}-semitone central pitch range, ${(monotony.flat_window_proportion * 100).toFixed(0)} percent flatter vocal windows, and ${cadence.component >= 0.65 ? 'varied' : 'fairly even'} active-speech timing.`,
       },
     ],
     deductions: deductions(
       'energy',
       component,
-      `${spread.toFixed(2)} semitones of pitch variation.`,
+      'Pitch and active-speech timing were less varied than the configured range.',
     ),
     warnings: [],
   }

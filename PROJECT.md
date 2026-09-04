@@ -70,7 +70,33 @@ capture evidence and the final Deepgram word array:
 - Pace is articulation rate: timed words divided by active speaking time after detected silence is removed.
 - Paused Time combines excessive beginning hesitation and excessive interword pauses. It uses the same hardened first-word onset as Pace, allows more time at the beginning and natural sentence boundaries than mid-thought, adds only duration beyond each allowance, and never counts trailing silence.
 - Articulation uses the proportion of eligible words with low final recognition confidence, gated by confidence coverage and audio signal separation. It does not use accent labels or native similarity.
-- Energy uses robust semitone pitch spread inside recognized-word windows after octave correction. Loudness is not scored.
+- Energy combines a robust central pitch range, typical pitch variation, temporal non-monotony, and active-speech cadence variation. Loudness is not scored.
+
+Energy analysis version `v3.audio.3` requires at least 8 timed words, 48 voiced frames, and pitch
+coverage in at least 3 of 4 word-order bins. All four subcomponents must be valid; missing signals are
+never treated as zero or silently reweighted. After octave correction, Pitch Range is the 10th-to-90th
+percentile span in speaker-relative semitones, while Pitch Variation is the scaled median absolute
+deviation around the speaker's median pitch. Non-Monotony divides voiced active speech into 6
+equal-frame temporal windows and scores the proportion whose local robust spread is not flat.
+Rhythm/Cadence uses the robust log spread of sliding three-word mean durations. It excludes interword
+silence and is scale-invariant, so absolute rate remains owned by Pace and silence remains owned by
+Paused Time. The composite weights are 20% Pitch Range, 30% Pitch Variation, 30% Non-Monotony, and
+20% Rhythm/Cadence. Presentation thresholds require somewhat more variation, Conversation allows
+somewhat more restraint, and the other modes sit between them. The initial deterministic fixtures
+cover monotone, restrained-natural, naturally expressive, exaggerated-pitch, and rhythmically robotic
+speech; exaggerated movement is capped rather than rewarded beyond the full component.
+
+The initial Energy ramps are centralized in `src/lib/scoring/v3/audio.ts`. Each `zero/full` pair is
+linear between its anchors and capped outside them. The flat-window columns use local semitone spread
+to classify windows, then map the total flat proportion from full credit to zero. Cadence log spread
+is dimensionless and relative to the response's median active word duration.
+
+| Mode         | Pitch range zero/full | Pitch variation zero/full | Flat window through | Flat proportion full/zero | Cadence zero/full |
+| ------------ | --------------------: | ------------------------: | ------------------: | ------------------------: | ----------------: |
+| Practice     |               2.0/5.5 |                   1.2/2.8 |                0.55 |                 0.25/0.85 |         0.04/0.22 |
+| Interview    |               2.0/5.5 |                   1.2/2.8 |                0.55 |                 0.25/0.80 |         0.04/0.22 |
+| Presentation |               2.5/6.5 |                   1.4/3.0 |                0.65 |                 0.20/0.80 |         0.05/0.25 |
+| Conversation |               1.8/5.0 |                   1.1/2.6 |                0.50 |                 0.35/0.90 |         0.03/0.20 |
 
 Paused Time considers interword gaps from 350 milliseconds upward. For each gap it adds
 `max(0, measured duration - contextual allowance)` to the total. Beginning silence uses the natural
@@ -172,7 +198,7 @@ failure codes are unavailable because those bounded diagnostics are logged but n
 
 - A prior public repository committed an environment file. Treat those keys as compromised and rotate them.
 - Content calibration needs broader real-recording coverage across deliberately varied responses.
-- Initial mode-specific pace, pause, onset, recognition-confidence, and pitch-spread thresholds need calibration across broader real-device recordings and speaking styles.
+- Initial mode-specific pace, pause, onset, recognition-confidence, and composite Energy thresholds need calibration across broader real-device recordings and speaking styles.
 - Browser backgrounding can throttle capture sampling. Timeline timestamps preserve the evidence, but an AudioWorklet would remove the issue.
 - Browser-reported audio duration is unreliable for recorded blobs. Use measured `duration_ms` for playback and score calculations.
 

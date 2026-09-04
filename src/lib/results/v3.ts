@@ -121,6 +121,10 @@ export function v3PrimaryMeasurement(
     return proportion === null ? null : `${Math.round(proportion * 100)}% low-confidence words`
   }
   if (metric === 'energy') {
+    const flatProportion = numericMeasurement(result.measurements, 'flat_window_proportion')
+    if (flatProportion !== null) {
+      return `${Math.round((1 - flatProportion) * 100)}% vocally varied windows`
+    }
     const spread = numericMeasurement(result.measurements, 'pitch_spread_semitones')
     return spread === null ? null : `${spread.toFixed(1)} semitone pitch spread`
   }
@@ -143,6 +147,22 @@ const INTERNAL_MEASUREMENT_KEYS = new Set([
 
 export function v3MeasurementDetails(result: V3PersistedMetricScore): string[] {
   if (!result.measurements) return []
+  if (result.metric === 'energy') {
+    const range = numericMeasurement(result.measurements, 'pitch_range_semitones')
+    const variation = numericMeasurement(result.measurements, 'pitch_variation_semitones')
+    const flatProportion = numericMeasurement(result.measurements, 'flat_window_proportion')
+    const cadence = numericMeasurement(result.measurements, 'rhythm_cadence_component')
+    if (range !== null && variation !== null && flatProportion !== null && cadence !== null) {
+      const cadenceLabel =
+        cadence >= 0.8 ? 'varied' : cadence >= 0.35 ? 'somewhat varied' : 'fairly even'
+      return [
+        `central pitch range: ${range.toFixed(1)} semitones`,
+        `typical pitch variation: ${variation.toFixed(1)} semitones`,
+        `flatter vocal windows: ${Math.round(flatProportion * 100)}%`,
+        `active-speech timing: ${cadenceLabel}`,
+      ]
+    }
+  }
   return Object.entries(result.measurements).flatMap(([key, value]) => {
     if (INTERNAL_MEASUREMENT_KEYS.has(key)) return []
     if (value === null) return []

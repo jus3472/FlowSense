@@ -8,6 +8,7 @@ import {
   evaluateReviewedCalibrationCorpus,
 } from '../src/lib/scoring/v2/calibration-reviewed'
 import { runDeliveryNextCalibration } from '../src/lib/scoring/v2/delivery-next-calibration'
+import { runV3EnergyCalibration } from '../src/lib/scoring/v3/energy-calibration'
 
 const result = runCalibrationCorpus(CALIBRATION_FIXTURES, CALIBRATION_BASELINES)
 console.log('Exact snapshot drift corpus')
@@ -24,4 +25,9 @@ const deliveryNext = runDeliveryNextCalibration()
 console.log('\nDelivery next calibration evidence')
 console.log(deliveryNext.report)
 for (const difference of deliveryNext.differences) console.log(`  ${difference}`)
-if (!result.ok || !reviewed.ok || !deliveryNext.ok) process.exitCode = 1
+
+const v3Energy = runV3EnergyCalibration()
+console.log('\nv3 Energy calibration evidence')
+console.log(v3Energy.report)
+
+if (!result.ok || !reviewed.ok || !deliveryNext.ok || !v3Energy.ok) process.exitCode = 1
