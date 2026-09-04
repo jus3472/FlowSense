@@ -603,14 +603,6 @@ function prepareIssue(prepared: Prepared, needsAmplitude: boolean): string | nul
   )
 }
 
-function activeSpeakingDuration(capture: CaptureMetrics, threshold: number): number {
-  return capture.amplitude.reduce((total, sample, index, samples) => {
-    if (sample.rms < threshold) return total
-    const nextMs = samples[index + 1]?.t_ms ?? capture.duration_ms
-    return total + Math.max(0, Math.min(capture.duration_ms, nextMs) - sample.t_ms)
-  }, 0)
-}
-
 function evaluatePace(prepared: Prepared, mode: PracticeMode): AudioMetricEvaluations['pace'] {
   const issue = prepareIssue(prepared, true)
   const wordCount = prepared.tokens.length
@@ -630,11 +622,8 @@ function evaluatePace(prepared: Prepared, mode: PracticeMode): AudioMetricEvalua
     )
   }
 
-  const activeSpeakingMs = activeSpeakingDuration(
-    prepared.capture,
-    prepared.pauseAnalysis.speech_threshold,
-  )
-  const excludedSilenceMs = prepared.capture.duration_ms - activeSpeakingMs
+  const excludedSilenceMs = prepared.pauseAnalysis.total_silence_ms
+  const activeSpeakingMs = prepared.capture.duration_ms - excludedSilenceMs
   const wpm = wordCount / (activeSpeakingMs / 60_000)
   if (
     !Number.isFinite(excludedSilenceMs) ||

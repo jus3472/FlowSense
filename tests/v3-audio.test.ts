@@ -135,18 +135,40 @@ describe('evaluateAudioMetrics', () => {
     }
   })
 
-  it('computes pace from RMS-active speech and excludes every silent frame', () => {
+  it('computes pace from recording time minus validated pause time', () => {
     const words = withConfidence(transcript)
     const capture = captureFor(words)
     const metric = evaluation(transcript, words, capture).metrics.pace
-    const expectedActiveMs = words.length * 400
+    const expectedExcludedMs = words[0]!.start * 1000 + 1_000
+    const expectedActiveMs = capture.duration_ms - expectedExcludedMs
 
     expect(metric.status).toBe('scored')
     expect(metric.measurements.active_speaking_ms).toBe(expectedActiveMs)
-    expect(metric.measurements.excluded_silence_ms).toBe(capture.duration_ms - expectedActiveMs)
+    expect(metric.measurements.excluded_silence_ms).toBe(expectedExcludedMs)
     expect(metric.measurements.words_per_minute).toBeCloseTo(
       (words.length / expectedActiveMs) * 60_000,
     )
+  })
+
+  it('does not inflate WPM when quiet consonant frames occur inside timed words', () => {
+    const words = withConfidence(transcript)
+    const steadyCapture = captureFor(words)
+    const durationMs = steadyCapture.duration_ms
+    const quietWithinWords = wordSegments(words).map((segment) => ({
+      ...segment,
+      to_ms: segment.from_ms + 200,
+    }))
+    const quietCapture = captureFor(words, {
+      amplitude: amplitudeTimeline(durationMs, quietWithinWords),
+    })
+
+    const steady = evaluation(transcript, words, steadyCapture).metrics.pace
+    const quiet = evaluation(transcript, words, quietCapture).metrics.pace
+
+    expect(steady.status).toBe('scored')
+    expect(quiet.status).toBe('scored')
+    expect(quiet.measurements.active_speaking_ms).toBe(steady.measurements.active_speaking_ms)
+    expect(quiet.measurements.words_per_minute).toBe(steady.measurements.words_per_minute)
   })
 
   it('anchors first word to recorder time and uses RMS only as corroboration', () => {
