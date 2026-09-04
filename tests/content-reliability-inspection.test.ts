@@ -25,6 +25,29 @@ const contentStatuses = (overrides: Record<string, string> = {}) => ({
   ...overrides,
 })
 
+const v3Statuses = (prefix: 'v3_score' | 'v3_content', status: string) =>
+  Object.fromEntries(
+    ['answered_prompt', 'specificity', 'structure', 'conciseness', 'word_choice', 'grammar'].map(
+      (metric) => [`${prefix}_${metric}_status`, status],
+    ),
+  )
+
+function v3Row(overrides: Record<string, unknown> = {}) {
+  return {
+    completed_at: '2026-09-03T03:00:00.000Z',
+    score_payload_version: 'v3.score.1',
+    score_rubric_version: 'v3',
+    content_payload_version: 'v3.content-evaluator.1',
+    content_status: 'checked',
+    content_calls: '1',
+    has_legacy_score_shape: false,
+    has_legacy_content_shape: false,
+    ...v3Statuses('v3_score', 'scored'),
+    ...v3Statuses('v3_content', 'scored'),
+    ...overrides,
+  }
+}
+
 function v2Row(overrides: Record<string, unknown> = {}) {
   return {
     completed_at: '2026-08-28T03:00:00.000Z',
@@ -107,6 +130,33 @@ describe('content reliability inspection', () => {
     })
   })
 
+  it('counts complete, unavailable, recovered, and malformed v3 content safely', () => {
+    const summary = summarizeContentReliability([
+      v3Row(),
+      v3Row({ content_calls: '2', completed_at: '2026-09-03T03:01:00.000Z' }),
+      v3Row({
+        content_status: 'not_checked',
+        ...v3Statuses('v3_score', 'not_checked'),
+        ...v3Statuses('v3_content', 'not_checked'),
+      }),
+      v3Row({ v3_content_grammar_status: 'not_checked' }),
+    ])
+
+    expect(summary).toMatchObject({
+      completedAttempts: 4,
+      v3Attempts: 4,
+      allSixV3ContentMetricsScored: 2,
+      v3WithoutAllSixContentMetrics: 2,
+      malformedOrInconsistentV3Snapshots: 1,
+      contentFullyChecked: 2,
+      contentAllNotChecked: 1,
+      callsOne: 3,
+      callsTwo: 1,
+      successfulRetryRecoveries: 1,
+      attemptsNeedingUnpersistedDiagnosticDetail: 3,
+    })
+  })
+
   it('separates legacy, unsupported, and malformed rows without treating them as failures', () => {
     const summary = summarizeContentReliability([
       {
@@ -118,9 +168,9 @@ describe('content reliability inspection', () => {
       },
       {
         completed_at: '2026-08-27T01:00:00Z',
-        score_payload_version: 'v3.score.1',
-        score_rubric_version: 'v3',
-        content_payload_version: 'v3.content.1',
+        score_payload_version: 'v4.score.1',
+        score_rubric_version: 'v4',
+        content_payload_version: 'v4.content.1',
       },
       {
         completed_at: 'invalid',
@@ -211,8 +261,9 @@ describe('content reliability inspection', () => {
     ])
     expect(calls[1]?.parameters).toEqual([100, null])
     expect(CONTENT_RELIABILITY_QUERY).not.toMatch(
-      /prompt_text|transcript|custom_context|audio_path|metrics|user_id|\bid\b/i,
+      /prompt_text|transcript|custom_context|audio_path|user_id|\bid\b/i,
     )
+    expect(CONTENT_RELIABILITY_QUERY).not.toMatch(/(?:^|\n)\s*metrics(?:\s|,|->)/im)
     expect(CONTENT_RELIABILITY_QUERY).not.toMatch(
       /\b(insert|update|delete|alter|drop|create|truncate)\b/i,
     )

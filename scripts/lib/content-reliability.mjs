@@ -1,6 +1,9 @@
-export const CURRENT_SCORE_PAYLOAD_VERSION = 'v2.score.1'
-export const CURRENT_RUBRIC_VERSION = 'v2'
-export const CURRENT_CONTENT_PAYLOAD_VERSION = 'v2.content-detector.1'
+export const CURRENT_SCORE_PAYLOAD_VERSION = 'v3.score.1'
+export const CURRENT_RUBRIC_VERSION = 'v3'
+export const CURRENT_CONTENT_PAYLOAD_VERSION = 'v3.content-evaluator.1'
+export const V2_SCORE_PAYLOAD_VERSION = 'v2.score.1'
+export const V2_RUBRIC_VERSION = 'v2'
+export const V2_CONTENT_PAYLOAD_VERSION = 'v2.content-detector.1'
 
 export const DEFAULT_CONTENT_RELIABILITY_LIMIT = 100
 export const MAX_CONTENT_RELIABILITY_LIMIT = 1_000
@@ -15,6 +18,15 @@ export const SCORE_CATEGORIES = [
 ]
 
 export const CONTENT_CATEGORIES = ['structure', 'grammar', 'vocabulary']
+
+export const V3_CONTENT_METRICS = [
+  'answered_prompt',
+  'specificity',
+  'structure',
+  'conciseness',
+  'word_choice',
+  'grammar',
+]
 
 /**
  * These codes are bounded in the provider adapter but are currently logged,
@@ -48,6 +60,18 @@ select
   content_result ->> 'version' as content_payload_version,
   content_result ->> 'status' as content_status,
   content_result ->> 'calls' as content_calls,
+  section_scores #>> '{sections,what_you_said,metrics,answered_prompt,status}' as v3_score_answered_prompt_status,
+  section_scores #>> '{sections,what_you_said,metrics,specificity,status}' as v3_score_specificity_status,
+  section_scores #>> '{sections,what_you_said,metrics,structure,status}' as v3_score_structure_status,
+  section_scores #>> '{sections,what_you_said,metrics,conciseness,status}' as v3_score_conciseness_status,
+  section_scores #>> '{sections,what_you_said,metrics,word_choice,status}' as v3_score_word_choice_status,
+  section_scores #>> '{sections,what_you_said,metrics,grammar,status}' as v3_score_grammar_status,
+  content_result #>> '{metrics,answered_prompt,status}' as v3_content_answered_prompt_status,
+  content_result #>> '{metrics,specificity,status}' as v3_content_specificity_status,
+  content_result #>> '{metrics,structure,status}' as v3_content_structure_status,
+  content_result #>> '{metrics,conciseness,status}' as v3_content_conciseness_status,
+  content_result #>> '{metrics,word_choice,status}' as v3_content_word_choice_status,
+  content_result #>> '{metrics,grammar,status}' as v3_content_grammar_status,
   section_scores #>> '{categories,fluency,status}' as score_fluency_status,
   section_scores #>> '{categories,clarity,status}' as score_clarity_status,
   section_scores #>> '{categories,vocabulary,status}' as score_vocabulary_status,
@@ -157,6 +181,13 @@ function safeTimestamp(value) {
 
 function isCurrentV2(row) {
   return (
+    row.score_payload_version === V2_SCORE_PAYLOAD_VERSION &&
+    row.score_rubric_version === V2_RUBRIC_VERSION
+  )
+}
+
+function isCurrentV3(row) {
+  return (
     row.score_payload_version === CURRENT_SCORE_PAYLOAD_VERSION &&
     row.score_rubric_version === CURRENT_RUBRIC_VERSION
   )
@@ -178,6 +209,14 @@ function contentStatus(row, category) {
   return row[`content_${category}_status`]
 }
 
+function v3ScoreStatus(row, metric) {
+  return row[`v3_score_${metric}_status`]
+}
+
+function v3ContentStatus(row, metric) {
+  return row[`v3_content_${metric}_status`]
+}
+
 export function summarizeContentReliability(rows, options = {}) {
   const limit = options.limit ?? DEFAULT_CONTENT_RELIABILITY_LIMIT
   const since = options.since ?? null
@@ -189,6 +228,7 @@ export function summarizeContentReliability(rows, options = {}) {
       newestCompletedAt: null,
     },
     completedAttempts: rows.length,
+    v3Attempts: 0,
     v2Attempts: 0,
     legacyAttempts: 0,
     unsupportedOrMalformedAttempts: 0,
@@ -198,6 +238,9 @@ export function summarizeContentReliability(rows, options = {}) {
     contentPartiallyNotChecked: 0,
     contentAllNotChecked: 0,
     malformedOrInconsistentV2Snapshots: 0,
+    allSixV3ContentMetricsScored: 0,
+    v3WithoutAllSixContentMetrics: 0,
+    malformedOrInconsistentV3Snapshots: 0,
     callsOne: 0,
     callsTwo: 0,
     callsOtherOrMissing: 0,
@@ -215,6 +258,49 @@ export function summarizeContentReliability(rows, options = {}) {
 
     if (isLegacy(row)) {
       summary.legacyAttempts += 1
+      continue
+    }
+    if (isCurrentV3(row)) {
+      summary.v3Attempts += 1
+      const calls = strictInteger(row.content_calls)
+      if (calls === 1) summary.callsOne += 1
+      else if (calls === 2) summary.callsTwo += 1
+      else summary.callsOtherOrMissing += 1
+
+      const contentStatuses = V3_CONTENT_METRICS.map((metric) => v3ContentStatus(row, metric))
+      const topLevelChecked = row.content_status === 'checked'
+      const topLevelNotChecked = row.content_status === 'not_checked'
+      const allContentScored = contentStatuses.every((status) => status === 'scored')
+      const allContentNotChecked = contentStatuses.every((status) => status === 'not_checked')
+      const contentMatchesScore = V3_CONTENT_METRICS.every(
+        (metric) => v3ContentStatus(row, metric) === v3ScoreStatus(row, metric),
+      )
+      const validV3 =
+        row.content_payload_version === CURRENT_CONTENT_PAYLOAD_VERSION &&
+        calls !== null &&
+        calls >= 0 &&
+        calls <= 2 &&
+        contentMatchesScore &&
+        ((topLevelChecked && allContentScored) || (topLevelNotChecked && allContentNotChecked))
+
+      if (!validV3) {
+        summary.v3WithoutAllSixContentMetrics += 1
+        summary.malformedOrInconsistentV3Snapshots += 1
+        summary.attemptsNeedingUnpersistedDiagnosticDetail += 1
+        continue
+      }
+      if (allContentScored) {
+        summary.allSixV3ContentMetricsScored += 1
+        summary.contentFullyChecked += 1
+        if (calls === 2) {
+          summary.successfulRetryRecoveries += 1
+          summary.attemptsNeedingUnpersistedDiagnosticDetail += 1
+        }
+      } else {
+        summary.v3WithoutAllSixContentMetrics += 1
+        summary.contentAllNotChecked += 1
+        summary.attemptsNeedingUnpersistedDiagnosticDetail += 1
+      }
       continue
     }
     if (!isCurrentV2(row)) {
@@ -244,7 +330,7 @@ export function summarizeContentReliability(rows, options = {}) {
       return scoreStatus(row, category) === expectedScoreStatus
     })
     const validContent =
-      row.content_payload_version === CURRENT_CONTENT_PAYLOAD_VERSION &&
+      row.content_payload_version === V2_CONTENT_PAYLOAD_VERSION &&
       validContentStatuses &&
       row.content_status === expectedTopLevelContentStatus &&
       calls !== null &&
@@ -309,11 +395,15 @@ export function formatContentReliabilityReport(summary) {
     `${pad('Newest completion in result')} ${summary.window.newestCompletedAt ?? 'none'}`,
     '',
     'Stored result cohorts',
-    `${pad('Current v2 attempts')} ${summary.v2Attempts}`,
+    `${pad('Current v3 attempts')} ${summary.v3Attempts}`,
+    `${pad('Historical v2 attempts')} ${summary.v2Attempts}`,
     `${pad('Legacy attempts')} ${summary.legacyAttempts}`,
     `${pad('Unsupported or malformed attempts')} ${summary.unsupportedOrMalformedAttempts}`,
     '',
     'Result completeness',
+    `${pad('All six v3 content metrics scored')} ${summary.allSixV3ContentMetricsScored}`,
+    `${pad('V3 without all six content metrics')} ${summary.v3WithoutAllSixContentMetrics}`,
+    `${pad('Malformed or inconsistent v3 snapshots')} ${summary.malformedOrInconsistentV3Snapshots}`,
     `${pad('All six categories checked')} ${summary.allSixCategoriesChecked}`,
     `${pad('V2 without all six checked')} ${summary.v2WithoutAllSixCategories}`,
     `${pad('All content categories checked')} ${summary.contentFullyChecked}`,
