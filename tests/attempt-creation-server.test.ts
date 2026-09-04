@@ -218,33 +218,41 @@ describe('server attempt creation reconciliation', () => {
     ['locked', { status: 'denied', reason: 'locked' }],
     ['inactive', { status: 'denied', reason: 'inactive' }],
     ['wrong path', { status: 'denied', reason: 'path_mismatch' }],
-  ] as const)('does not create a structured attempt when the lesson is %s', async (_label, access) => {
-    const payload: CreateAttemptPayload = {
-      ...PAYLOAD,
-      promptId: PROMPT_ID,
-      promptText: 'Describe a choice you made recently.',
-      mode: 'interview',
-      source: 'library',
-      additionalContext: undefined,
-      targetDurationSeconds: 60,
-      curriculum: {
-        lessonId: LESSON_ID,
-        pathSlug: 'interviews',
-        chapterLevel: 'beginner',
-        lessonSlug: 'interviews-beginner-01-answer-directly',
-        lessonPosition: 1,
-        checkpoint: false,
-      },
-    }
-    mocks.lessonAccess.mockResolvedValue(access)
-    const existing = readQuery({ data: null, error: null })
-    const admin = adminFrom(existing)
+  ] as const)(
+    'does not create a structured attempt when the lesson is %s',
+    async (_label, access) => {
+      const payload: CreateAttemptPayload = {
+        ...PAYLOAD,
+        promptId: PROMPT_ID,
+        promptText: 'Describe a choice you made recently.',
+        mode: 'interview',
+        source: 'library',
+        additionalContext: undefined,
+        targetDurationSeconds: 60,
+        curriculum: {
+          lessonId: LESSON_ID,
+          pathSlug: 'interviews',
+          chapterLevel: 'beginner',
+          lessonSlug: 'interviews-beginner-01-answer-directly',
+          lessonPosition: 1,
+          checkpoint: false,
+        },
+      }
+      mocks.lessonAccess.mockResolvedValue(access)
+      const existing = readQuery({ data: null, error: null })
+      const admin = adminFrom(existing)
 
-    await expect(
-      ensureAttemptCreation({ admin: admin as never, userId: USER_ID, payload, intent: 'uploading' }),
-    ).resolves.toEqual({ status: 'unavailable' })
-    expect(admin.from).toHaveBeenCalledOnce()
-  })
+      await expect(
+        ensureAttemptCreation({
+          admin: admin as never,
+          userId: USER_ID,
+          payload,
+          intent: 'uploading',
+        }),
+      ).resolves.toEqual({ status: 'unavailable' })
+      expect(admin.from).toHaveBeenCalledOnce()
+    },
+  )
 
   it('fails a structured creation when authoritative curriculum data cannot be read', async () => {
     const payload: CreateAttemptPayload = {
@@ -265,7 +273,12 @@ describe('server attempt creation reconciliation', () => {
     const admin = adminFrom(readQuery({ data: null, error: null }))
 
     await expect(
-      ensureAttemptCreation({ admin: admin as never, userId: USER_ID, payload, intent: 'uploading' }),
+      ensureAttemptCreation({
+        admin: admin as never,
+        userId: USER_ID,
+        payload,
+        intent: 'uploading',
+      }),
     ).resolves.toEqual({ status: 'failure' })
   })
 
@@ -395,7 +408,12 @@ describe('server attempt creation reconciliation', () => {
     const admin = adminFrom(existing, parent)
 
     await expect(
-      ensureAttemptCreation({ admin: admin as never, userId: USER_ID, payload, intent: 'uploading' }),
+      ensureAttemptCreation({
+        admin: admin as never,
+        userId: USER_ID,
+        payload,
+        intent: 'uploading',
+      }),
     ).resolves.toEqual({ status: 'unavailable' })
     expect(admin.from).toHaveBeenCalledTimes(2)
   })
