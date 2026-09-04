@@ -8,6 +8,7 @@ import {
   canRunScoring,
   classifyAttemptRubric,
   shouldUseV2Assembler,
+  shouldUseV3Assembler,
 } from '@/lib/attempts/lifecycle'
 import {
   authenticatedAttemptContext,
@@ -49,6 +50,22 @@ import type { V2ContentDetectorProvider } from '@/lib/scoring/v2/content/contrac
 import { runV2ContentEvaluation } from '@/lib/scoring/v2/content/evaluate'
 import { evaluateDelivery } from '@/lib/scoring/v2/delivery'
 import { evaluateFluency } from '@/lib/scoring/v2/fluency'
+import { assembleV3Score, isV3ScorePayload } from '@/lib/scoring/v3/assemble'
+import {
+  evaluateAudioMetrics,
+  type AudioMetricEvidence,
+  type AudioMetricEvaluation,
+  type AudioMetricId,
+} from '@/lib/scoring/v3/audio'
+import { v3ContentEvaluatorFromModel } from '@/lib/scoring/v3/content/adapter'
+import type { V3ContentEvaluatorProvider } from '@/lib/scoring/v3/content/contracts'
+import { runV3ContentEvaluation } from '@/lib/scoring/v3/content/evaluate'
+import type {
+  HowYouSoundedMetricId,
+  V3Measurements,
+  V3MetricEvaluation,
+  V3ScoreEvidence,
+} from '@/lib/scoring/v3/contracts'
 import type { TranscriptWord } from '@/lib/deepgram/parse'
 import type { AttemptMetrics } from '@/lib/types/metrics'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
@@ -89,7 +106,14 @@ function mechanicalSpans(transcript: string, words: readonly TranscriptWord[]) {
     const first = selected[0]
     const last = selected.at(-1)
     return first && last
-      ? [{ start: first.charStart, end: last.charEnd, text: hit.text, category: hit.category }]
+      ? [
+          {
+            start: first.charStart,
+            end: last.charEnd,
+            text: transcript.slice(first.charStart, last.charEnd),
+            category: hit.category,
+          },
+        ]
       : []
   })
 }
@@ -103,11 +127,96 @@ function unreliableSpans(transcript: string, words: readonly TranscriptWord[]) {
   })
 }
 
-function unavailableProvider(error: unknown): V2ContentDetectorProvider {
+function unavailableV2Provider(error: unknown): V2ContentDetectorProvider {
   const failure = reportContentProviderFailure(error, 'deepseek', 'configuration_error')
   return {
     name: 'deepseek',
     complete: async () => Promise.reject(failure),
+  }
+}
+
+function unavailableV3Provider(error: unknown): V3ContentEvaluatorProvider {
+  const failure = reportContentProviderFailure(error, 'deepseek', 'configuration_error')
+  return {
+    name: 'deepseek',
+    complete: async () => Promise.reject(failure),
+  }
+}
+
+function v3Evidence(evidence: AudioMetricEvidence): V3ScoreEvidence | null {
+  if (
+    !Number.isFinite(evidence.start) ||
+    !Number.isFinite(evidence.end) ||
+    evidence.start < 0 ||
+    evidence.end <= evidence.start ||
+    (evidence.coordinate === 'transcript_utf16' &&
+      (!Number.isInteger(evidence.start) ||
+        !Number.isInteger(evidence.end) ||
+        (evidence.quote !== null && evidence.quote.length !== evidence.end - evidence.start)))
+  ) {
+    return null
+  }
+  return {
+    source: evidence.source,
+    start: evidence.start,
+    end: evidence.end,
+    coordinate:
+      evidence.coordinate === 'transcript_utf16'
+        ? { space: 'transcript', unit: 'utf16_code_unit' }
+        : { space: 'audio_timeline', unit: 'millisecond' },
+    quote: evidence.quote,
+    detail: evidence.detail,
+  }
+}
+
+function v3AudioMetric(metric: AudioMetricEvaluation<AudioMetricId, object>): V3MetricEvaluation {
+  if (metric.status === 'unavailable') {
+    return {
+      metric: metric.id,
+      status: 'unavailable',
+      component: null,
+      explanation: null,
+      measurements: null,
+      evidence: [],
+      details: [],
+      warnings: metric.warnings,
+    }
+  }
+  const evidence = metric.evidence.flatMap((item) => {
+    const converted = v3Evidence(item)
+    return converted ? [converted] : []
+  })
+  return {
+    metric: metric.id,
+    status: 'scored',
+    component: metric.component,
+    explanation: metric.explanation,
+    measurements: Object.fromEntries(Object.entries(metric.measurements)) as V3Measurements,
+    evidence,
+    details: metric.deductions.map((deduction) => ({
+      kind: deduction.metric,
+      source: 'audio' as const,
+      quote: null,
+      observation: deduction.detail,
+      suggestion: null,
+      evidence,
+    })),
+    warnings:
+      evidence.length === metric.evidence.length
+        ? metric.warnings
+        : [...metric.warnings, 'Invalid audio evidence was omitted.'],
+  }
+}
+
+function v3AudioMetrics(
+  audio: ReturnType<typeof evaluateAudioMetrics>,
+): Record<HowYouSoundedMetricId, V3MetricEvaluation> {
+  return {
+    pace: v3AudioMetric(audio.metrics.pace),
+    time_to_first_word: v3AudioMetric(audio.metrics.time_to_first_word),
+    paused_time: v3AudioMetric(audio.metrics.paused_time),
+    articulation: v3AudioMetric(audio.metrics.articulation),
+    energy: v3AudioMetric(audio.metrics.energy),
   }
 }
 
@@ -165,13 +274,18 @@ export async function POST(request: Request) {
   const storedResult = readAttemptResult(storedResultInput)
   const rubricKind = classifyAttemptRubric(attempt.rubric_version)
   const v2Mode = isPracticeMode(attempt.practice_mode) ? attempt.practice_mode : null
+  const v3Mode = v2Mode
   const legacyRecheck = isLegacyRecheckSnapshot({
     ...storedResultInput,
     status: attempt.status,
     rubricVersion: attempt.rubric_version,
   })
+  const runV3Assembler = shouldUseV3Assembler(rubricKind, Boolean(v3Mode), legacyRecheck)
   const runV2Assembler = shouldUseV2Assembler(rubricKind, Boolean(v2Mode), legacyRecheck)
-  if (rubricKind === 'unsupported' || (rubricKind === 'v2' && !v2Mode && !legacyRecheck)) {
+  if (
+    rubricKind === 'unsupported' ||
+    ((rubricKind === 'v3' || rubricKind === 'v2') && !v2Mode && !legacyRecheck)
+  ) {
     const isActive = ['uploading', 'transcribing', 'scoring'].includes(attempt.status)
     if (isActive) {
       await markOwnedAttemptFailure(
@@ -188,10 +302,13 @@ export async function POST(request: Request) {
     return apiError('This attempt uses an unsupported scoring version.', 409)
   }
 
-  // A structurally valid v2 snapshot is immutable. Legacy snapshots remain on
+  // A structurally valid versioned snapshot is immutable. Legacy snapshots remain on
   // the existing path so an explicit "Run the checks" retry can call its
   // content provider again after a prior not_checked result.
-  if (shouldReuseStoredV2Score(attempt.section_scores)) {
+  if (
+    (rubricKind === 'v3' && isV3ScorePayload(attempt.section_scores)) ||
+    (rubricKind !== 'v3' && shouldReuseStoredV2Score(attempt.section_scores))
+  ) {
     return NextResponse.json({
       score: attempt.score,
       section_scores: attempt.section_scores,
@@ -253,6 +370,104 @@ export async function POST(request: Request) {
   }
 
   try {
+    if (runV3Assembler && v3Mode) {
+      let provider: V3ContentEvaluatorProvider
+      try {
+        provider = v3ContentEvaluatorFromModel(
+          contentModelWithinBudget(createDeepSeekModel(deepseekApiKey()), workBudget),
+        )
+      } catch (error) {
+        provider = unavailableV3Provider(error)
+      }
+      const mechanicallyOwned = mechanicalSpans(transcript, transcriptWords)
+      const unreliableTranscriptSpans = unreliableSpans(transcript, transcriptWords)
+      const content = await runV3ContentEvaluation({
+        provider,
+        mode: v3Mode,
+        prompt: attempt.prompt_text,
+        transcript,
+        mechanicallyOwned,
+        unreliableTranscriptSpans,
+        timeoutMs: SCORING_PROVIDER_TIMEOUT_MS,
+      })
+      const audio = evaluateAudioMetrics({
+        capture,
+        words: transcriptWords,
+        transcript,
+        mode: v3Mode,
+      })
+      const assembled = assembleV3Score({
+        mode: v3Mode,
+        content,
+        sounded: v3AudioMetrics(audio),
+      })
+      const nextMetrics = {
+        ...metrics,
+        v3: {
+          score: assembled,
+          content,
+          audio,
+          scored_at: new Date().toISOString(),
+        },
+      }
+      const saved = await transitionOwnedAttempt(admin, userId, attemptId, ['scoring'], 'done', {
+        score: assembled.total_earned_points,
+        section_scores: JSON.parse(JSON.stringify(assembled)),
+        metrics: JSON.parse(JSON.stringify(nextMetrics)),
+        content_result: JSON.parse(JSON.stringify(content)),
+      })
+      if (!saved) {
+        const concurrentRead = await readDatabaseQuery(() =>
+          admin
+            .from('attempts')
+            .select('score, section_scores, content_result')
+            .eq('id', attemptId)
+            .eq('user_id', userId)
+            .maybeSingle(),
+        )
+        if (concurrentRead.status === 'failure') {
+          logAttemptDiagnostic(
+            'load_concurrent_score',
+            'concurrent_score_read_failed',
+            attemptId,
+            concurrentRead.error,
+          )
+          return apiError('The score could not be saved.', 500)
+        }
+        const concurrent = concurrentRead.data
+        if (concurrent && isV3ScorePayload(concurrent.section_scores)) {
+          return NextResponse.json({
+            score: concurrent.score,
+            section_scores: concurrent.section_scores,
+            content_status: storedContentStatus(concurrent.content_result),
+          })
+        }
+        await markOwnedAttemptFailure(
+          admin,
+          userId,
+          attemptId,
+          ['scoring'],
+          'failed',
+          ATTEMPT_FAILURE_CODES.scoringPersistenceFailed,
+        )
+        return apiError('The score could not be saved.', 500)
+      }
+
+      await recordPracticeActivityDay(admin, userId, {
+        status: 'done',
+        durationMs: attempt.duration_ms,
+        transcript: attempt.transcript,
+        score: assembled.total_earned_points,
+        sectionScores: assembled,
+      })
+
+      return NextResponse.json({
+        score: assembled.total_earned_points,
+        section_scores: assembled,
+        content_status: content.status,
+      })
+    }
+
     if (runV2Assembler && v2Mode) {
       const ownedAudio = validateOwnedAttemptAudioPath({
         userId,
@@ -287,7 +502,7 @@ export async function POST(request: Request) {
           contentModelWithinBudget(createDeepSeekModel(deepseekApiKey()), workBudget),
         )
       } catch (error) {
-        provider = unavailableProvider(error)
+        provider = unavailableV2Provider(error)
       }
       const contentPromise = runV2ContentEvaluation({
         provider,

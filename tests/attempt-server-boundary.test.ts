@@ -97,16 +97,20 @@ describe('server-owned attempt boundary', () => {
     expect(disputeRoute).toContain("admin.from('note_feedback').insert")
   })
 
-  it('rejects unknown rubric versions before v2 reuse or legacy dispatch', () => {
+  it('rejects unknown rubric versions before versioned reuse or legacy dispatch', () => {
     const scoreRoute = readFileSync('src/app/api/score/route.ts', 'utf8')
     const guard = scoreRoute.indexOf("rubricKind === 'unsupported'")
     expect(guard).toBeGreaterThan(-1)
-    expect(guard).toBeLessThan(scoreRoute.indexOf('if (shouldReuseStoredV2Score'))
+    expect(guard).toBeLessThan(scoreRoute.indexOf('isV3ScorePayload(attempt.section_scores)'))
     expect(scoreRoute).toContain('ATTEMPT_FAILURE_CODES.unsupportedRubricVersion')
     expect(scoreRoute).toContain('const legacyRecheck = isLegacyRecheckSnapshot({')
     expect(scoreRoute).toContain(
       'const runV2Assembler = shouldUseV2Assembler(rubricKind, Boolean(v2Mode), legacyRecheck)',
     )
+    expect(scoreRoute).toContain(
+      'const runV3Assembler = shouldUseV3Assembler(rubricKind, Boolean(v3Mode), legacyRecheck)',
+    )
+    expect(scoreRoute).toContain('if (runV3Assembler && v3Mode)')
     expect(scoreRoute).toContain('if (runV2Assembler && v2Mode)')
     expect(scoreRoute).toContain("if (attempt.status === 'done' && !legacyRecheck)")
   })

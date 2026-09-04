@@ -3,15 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   assembleScore: vi.fn(),
   assembleV2Score: vi.fn(),
+  assembleV3Score: vi.fn(),
   recordPracticeActivityDay: vi.fn(),
   authenticatedAttemptContext: vi.fn(),
   collectPronunciationEvidence: vi.fn(),
   computeMechanical: vi.fn(),
   deepSeekComplete: vi.fn(),
+  evaluateAudioMetrics: vi.fn(),
+  isV3ScorePayload: vi.fn(),
   isLegacyRecheckSnapshot: vi.fn(),
   markOwnedAttemptFailure: vi.fn(),
   runContentCheckSafely: vi.fn(),
   runV2ContentEvaluation: vi.fn(),
+  runV3ContentEvaluation: vi.fn(),
   transitionOwnedAttempt: vi.fn(),
 }))
 
@@ -77,6 +81,19 @@ vi.mock('@/lib/scoring/v2/content/evaluate', () => ({
   runV2ContentEvaluation: mocks.runV2ContentEvaluation,
 }))
 
+vi.mock('@/lib/scoring/v3/assemble', () => ({
+  assembleV3Score: mocks.assembleV3Score,
+  isV3ScorePayload: mocks.isV3ScorePayload,
+}))
+
+vi.mock('@/lib/scoring/v3/audio', () => ({
+  evaluateAudioMetrics: mocks.evaluateAudioMetrics,
+}))
+
+vi.mock('@/lib/scoring/v3/content/evaluate', () => ({
+  runV3ContentEvaluation: mocks.runV3ContentEvaluation,
+}))
+
 import { POST } from '@/app/api/score/route'
 import { ATTEMPT_FAILURE_CODES } from '@/lib/attempts/lifecycle'
 import type { SafeContentCheckInput } from '@/lib/scoring/run-content'
@@ -92,6 +109,85 @@ const PRIVATE_DATABASE_ERROR = {
   message: PRIVATE_DATABASE_MESSAGE,
   details: PRIVATE_TRANSCRIPT,
   hint: PRIVATE_PROMPT,
+}
+
+const V3_CONTENT = {
+  version: 'v3.content-evaluator.1',
+  provider: 'deepseek',
+  status: 'checked',
+  metrics: {},
+  warnings: [],
+  calls: 1,
+}
+
+const V3_SCORE = {
+  version: 'v3.score.1',
+  rubric_version: 'v3',
+  mode: 'practice',
+  total_earned_points: 74,
+  total_max_points: 100,
+  sections: {},
+  recommendation: null,
+  warnings: [],
+}
+
+function audioMetric(id: string, component = 0.8) {
+  return {
+    id,
+    status: 'scored',
+    component,
+    explanation: `Measured ${id}.`,
+    measurements: { raw: 1 },
+    evidence: [
+      {
+        source: 'audio_timeline',
+        start: 100,
+        end: 200,
+        coordinate: 'audio_millisecond',
+        quote: null,
+        detail: `Evidence for ${id}.`,
+      },
+    ],
+    deductions: [{ metric: id, component_reduction: 1 - component, detail: `Review ${id}.` }],
+    warnings: [],
+  }
+}
+
+const V3_AUDIO = {
+  version: 'v3.audio.1',
+  mode: 'practice',
+  metrics: {
+    pace: audioMetric('pace'),
+    time_to_first_word: {
+      ...audioMetric('time_to_first_word'),
+      evidence: [
+        {
+          source: 'transcript_and_audio_timeline',
+          start: 0,
+          end: 0,
+          coordinate: 'audio_millisecond',
+          quote: 'Private',
+          detail: 'The first word began at recording start.',
+        },
+      ],
+    },
+    paused_time: audioMetric('paused_time'),
+    articulation: {
+      ...audioMetric('articulation'),
+      evidence: [
+        {
+          source: 'deepgram_word_confidence',
+          start: 0,
+          end: 7,
+          coordinate: 'transcript_utf16',
+          quote: 'Private',
+          detail: 'Timed transcript evidence.',
+        },
+      ],
+    },
+    energy: audioMetric('energy'),
+  },
+  warnings: [],
 }
 
 interface QueryResponse {
@@ -339,6 +435,10 @@ beforeEach(() => {
   })
   mocks.runV2ContentEvaluation.mockResolvedValue({ status: 'checked' })
   mocks.assembleV2Score.mockReturnValue(v2Snapshot({ component: 0.8 }))
+  mocks.isV3ScorePayload.mockReturnValue(false)
+  mocks.runV3ContentEvaluation.mockResolvedValue(V3_CONTENT)
+  mocks.evaluateAudioMetrics.mockReturnValue(V3_AUDIO)
+  mocks.assembleV3Score.mockReturnValue(V3_SCORE)
 })
 
 afterEach(() => {
@@ -475,6 +575,255 @@ describe('score route database integrity', () => {
     expect(mocks.deepSeekComplete).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ timeoutMs: 25_000 }),
     )
+  })
+
+  it('returns an exact stored v3 snapshot without running any evaluator again', async () => {
+    const setup = adminClient({
+      attempt: attempt({
+        practice_mode: 'practice',
+        rubric_version: 'v3',
+        status: 'done',
+        score: 74,
+        section_scores: V3_SCORE,
+        content_result: V3_CONTENT,
+      }),
+    })
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+    mocks.isV3ScorePayload.mockReturnValue(true)
+
+    const response = await POST(scoreRequest())
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      score: 74,
+      section_scores: V3_SCORE,
+      content_status: 'checked',
+    })
+    expect(mocks.runV3ContentEvaluation).not.toHaveBeenCalled()
+    expect(mocks.evaluateAudioMetrics).not.toHaveBeenCalled()
+    expect(mocks.assembleV3Score).not.toHaveBeenCalled()
+    expect(mocks.transitionOwnedAttempt).not.toHaveBeenCalled()
+  })
+
+  it('keeps returning an exact stored v2 snapshot without running v3', async () => {
+    const stored = v2Snapshot({ component: 0.75 })
+    const setup = adminClient({
+      attempt: attempt({
+        practice_mode: 'practice',
+        rubric_version: 'v2',
+        status: 'done',
+        score: 78,
+        section_scores: stored,
+        content_result: { status: 'checked' },
+      }),
+    })
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+
+    const response = await POST(scoreRequest())
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      score: 78,
+      section_scores: stored,
+      content_status: 'checked',
+    })
+    expect(mocks.runV3ContentEvaluation).not.toHaveBeenCalled()
+    expect(mocks.runV2ContentEvaluation).not.toHaveBeenCalled()
+    expect(mocks.transitionOwnedAttempt).not.toHaveBeenCalled()
+  })
+
+  it('does not reuse a v2 payload on a v3 attempt', async () => {
+    const setup = adminClient({
+      attempt: attempt({
+        practice_mode: 'practice',
+        rubric_version: 'v3',
+        status: 'scoring',
+        section_scores: v2Snapshot({ component: 0.75 }),
+      }),
+    })
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+
+    const response = await POST(scoreRequest())
+
+    expect(response.status).toBe(200)
+    expect(mocks.runV3ContentEvaluation).toHaveBeenCalledTimes(1)
+    expect(mocks.evaluateAudioMetrics).toHaveBeenCalledTimes(1)
+    expect(mocks.assembleV3Score).toHaveBeenCalledTimes(1)
+    expect(mocks.runV2ContentEvaluation).not.toHaveBeenCalled()
+  })
+
+  it('runs the v3 content and production audio evaluators without invoking Azure or v2', async () => {
+    const setup = adminClient({
+      attempt: attempt({ practice_mode: 'practice', rubric_version: 'v3', status: 'scoring' }),
+    })
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+
+    const response = await POST(scoreRequest())
+
+    expect(response.status).toBe(200)
+    expect(mocks.runV3ContentEvaluation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        mode: 'practice',
+        prompt: PRIVATE_PROMPT,
+        transcript: PRIVATE_TRANSCRIPT,
+        mechanicallyOwned: [],
+        unreliableTranscriptSpans: [],
+        timeoutMs: 30_000,
+      }),
+    )
+    expect(mocks.evaluateAudioMetrics).toHaveBeenCalledExactlyOnceWith({
+      capture: expect.objectContaining({ duration_ms: 20_000 }),
+      words: [],
+      transcript: PRIVATE_TRANSCRIPT,
+      mode: 'practice',
+    })
+    expect(mocks.assembleV3Score).toHaveBeenCalledExactlyOnceWith({
+      mode: 'practice',
+      content: V3_CONTENT,
+      sounded: expect.objectContaining({
+        pace: expect.objectContaining({
+          metric: 'pace',
+          status: 'scored',
+          component: 0.8,
+          measurements: { raw: 1 },
+          evidence: [
+            expect.objectContaining({
+              coordinate: { space: 'audio_timeline', unit: 'millisecond' },
+            }),
+          ],
+        }),
+        articulation: expect.objectContaining({
+          evidence: [
+            expect.objectContaining({
+              quote: 'Private',
+              coordinate: { space: 'transcript', unit: 'utf16_code_unit' },
+            }),
+          ],
+        }),
+        time_to_first_word: expect.objectContaining({
+          status: 'scored',
+          component: 0.8,
+          evidence: [],
+          warnings: ['Invalid audio evidence was omitted.'],
+        }),
+      }),
+    })
+    expect(mocks.collectPronunciationEvidence).not.toHaveBeenCalled()
+    expect(mocks.runV2ContentEvaluation).not.toHaveBeenCalled()
+    expect(mocks.assembleV2Score).not.toHaveBeenCalled()
+    expect(mocks.runContentCheckSafely).not.toHaveBeenCalled()
+    expect(mocks.transitionOwnedAttempt).toHaveBeenCalledWith(
+      setup.admin,
+      USER_ID,
+      ATTEMPT_ID,
+      ['scoring'],
+      'done',
+      expect.objectContaining({
+        score: 74,
+        section_scores: V3_SCORE,
+        content_result: V3_CONTENT,
+        metrics: expect.objectContaining({
+          v3: expect.objectContaining({ score: V3_SCORE, content: V3_CONTENT, audio: V3_AUDIO }),
+        }),
+      }),
+    )
+    expect(mocks.recordPracticeActivityDay).toHaveBeenCalledWith(
+      setup.admin,
+      USER_ID,
+      expect.objectContaining({ score: 74, sectionScores: V3_SCORE }),
+    )
+    expect(await response.json()).toEqual({
+      score: 74,
+      section_scores: V3_SCORE,
+      content_status: 'checked',
+    })
+  })
+
+  it('passes mechanically owned spans with exact transcript text into v3 content scoring', async () => {
+    const transcript = 'I, I answered.'
+    const setup = adminClient({
+      attempt: attempt({
+        practice_mode: 'practice',
+        rubric_version: 'v3',
+        status: 'scoring',
+        transcript,
+        metrics: {
+          capture: { duration_ms: 20_000, sample_interval_ms: 50, amplitude: [], pitch: [] },
+          transcript: {
+            words: [
+              { word: 'I', start: 0, end: 0.1, confidence: 0.99 },
+              { word: 'I', start: 0.2, end: 0.3, confidence: 0.99 },
+              { word: 'answered', start: 0.4, end: 0.8, confidence: 0.99 },
+            ],
+          },
+        },
+      }),
+    })
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+
+    const response = await POST(scoreRequest())
+
+    expect(response.status).toBe(200)
+    expect(mocks.runV3ContentEvaluation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transcript,
+        mechanicallyOwned: [{ start: 0, end: 2, text: 'I,', category: 'false_start' }],
+      }),
+    )
+  })
+
+  it('persists a provider-neutral v3 result and records neutral activity when scoring is unavailable', async () => {
+    const neutral = { ...V3_SCORE, mode: 'conversation', total_earned_points: null }
+    mocks.assembleV3Score.mockReturnValueOnce(neutral)
+    const setup = adminClient({
+      attempt: attempt({ practice_mode: 'conversation', rubric_version: 'v3', status: 'scoring' }),
+    })
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+
+    const response = await POST(scoreRequest())
+
+    expect(response.status).toBe(200)
+    expect(mocks.transitionOwnedAttempt).toHaveBeenCalledWith(
+      setup.admin,
+      USER_ID,
+      ATTEMPT_ID,
+      ['scoring'],
+      'done',
+      expect.objectContaining({ score: null, section_scores: neutral }),
+    )
+    expect(mocks.recordPracticeActivityDay).toHaveBeenCalledWith(
+      setup.admin,
+      USER_ID,
+      expect.objectContaining({ score: null, sectionScores: neutral }),
+    )
+    expect(await response.json()).toMatchObject({ score: null, section_scores: neutral })
+  })
+
+  it('returns a valid concurrent v3 snapshot without replacing it', async () => {
+    const setup = adminClient({
+      attempt: attempt({ practice_mode: 'practice', rubric_version: 'v3', status: 'scoring' }),
+      concurrent: {
+        data: { score: 74, section_scores: V3_SCORE, content_result: V3_CONTENT },
+        error: null,
+      },
+    })
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+    mocks.isV3ScorePayload.mockReturnValueOnce(false).mockReturnValueOnce(true)
+    mocks.transitionOwnedAttempt.mockResolvedValueOnce(false)
+
+    const response = await POST(scoreRequest())
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      score: 74,
+      section_scores: V3_SCORE,
+      content_status: 'checked',
+    })
+    expect(mocks.markOwnedAttemptFailure).not.toHaveBeenCalled()
+    expect(setup.attemptReadTraces[1]?.filters).toEqual([
+      { column: 'id', value: ATTEMPT_ID },
+      { column: 'user_id', value: USER_ID },
+    ])
   })
 
   it('finishes v2 scoring when optional pronunciation work exhausts the shared budget', async () => {
