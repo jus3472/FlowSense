@@ -1,3 +1,4 @@
+import type { Route } from 'next'
 import { CurriculumStars } from '@/components/curriculum/stars'
 import { AudioPlayer } from '@/components/record/audio-player'
 import { TranscriptPanel } from '@/components/results/transcript-panel'
@@ -239,13 +240,13 @@ export function V3ResultsView({
               ))}
             </ul>
             {previousAttemptId ? (
-              <ButtonLink href={`/attempts/${previousAttemptId}`} variant="secondary">
+              <ButtonLink href={`/attempts/${previousAttemptId}` as Route} variant="secondary">
                 View previous response
               </ButtonLink>
             ) : null}
           </Card>
         ) : previousAttemptId ? (
-          <ButtonLink href={`/attempts/${previousAttemptId}`} variant="secondary">
+          <ButtonLink href={`/attempts/${previousAttemptId}` as Route} variant="secondary">
             View previous response
           </ButtonLink>
         ) : null}
