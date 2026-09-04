@@ -162,6 +162,16 @@ function readHomeResult(
       trendCohort: `v2:${result.payload.version}:${result.payload.rubric_version}:${result.payload.mode}`,
     }
   }
+  if (result.kind === 'v3') {
+    return {
+      latest: {
+        attemptId: attempt.id,
+        score: result.payload.total_earned_points,
+        summary: result.payload.recommendation?.text ?? null,
+      },
+      trendCohort: `v3:${result.payload.version}:${result.payload.rubric_version}:${result.payload.mode}`,
+    }
+  }
   if (result.kind === 'legacy') {
     const disputes = validLegacyDisputes(result.attempt.content, storedDisputes)
     const adjusted = recomputeScore(

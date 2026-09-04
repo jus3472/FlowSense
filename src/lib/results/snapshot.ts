@@ -2,6 +2,12 @@ import { CHECK_NAMES } from '@/lib/scoring/content'
 import { DELIVERY_POINTS } from '@/lib/scoring/mechanical'
 import { isScorePayloadForDefinition, type V2ScorePayload } from '@/lib/scoring/v2/assemble'
 import { scoringDefinitionFor } from '@/lib/scoring/v2/registry'
+import { isV3ScorePayload } from '@/lib/scoring/v3/assemble'
+import {
+  V3_RUBRIC_VERSION,
+  V3_SCORE_PAYLOAD_VERSION,
+  type V3ScorePayload,
+} from '@/lib/scoring/v3/contracts'
 
 export interface LegacySectionSnapshot {
   content: {
@@ -20,6 +26,7 @@ export type StoredSectionSnapshot =
   | { kind: 'none' }
   | { kind: 'legacy'; sections: LegacySectionSnapshot }
   | { kind: 'v2'; payload: V2ScorePayload }
+  | { kind: 'v3'; payload: V3ScorePayload }
   | {
       kind: 'unsupported_version'
       scoreVersion: string | null
@@ -84,6 +91,9 @@ export function decodeStoredSectionSnapshot(value: unknown): StoredSectionSnapsh
     }
     const scoreVersion = value.version
     const rubricVersion = value.rubric_version
+    if (scoreVersion === V3_SCORE_PAYLOAD_VERSION && rubricVersion === V3_RUBRIC_VERSION) {
+      return isV3ScorePayload(value) ? { kind: 'v3', payload: value } : { kind: 'malformed' }
+    }
     const definition = scoringDefinitionFor(scoreVersion, rubricVersion)
     if (!definition) {
       return { kind: 'unsupported_version', scoreVersion, rubricVersion }

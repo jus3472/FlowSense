@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { decodeStoredSectionSnapshot } from '@/lib/results/snapshot'
-import { legacySectionSnapshot, v2Snapshot } from './helpers/result-snapshots'
+import { legacySectionSnapshot, v2Snapshot, v3Snapshot } from './helpers/result-snapshots'
 
 function withFluencyFields(fields: Record<string, unknown>): unknown {
   const snapshot = v2Snapshot()
@@ -35,6 +35,27 @@ describe('stored result snapshot decoder', () => {
     expect(decodeStoredSectionSnapshot(v2Snapshot({ unavailableCategory: 'clarity' })).kind).toBe(
       'v2',
     )
+  })
+
+  it('recognizes only strict complete and partial v3 snapshots', () => {
+    expect(decodeStoredSectionSnapshot(v3Snapshot())).toMatchObject({ kind: 'v3' })
+    expect(decodeStoredSectionSnapshot(v3Snapshot({ notCheckedMetric: 'grammar' }))).toMatchObject({
+      kind: 'v3',
+    })
+
+    const malformed = v3Snapshot()
+    expect(
+      decodeStoredSectionSnapshot({
+        ...malformed,
+        sections: {
+          ...malformed.sections,
+          what_you_said: {
+            ...malformed.sections.what_you_said,
+            unexpected: true,
+          },
+        },
+      }),
+    ).toEqual({ kind: 'malformed' })
   })
 
   it('preserves historical v2 evidence without coordinate metadata', () => {
@@ -146,9 +167,9 @@ describe('stored result snapshot decoder', () => {
   it('classifies future payload and rubric versions explicitly', () => {
     const supported = v2Snapshot()
 
-    expect(decodeStoredSectionSnapshot({ ...supported, version: 'v3.score.1' })).toMatchObject({
+    expect(decodeStoredSectionSnapshot({ ...supported, version: 'future.score.1' })).toMatchObject({
       kind: 'unsupported_version',
-      scoreVersion: 'v3.score.1',
+      scoreVersion: 'future.score.1',
     })
     expect(decodeStoredSectionSnapshot({ ...supported, rubric_version: 'v3' })).toMatchObject({
       kind: 'unsupported_version',
@@ -197,8 +218,8 @@ describe('stored result snapshot decoder', () => {
     expect(
       decodeStoredSectionSnapshot({
         ...legacySectionSnapshot,
-        version: 'v3.score.1',
-        rubric_version: 'v3',
+        version: 'future.score.1',
+        rubric_version: 'future',
       }).kind,
     ).toBe('unsupported_version')
   })

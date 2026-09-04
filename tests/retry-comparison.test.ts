@@ -1,10 +1,12 @@
 import {
   compareRetryResults,
+  compareV3RetryResults,
   loadRetryAncestorChain,
   RETRY_COMPARISON_NOISE_POINTS,
 } from '@/lib/results/retry-comparison'
 import { V2_SCORE_PAYLOAD_VERSION, type V2ScorePayload } from '@/lib/scoring/v2/assemble'
 import { describe, expect, it } from 'vitest'
+import { v3Snapshot } from './helpers/result-snapshots'
 
 function score(overrides: Partial<V2ScorePayload> = {}): V2ScorePayload {
   const categories = Object.fromEntries(
@@ -117,6 +119,20 @@ describe('retry comparison', () => {
         }),
       ),
     ).toBeNull()
+  })
+
+  it('compares only exact v3 metric cohorts and never maps v2 categories onto them', () => {
+    const current = v3Snapshot({ component: 0.8 })
+    const previous = v3Snapshot({ component: 0.4 })
+    const comparison = compareV3RetryResults(current, previous)
+
+    expect(comparison?.rows).toHaveLength(12)
+    expect(comparison?.rows[0]).toMatchObject({ category: 'overall', label: 'Overall' })
+    expect(comparison?.rows).toContainEqual(
+      expect.objectContaining({ category: 'answered_prompt', label: 'Answered the Prompt' }),
+    )
+    expect(compareV3RetryResults(current, v3Snapshot({ mode: 'interview' }))).toBeNull()
+    expect(compareV3RetryResults(current, score() as never)).toBeNull()
   })
 
   it('bounds the exact loaded chain and rejects missing, malformed, or cyclic parents', async () => {

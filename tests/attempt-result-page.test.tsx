@@ -74,6 +74,26 @@ vi.mock('@/components/results/v2-results-view', () => ({
   ),
 }))
 
+vi.mock('@/components/results/v3-results-view', () => ({
+  V3ResultsView: ({
+    audioUrl,
+    payload,
+    curriculumResult,
+  }: {
+    audioUrl: string | null
+    payload: { fixture: string }
+    curriculumResult?: { lesson: { title: string } } | null
+  }) => (
+    <div
+      data-audio={audioUrl ?? 'none'}
+      data-curriculum={curriculumResult?.lesson.title ?? 'none'}
+      data-testid="v3-result"
+    >
+      {payload.fixture}
+    </div>
+  ),
+}))
+
 import AttemptPage from '@/app/(app)/attempts/[id]/page'
 import { v2Snapshot } from './helpers/result-snapshots'
 
@@ -239,6 +259,17 @@ beforeEach(() => {
       if (input.sectionScores === 'v2-partial') {
         return { kind: 'v2', payload: { fixture: 'Partial v2 result' } }
       }
+      if (input.sectionScores === 'v3') {
+        return {
+          kind: 'v3',
+          payload: {
+            fixture: 'Complete v3 result',
+            mode: 'practice',
+            rubric_version: 'v3',
+            total_earned_points: 80,
+          },
+        }
+      }
       return { kind: 'v2', payload: { fixture: 'Complete v2 result' } }
     },
   )
@@ -383,6 +414,7 @@ describe('owned attempt result loading', () => {
     { snapshot: 'legacy', testId: 'legacy-result', label: 'Legacy result' },
     { snapshot: 'v2', testId: 'v2-result', label: 'Complete v2 result' },
     { snapshot: 'v2-partial', testId: 'v2-result', label: 'Partial v2 result' },
+    { snapshot: 'v3', testId: 'v3-result', label: 'Complete v3 result' },
   ])('renders an owned $snapshot snapshot without audio', async ({ snapshot, testId, label }) => {
     const setup = client({
       primary: { data: attempt({ section_scores: snapshot, audio_path: null }), error: null },
@@ -395,6 +427,35 @@ describe('owned attempt result loading', () => {
     expect(screen.getByTestId(testId)).toHaveAttribute('data-audio', 'none')
     expect(setup.createSignedUrl).not.toHaveBeenCalled()
     expect(mocks.logAttemptDiagnostic).not.toHaveBeenCalled()
+  })
+
+  it('passes owner-scoped structured context to the v3 renderer', async () => {
+    const setup = client({
+      primary: {
+        data: attempt({ lesson_id: LESSON_ID, section_scores: 'v3', rubric_version: 'v3' }),
+        error: null,
+      },
+    })
+    mocks.createClient.mockResolvedValue(setup.supabase)
+    mocks.loadStructuredLessonResultForUser.mockResolvedValue({
+      status: 'ready',
+      data: { lesson: { title: 'Handling a setback' } },
+    })
+
+    await renderPage()
+
+    expect(screen.getByTestId('v3-result')).toHaveAttribute('data-curriculum', 'Handling a setback')
+    expect(mocks.loadStructuredLessonResultForUser).toHaveBeenCalledWith(setup.supabase, USER_ID, {
+      lessonId: LESSON_ID,
+      attemptId: ATTEMPT_ID,
+      promptId: null,
+      practiceMode: 'practice',
+      rubricVersion: 'v3',
+      currentScore: 80,
+      snapshotMode: 'practice',
+      snapshotRubricVersion: 'v3',
+      snapshotScore: 80,
+    })
   })
 
   it('adds owner-scoped structured context from lesson_id to a v2 result', async () => {

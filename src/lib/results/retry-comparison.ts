@@ -1,12 +1,18 @@
 import { SKILL_CATEGORIES, type SkillCategory } from '@/lib/practice/contracts'
 import type { V2ScorePayload } from '@/lib/scoring/v2/assemble'
+import {
+  V3_METRIC_IDS,
+  V3_METRIC_LABELS,
+  type V3MetricId,
+  type V3ScorePayload,
+} from '@/lib/scoring/v3/contracts'
 
 /** A display hint only. It never suppresses numeric stored-result evidence. */
 export const RETRY_COMPARISON_NOISE_POINTS = 2
 export const MAX_RETRY_CHAIN_LENGTH = 8
 
 export interface RetryComparisonRow {
-  category: SkillCategory | 'overall'
+  category: SkillCategory | V3MetricId | 'overall'
   label: string
   currentPoints: number
   previousPoints: number
@@ -106,6 +112,70 @@ export function compareRetryResults(
       currentPoints: currentCategory.earned_points,
       previousPoints: previousCategory.earned_points,
       maxPoints: currentCategory.max_points,
+      deltaPoints,
+      withinNoise: Math.abs(deltaPoints) <= RETRY_COMPARISON_NOISE_POINTS,
+    })
+  }
+  return { rows }
+}
+
+function v3Metric(payload: V3ScorePayload, metric: V3MetricId) {
+  return metric in payload.sections.what_you_said.metrics
+    ? payload.sections.what_you_said.metrics[
+        metric as keyof typeof payload.sections.what_you_said.metrics
+      ]
+    : payload.sections.how_you_sounded.metrics[
+        metric as keyof typeof payload.sections.how_you_sounded.metrics
+      ]
+}
+
+/** Compares only exact v3 score/rubric/mode snapshots. */
+export function compareV3RetryResults(
+  current: V3ScorePayload,
+  previous: V3ScorePayload | null,
+): RetryComparison | null {
+  if (
+    !previous ||
+    current.version !== previous.version ||
+    current.rubric_version !== previous.rubric_version ||
+    current.mode !== previous.mode
+  ) {
+    return null
+  }
+
+  const rows: RetryComparisonRow[] = []
+  if (current.total_earned_points !== null && previous.total_earned_points !== null) {
+    const deltaPoints = current.total_earned_points - previous.total_earned_points
+    rows.push({
+      category: 'overall',
+      label: 'Overall',
+      currentPoints: current.total_earned_points,
+      previousPoints: previous.total_earned_points,
+      maxPoints: 100,
+      deltaPoints,
+      withinNoise: Math.abs(deltaPoints) <= RETRY_COMPARISON_NOISE_POINTS,
+    })
+  }
+
+  for (const metric of V3_METRIC_IDS) {
+    const currentMetric = v3Metric(current, metric)
+    const previousMetric = v3Metric(previous, metric)
+    if (
+      currentMetric.status !== 'scored' ||
+      previousMetric.status !== 'scored' ||
+      currentMetric.earned_points === null ||
+      previousMetric.earned_points === null ||
+      currentMetric.max_points !== previousMetric.max_points
+    ) {
+      continue
+    }
+    const deltaPoints = currentMetric.earned_points - previousMetric.earned_points
+    rows.push({
+      category: metric,
+      label: V3_METRIC_LABELS[metric],
+      currentPoints: currentMetric.earned_points,
+      previousPoints: previousMetric.earned_points,
+      maxPoints: currentMetric.max_points,
       deltaPoints,
       withinNoise: Math.abs(deltaPoints) <= RETRY_COMPARISON_NOISE_POINTS,
     })

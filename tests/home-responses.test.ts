@@ -8,7 +8,7 @@ import {
 } from '@/lib/home/server'
 import { DELIVERY_POINTS } from '@/lib/scoring/mechanical'
 import type { Database } from '@/lib/types/database'
-import { v2Snapshot } from './helpers/result-snapshots'
+import { v2Snapshot, v3Snapshot } from './helpers/result-snapshots'
 
 vi.mock('server-only', () => ({}))
 
@@ -340,6 +340,36 @@ describe('Home response display model', () => {
     })
   })
 
+  it('uses the stored v3 total and recommendation in an isolated v3 mode cohort', () => {
+    const latest = v3Snapshot({ mode: 'conversation', component: 0.8 })
+    const older = v3Snapshot({ mode: 'conversation', component: 0.6 })
+    const otherMode = v3Snapshot({ mode: 'practice', component: 1 })
+    const result = buildHomeResponseData([
+      row('new-v3', {
+        section_scores: latest,
+        score: latest.total_earned_points,
+      }),
+      row('old-v3', {
+        created_at: '2026-08-26T12:00:00.000Z',
+        section_scores: older,
+        score: older.total_earned_points,
+      }),
+      row('other-mode-v3', {
+        created_at: '2026-08-25T12:00:00.000Z',
+        section_scores: otherMode,
+        score: otherMode.total_earned_points,
+      }),
+      row('v2', { created_at: '2026-08-24T12:00:00.000Z' }),
+    ])
+
+    expect(result?.latest).toEqual({
+      attemptId: 'new-v3',
+      score: latest.total_earned_points,
+      summary: latest.recommendation?.text,
+    })
+    expect(result?.scores).toEqual([older.total_earned_points, latest.total_earned_points])
+  })
+
   it('keeps a historical score-only attempt linkable without inventing detail or a trend', () => {
     const result = buildHomeResponseData(
       [
@@ -359,7 +389,7 @@ describe('Home response display model', () => {
   })
 
   it('keeps an unsupported-version overall linkable but outside the trend cohort', () => {
-    const unsupported = { ...v2Snapshot(), version: 'v3.score.1', rubric_version: 'v3' }
+    const unsupported = { ...v2Snapshot(), version: 'future.score.1', rubric_version: 'future' }
     const result = buildHomeResponseData(
       [
         row('unsupported', { score: 72, section_scores: unsupported }),
@@ -392,7 +422,7 @@ describe('Home response display model', () => {
       row('future', {
         created_at: '2026-08-24T12:00:00.000Z',
         score: 92,
-        section_scores: { ...v2Snapshot(), version: 'v3.score.1', rubric_version: 'v3' },
+        section_scores: { ...v2Snapshot(), version: 'future.score.1', rubric_version: 'future' },
       }),
     ])
 

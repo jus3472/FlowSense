@@ -7,9 +7,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { ProgressDashboard } from '@/components/progress/progress-dashboard'
 import { ProgressTrend } from '@/components/progress/progress-trend'
 import { aggregateV2Progress, type ProgressSeries } from '@/lib/progress/aggregation'
+import { aggregateV3Progress } from '@/lib/progress/v3-aggregation'
 import { parseProgressMode, selectCategory } from '@/lib/progress/display'
 import {
   recentRetryComparisons,
+  recentV3RetryComparisons,
   retryDifferenceLabel,
   type ProgressRetryAttemptInput,
 } from '@/lib/progress/retries'
@@ -26,7 +28,12 @@ import {
 } from '@/lib/scoring/v2/assemble'
 import { rubricFor } from '@/lib/scoring/v2/rubrics'
 import type { ProgressDashboardData } from '@/lib/progress/server'
-import { legacySectionSnapshot, progressAttempt, v2Snapshot } from './helpers/result-snapshots'
+import {
+  legacySectionSnapshot,
+  progressAttempt,
+  v2Snapshot,
+  v3Snapshot,
+} from './helpers/result-snapshots'
 
 vi.mock('next/link', () => ({
   default: ({ href, ...props }: ComponentProps<'a'>) => <a href={String(href)} {...props} />,
@@ -208,6 +215,39 @@ describe('progress dashboard helpers', () => {
     expect(overall && retryDifferenceLabel(overall)).not.toContain('improv')
   })
 
+  it('keeps recent v3 retries separate from v2 parents and other v3 modes', () => {
+    const parent = progressAttempt(
+      'parent',
+      '2026-08-20T12:00:00.000Z',
+      v3Snapshot({ component: 0.5 }),
+    )
+    const retry = progressAttempt(
+      'retry',
+      '2026-08-25T12:00:00.000Z',
+      v3Snapshot({ component: 0.8 }),
+      'parent',
+    )
+    const v2Parent = progressAttempt('v2-parent', '2026-08-20T12:00:00.000Z', v2Snapshot())
+    const crossGeneration = progressAttempt(
+      'cross-generation',
+      '2026-08-25T10:00:00.000Z',
+      v3Snapshot({ component: 0.9 }),
+      'v2-parent',
+    )
+    const otherMode = progressAttempt(
+      'other-mode',
+      '2026-08-25T11:00:00.000Z',
+      v3Snapshot({ mode: 'interview' }),
+      'parent',
+    )
+
+    expect(
+      recentV3RetryComparisons([parent, retry, v2Parent, crossGeneration, otherMode], {
+        now: NOW,
+      }).map((item) => item.attemptId),
+    ).toEqual(['retry'])
+  })
+
   it('keeps Progress discoverable from the compact account menu', () => {
     const menu = readFileSync('src/components/layout/overflow-menu.tsx', 'utf8')
     expect(menu).toContain("'/progress' as Route")
@@ -276,6 +316,24 @@ describe('progress dashboard helpers', () => {
     expect(screen.getAllByText(/→/).length).toBeGreaterThan(0)
     expect(screen.getAllByText('Small score difference').length).toBeGreaterThan(0)
     expect(screen.queryByText(/improved|worse/i)).not.toBeInTheDocument()
+  })
+
+  it('shows v3 metrics and keeps the earlier v2 cohort accessible without merging them', () => {
+    const attempts = [
+      progressAttempt('v3-a', '2026-08-24T12:00:00.000Z', v3Snapshot({ component: 0.6 })),
+      progressAttempt('v3-b', '2026-08-25T12:00:00.000Z', v3Snapshot({ component: 0.8 })),
+      progressAttempt('v2', '2026-08-23T12:00:00.000Z', v2Snapshot()),
+    ]
+    const v2 = aggregateV2Progress(attempts, { now: NOW })
+    const v3 = aggregateV3Progress(attempts, { now: NOW })
+    render(<ProgressDashboard dashboard={dashboard(v2, { v3Progress: v3 })} />)
+
+    expect(screen.getByRole('heading', { name: 'Current metric trends' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Current metric trends' })).toBeInTheDocument()
+    expect(screen.getByText('Earlier category trends')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Category trends' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Answered the Prompt' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Fluency' })).toBeInTheDocument()
   })
 
   it('does not add a second main landmark inside the app layout main', () => {

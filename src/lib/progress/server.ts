@@ -6,7 +6,12 @@ import {
   type ProgressAggregationOptions,
 } from '@/lib/progress/aggregation'
 import { readProgressAttemptRows, safeProgressErrorCode } from '@/lib/progress/load'
-import { recentRetryComparisons, type ProgressRetryComparison } from '@/lib/progress/retries'
+import {
+  recentRetryComparisons,
+  recentV3RetryComparisons,
+  type ProgressRetryComparison,
+} from '@/lib/progress/retries'
+import { aggregateV3Progress, type V3ProgressAggregation } from '@/lib/progress/v3-aggregation'
 import { createClient } from '@/lib/supabase/server'
 
 /**
@@ -22,7 +27,9 @@ export interface ProgressQueryCoverage {
 
 export interface ProgressDashboardData {
   progress: ProgressAggregation
+  v3Progress?: V3ProgressAggregation
   retryComparisons: readonly ProgressRetryComparison[]
+  v3RetryComparisons?: readonly ProgressRetryComparison[]
   coverage: ProgressQueryCoverage
 }
 
@@ -59,7 +66,12 @@ export async function getProgressDashboardData(
       status: 'ready',
       data: {
         progress: aggregateV2Progress(rows.attempts, options),
+        v3Progress: aggregateV3Progress(rows.attempts, options),
         retryComparisons: recentRetryComparisons(rows.attempts, {
+          now: options.now,
+          mode: options.mode,
+        }),
+        v3RetryComparisons: recentV3RetryComparisons(rows.attempts, {
           now: options.now,
           mode: options.mode,
         }),

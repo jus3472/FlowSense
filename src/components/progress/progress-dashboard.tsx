@@ -6,7 +6,7 @@ import { RetryButton } from '@/components/system/retry-button'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import type { CurriculumOverviewData } from '@/lib/curriculum/overview'
-import { selectCategory } from '@/lib/progress/display'
+import { selectCategory, selectProgressDimension } from '@/lib/progress/display'
 import { retryDifferenceLabel } from '@/lib/progress/retries'
 import type { ProgressDashboardData } from '@/lib/progress/server'
 import {
@@ -16,6 +16,7 @@ import {
   type SkillCategory,
 } from '@/lib/practice/contracts'
 import { cn } from '@/lib/utils'
+import { V3_METRIC_IDS, V3_METRIC_LABELS } from '@/lib/scoring/v3/contracts'
 
 const labels: Record<PracticeMode | SkillCategory, string> = {
   practice: 'Practice',
@@ -73,10 +74,19 @@ export function ProgressDashboard({
   curriculumUnavailable?: boolean
 }) {
   const progress = dashboard?.progress ?? null
+  const v3Progress = dashboard?.v3Progress ?? null
   const retryComparisons = dashboard?.retryComparisons ?? []
+  const v3RetryComparisons = dashboard?.v3RetryComparisons ?? []
   const window = progress?.windows.all ?? null
+  const v3Window = v3Progress?.windows.all ?? null
+  const hasV3 = (v3Progress?.counts.selectedCohort ?? 0) > 0
+  const hasV2 = (progress?.counts.selectedCohort ?? 0) > 0
   const strongest = window ? selectCategory(window.categories, true) : null
   const needs = window ? selectCategory(window.categories, false) : null
+  const strongestV3 = v3Window
+    ? selectProgressDimension(V3_METRIC_IDS, v3Window.metrics, true)
+    : null
+  const needsV3 = v3Window ? selectProgressDimension(V3_METRIC_IDS, v3Window.metrics, false) : null
   const hasLimitedSeries =
     window !== null &&
     (window.overall.state === 'insufficient_data' ||
@@ -84,10 +94,14 @@ export function ProgressDashboard({
         (category) => window.categories[category].state === 'insufficient_data',
       ))
   const hasExcludedSnapshots =
-    progress !== null &&
-    (progress.counts.malformed > 0 ||
-      progress.counts.unsupportedVersion > 0 ||
-      progress.counts.excludedIncompatible > 0)
+    (progress !== null &&
+      (progress.counts.malformed > 0 || progress.counts.unsupportedVersion > 0)) ||
+    (v3Progress !== null &&
+      (v3Progress.counts.malformed > 0 || v3Progress.counts.unsupportedVersion > 0))
+  const hasLimitedV3Series =
+    v3Window !== null &&
+    (v3Window.overall.state === 'insufficient_data' ||
+      V3_METRIC_IDS.some((metric) => v3Window.metrics[metric].state === 'insufficient_data'))
 
   return (
     <div className="flex flex-col gap-8 pb-12">
@@ -141,23 +155,18 @@ export function ProgressDashboard({
           })}
         </nav>
 
-        {dashboard === null ? (
-          <Card className="flex flex-col gap-3">
-            <div>
-              <h3 className="text-foreground font-medium">
-                Speaking skill progress is unavailable
-              </h3>
-              <p className="text-muted mt-1 text-sm">Your response trends could not be loaded.</p>
-            </div>
-            <RetryButton />
-          </Card>
-        ) : progress && window && progress.counts.selectedCohort === 0 ? (
-          <EmptyProgress mode={mode} hasAttempts={progress.counts.input > 0} />
-        ) : progress && window ? (
+        {hasV3 && v3Progress && v3Window ? (
           <div className="flex flex-col gap-6">
-            {hasLimitedSeries ? (
+            <div className="flex flex-col gap-1">
+              <h3 className="text-foreground font-medium">Current metric trends</h3>
+              <p className="text-muted text-sm">
+                These use the current What You Said and How You Sounded metrics.
+              </p>
+            </div>
+
+            {hasLimitedV3Series ? (
               <Card className="flex flex-col gap-1">
-                <h2 className="text-foreground font-medium">Some trends need more data</h2>
+                <h3 className="text-foreground font-medium">Some trends need more data</h3>
                 <p className="text-muted text-sm">
                   Each trend appears after two compatible checked results.
                 </p>
@@ -165,50 +174,53 @@ export function ProgressDashboard({
             ) : null}
 
             <section className="bg-surface rounded-card p-6">
-              <h2 className="text-foreground font-medium">Overall trend</h2>
+              <h3 className="text-foreground font-medium">Overall trend</h3>
               <div className="mt-3">
-                <ProgressTrend label="Overall" series={window.overall} />
+                <ProgressTrend label="Overall" series={v3Window.overall} />
               </div>
             </section>
 
-            <section aria-label="Category trends" className="grid gap-3 sm:grid-cols-2">
-              {SKILL_CATEGORIES.map((category) => (
-                <div key={category} className="bg-surface rounded-card p-4">
-                  <h2 className="text-muted text-sm">{labels[category]}</h2>
-                  <ProgressTrend label={labels[category]} series={window.categories[category]} />
+            <section aria-label="Current metric trends" className="grid gap-3 sm:grid-cols-2">
+              {V3_METRIC_IDS.map((metric) => (
+                <div key={metric} className="bg-surface rounded-card p-4">
+                  <h3 className="text-muted text-sm">{V3_METRIC_LABELS[metric]}</h3>
+                  <ProgressTrend
+                    label={V3_METRIC_LABELS[metric]}
+                    series={v3Window.metrics[metric]}
+                  />
                 </div>
               ))}
             </section>
 
             <section
-              aria-label="Progress summary"
+              aria-label="Current progress summary"
               className="text-muted flex flex-col gap-2 text-sm"
             >
-              {strongest ? (
-                <p>Current strongest category: {labels[strongest]}</p>
-              ) : (
-                <p>More checked results are needed to identify a strongest category.</p>
-              )}
-              {needs ? (
-                <p>Category needing the most practice: {labels[needs]}</p>
-              ) : (
-                <p>More checked results are needed to identify a practice category.</p>
-              )}
               <p>
-                Recent practice: {responseCount(progress.windows.recent.attemptCount)} in 7 days.
+                {strongestV3
+                  ? `Current strongest metric: ${V3_METRIC_LABELS[strongestV3]}`
+                  : 'More checked results are needed to identify a strongest metric.'}
+              </p>
+              <p>
+                {needsV3
+                  ? `Metric needing the most practice: ${V3_METRIC_LABELS[needsV3]}`
+                  : 'More checked results are needed to identify a practice metric.'}
+              </p>
+              <p>
+                Recent practice: {responseCount(v3Progress.windows.recent.attemptCount)} in 7 days.
               </p>
             </section>
 
-            {retryComparisons.length > 0 ? (
-              <section aria-labelledby="retry-progress-heading" className="flex flex-col gap-3">
+            {v3RetryComparisons.length > 0 ? (
+              <section aria-labelledby="v3-retry-progress-heading" className="flex flex-col gap-3">
                 <div>
-                  <h2 id="retry-progress-heading" className="text-foreground font-medium">
+                  <h3 id="v3-retry-progress-heading" className="text-foreground font-medium">
                     Recent retries
-                  </h2>
-                  <p className="text-muted mt-1 text-sm">Compatible scores from the same prompt.</p>
+                  </h3>
+                  <p className="text-muted mt-1 text-sm">Current metrics from the same prompt.</p>
                 </div>
                 <div className="flex flex-col gap-3">
-                  {retryComparisons.map((retry) => (
+                  {v3RetryComparisons.map((retry) => (
                     <Link
                       key={retry.attemptId}
                       href={attemptHref(retry.attemptId)}
@@ -231,6 +243,108 @@ export function ProgressDashboard({
               </section>
             ) : null}
           </div>
+        ) : null}
+
+        {dashboard === null ? (
+          <Card className="flex flex-col gap-3">
+            <div>
+              <h3 className="text-foreground font-medium">
+                Speaking skill progress is unavailable
+              </h3>
+              <p className="text-muted mt-1 text-sm">Your response trends could not be loaded.</p>
+            </div>
+            <RetryButton />
+          </Card>
+        ) : progress && window && progress.counts.selectedCohort === 0 && !hasV3 ? (
+          <EmptyProgress mode={mode} hasAttempts={progress.counts.input > 0} />
+        ) : progress && window && hasV2 ? (
+          <details open={!hasV3} className="flex flex-col gap-6">
+            <summary className="text-foreground cursor-pointer font-medium">
+              {hasV3 ? 'Earlier category trends' : 'Category trends'}
+            </summary>
+            <div className="mt-6 flex flex-col gap-6">
+              {hasLimitedSeries ? (
+                <Card className="flex flex-col gap-1">
+                  <h2 className="text-foreground font-medium">Some trends need more data</h2>
+                  <p className="text-muted text-sm">
+                    Each trend appears after two compatible checked results.
+                  </p>
+                </Card>
+              ) : null}
+
+              <section className="bg-surface rounded-card p-6">
+                <h2 className="text-foreground font-medium">Overall trend</h2>
+                <div className="mt-3">
+                  <ProgressTrend label="Overall" series={window.overall} />
+                </div>
+              </section>
+
+              <section aria-label="Category trends" className="grid gap-3 sm:grid-cols-2">
+                {SKILL_CATEGORIES.map((category) => (
+                  <div key={category} className="bg-surface rounded-card p-4">
+                    <h2 className="text-muted text-sm">{labels[category]}</h2>
+                    <ProgressTrend label={labels[category]} series={window.categories[category]} />
+                  </div>
+                ))}
+              </section>
+
+              <section
+                aria-label="Progress summary"
+                className="text-muted flex flex-col gap-2 text-sm"
+              >
+                {strongest ? (
+                  <p>Current strongest category: {labels[strongest]}</p>
+                ) : (
+                  <p>More checked results are needed to identify a strongest category.</p>
+                )}
+                {needs ? (
+                  <p>Category needing the most practice: {labels[needs]}</p>
+                ) : (
+                  <p>More checked results are needed to identify a practice category.</p>
+                )}
+                <p>
+                  Recent practice: {responseCount(progress.windows.recent.attemptCount)} in 7 days.
+                </p>
+              </section>
+
+              {retryComparisons.length > 0 ? (
+                <section aria-labelledby="retry-progress-heading" className="flex flex-col gap-3">
+                  <div>
+                    <h2 id="retry-progress-heading" className="text-foreground font-medium">
+                      Recent retries
+                    </h2>
+                    <p className="text-muted mt-1 text-sm">
+                      Compatible scores from the same prompt.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    {retryComparisons.map((retry) => (
+                      <Link
+                        key={retry.attemptId}
+                        href={attemptHref(retry.attemptId)}
+                        className="bg-surface rounded-card hover:bg-surface-sunken flex flex-col gap-2 p-4"
+                      >
+                        {retry.comparison.rows.slice(0, 3).map((row) => (
+                          <div
+                            key={row.category}
+                            className="flex items-center justify-between gap-4"
+                          >
+                            <span className="text-foreground text-sm">{row.label}</span>
+                            <span className="text-muted flex items-center gap-3 text-xs">
+                              <span className="numeric text-foreground">
+                                {row.previousPoints} → {row.currentPoints}
+                              </span>
+                              <span>{retryDifferenceLabel(row)}</span>
+                            </span>
+                          </div>
+                        ))}
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+            </div>
+          </details>
         ) : null}
 
         {hasExcludedSnapshots ? (

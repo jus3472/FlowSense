@@ -1,12 +1,18 @@
 import type { PracticeMode } from '@/lib/practice/contracts'
 import { decodeStoredSectionSnapshot } from '@/lib/results/snapshot'
 
-export type HistoryResultKind = 'legacy' | 'v2' | 'partial' | 'unsupported'
+export type HistoryResultKind = 'legacy' | 'v2' | 'v3' | 'partial' | 'unsupported'
 
 export type HistoryScoreCohort =
   | { kind: 'legacy' }
   | {
       kind: 'v2'
+      scoreVersion: string
+      rubricVersion: string
+      mode: PracticeMode
+    }
+  | {
+      kind: 'v3'
       scoreVersion: string
       rubricVersion: string
       mode: PracticeMode
@@ -62,6 +68,11 @@ export function readHistoryStoredResult(
       ? { kind: 'v2', score: snapshot.payload.total_earned_points }
       : { kind: 'partial', score: null }
   }
+  if (snapshot.kind === 'v3') {
+    return finiteScore(snapshot.payload.total_earned_points)
+      ? { kind: 'v3', score: snapshot.payload.total_earned_points }
+      : { kind: 'partial', score: null }
+  }
   if (snapshot.kind === 'legacy' && finiteScore(score)) return { kind: 'legacy', score }
   return { kind: 'partial', score: null }
 }
@@ -82,6 +93,24 @@ function scoredCandidate(input: HistoryScoreInput): ScoredCandidate | null {
       time,
       cohort: {
         kind: 'v2',
+        scoreVersion: snapshot.payload.version,
+        rubricVersion: snapshot.payload.rubric_version,
+        mode: snapshot.payload.mode,
+      },
+    }
+  }
+  if (
+    snapshot.kind === 'v3' &&
+    input.practiceMode === snapshot.payload.mode &&
+    finiteScore(snapshot.payload.total_earned_points)
+  ) {
+    return {
+      attemptId: input.id,
+      createdAt: input.createdAt,
+      value: snapshot.payload.total_earned_points,
+      time,
+      cohort: {
+        kind: 'v3',
         scoreVersion: snapshot.payload.version,
         rubricVersion: snapshot.payload.rubric_version,
         mode: snapshot.payload.mode,

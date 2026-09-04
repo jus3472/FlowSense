@@ -6,6 +6,21 @@ import {
   type V2ScorePayload,
 } from '@/lib/scoring/v2/assemble'
 import { rubricFor } from '@/lib/scoring/v2/rubrics'
+import { assembleV3Score } from '@/lib/scoring/v3/assemble'
+import {
+  V3_CONTENT_EVALUATOR_VERSION,
+  type V3ContentEvaluation,
+  type V3ContentMetricResult,
+} from '@/lib/scoring/v3/content/contracts'
+import {
+  HOW_YOU_SOUNDED_METRICS,
+  WHAT_YOU_SAID_METRICS,
+  type HowYouSoundedMetricId,
+  type V3MetricEvaluation,
+  type V3MetricId,
+  type V3ScoreEvidence,
+  type WhatYouSaidMetricId,
+} from '@/lib/scoring/v3/contracts'
 
 export const legacySectionSnapshot: LegacySectionSnapshot = {
   content: {
@@ -106,6 +121,64 @@ export function v2Snapshot(options: V2SnapshotOptions = {}): V2ScorePayload {
     categories,
     warnings: [],
   }
+}
+
+interface V3SnapshotOptions {
+  mode?: PracticeMode
+  component?: number
+  unavailableMetric?: V3MetricId
+  notCheckedMetric?: V3MetricId
+  evidenceMetric?: V3MetricId
+  evidence?: readonly V3ScoreEvidence[]
+  measurements?: Readonly<Record<string, string | number | boolean | null>>
+}
+
+function v3Evaluation(metric: V3MetricId, options: V3SnapshotOptions): V3MetricEvaluation {
+  const unavailable = metric === options.unavailableMetric
+  const notChecked = metric === options.notCheckedMetric
+  if (unavailable || notChecked) {
+    return {
+      metric,
+      status: unavailable ? 'unavailable' : 'not_checked',
+      component: null,
+      explanation: null,
+      measurements: null,
+      evidence: [],
+      details: [],
+      warnings: [`${metric} was not scored.`],
+    }
+  }
+  return {
+    metric,
+    status: 'scored',
+    component: options.component ?? 0.8,
+    explanation: `You have visible ${metric} evidence.`,
+    measurements: metric === options.evidenceMetric ? (options.measurements ?? {}) : {},
+    evidence: metric === options.evidenceMetric ? (options.evidence ?? []) : [],
+    details: [],
+    warnings: [],
+  }
+}
+
+export function v3Snapshot(options: V3SnapshotOptions = {}) {
+  const content: V3ContentEvaluation = {
+    version: V3_CONTENT_EVALUATOR_VERSION,
+    provider: 'test',
+    status: 'checked',
+    metrics: Object.fromEntries(
+      WHAT_YOU_SAID_METRICS.map((metric) => [
+        metric,
+        v3Evaluation(metric, options) as V3ContentMetricResult,
+      ]),
+    ) as Record<WhatYouSaidMetricId, V3ContentMetricResult>,
+    warnings: [],
+    calls: 1,
+  }
+  const sounded = Object.fromEntries(
+    HOW_YOU_SOUNDED_METRICS.map((metric) => [metric, v3Evaluation(metric, options)]),
+  ) as Record<HowYouSoundedMetricId, V3MetricEvaluation>
+
+  return assembleV3Score({ mode: options.mode ?? 'practice', content, sounded })
 }
 
 export function progressAttempt(
