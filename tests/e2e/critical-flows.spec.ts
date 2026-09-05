@@ -936,8 +936,15 @@ test('@mobile Tracks stays readable through the lesson boundary', async ({ page 
   )
 
   await page.getByRole('link', { name: 'Interviews' }).click()
-  await expect(page.getByRole('heading', { name: 'Interviews' })).toBeVisible()
-  await expect(page.getByText('Checkpoint').first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Interviews', exact: true })).toBeVisible()
+  await expect(page.getByText('Track', { exact: true })).toHaveCount(2)
+  await expect(page.getByText('Practice path', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('Current chapter', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('Lesson 1 of 10', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Lesson 1', exact: true })).toHaveCount(3)
+  await expect(page.getByText('Checkpoint', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('Chapter locked', { exact: true })).toHaveCount(2)
+  await expect(page.getByText(/checkpoint to unlock this chapter/i)).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )

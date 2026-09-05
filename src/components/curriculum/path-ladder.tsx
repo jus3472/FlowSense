@@ -4,7 +4,6 @@ import { Card } from '@/components/ui/card'
 import { PageShell } from '@/components/ui/page-shell'
 import { ScoreProgress } from '@/components/ui/score-progress'
 import type {
-  CurriculumChapterSummary,
   CurriculumLessonProgress,
   CurriculumPathProgress,
   PathSlug,
@@ -12,24 +11,6 @@ import type {
 import { curriculumLessonHref, curriculumLessonRecordHref } from '@/lib/curriculum/routes'
 import { PASSING_SCORE } from '@/lib/curriculum/thresholds'
 import { cn } from '@/lib/utils'
-
-function chapterUnlockRequirement(
-  chapters: readonly CurriculumChapterSummary[],
-  index: number,
-): string | null {
-  const previous = chapters[index - 1]
-  return previous ? `Pass the ${previous.chapter.title} checkpoint to unlock this chapter.` : null
-}
-
-function checkpointDescription(
-  chapters: readonly CurriculumChapterSummary[],
-  index: number,
-): string {
-  const next = chapters[index + 1]
-  return next
-    ? `This checkpoint unlocks ${next.chapter.title} when you pass with ${PASSING_SCORE}.`
-    : `This checkpoint completes the path when you pass with ${PASSING_SCORE}.`
-}
 
 function LessonDetails({ lesson }: { lesson: CurriculumLessonProgress }) {
   if (lesson.state === 'passed') {
@@ -60,23 +41,16 @@ function LessonDetails({ lesson }: { lesson: CurriculumLessonProgress }) {
     )
   }
 
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="text-muted text-sm font-medium">Locked</p>
-      <p className="text-muted text-sm">Pass the previous lesson to unlock this one.</p>
-    </div>
-  )
+  return <p className="text-muted text-sm font-medium">Locked</p>
 }
 
 function LessonCard({
   lesson,
   current,
-  checkpointCopy,
   pathSlug,
 }: {
   lesson: CurriculumLessonProgress
   current: boolean
-  checkpointCopy: string | null
   pathSlug: PathSlug
 }) {
   const content = (
@@ -92,27 +66,22 @@ function LessonCard({
     >
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <h3 className="numeric text-foreground text-base font-medium">
-            Lesson {lesson.lesson.position} of 10
+          <h3
+            aria-label={
+              lesson.checkpoint ? `Lesson ${lesson.lesson.position}, checkpoint` : undefined
+            }
+            className="numeric text-foreground text-base font-medium"
+          >
+            Lesson {lesson.lesson.position}
           </h3>
         </div>
-        {current || lesson.checkpoint ? (
-          <div className="flex shrink-0 flex-wrap justify-end gap-2">
-            {current ? (
-              <span className="bg-surface text-foreground rounded-full px-3 py-1 text-xs font-medium">
-                Current lesson
-              </span>
-            ) : null}
-            {lesson.checkpoint ? (
-              <span className="bg-highlight text-highlight-fg rounded-full px-3 py-1 text-xs font-medium">
-                Checkpoint
-              </span>
-            ) : null}
-          </div>
+        {current ? (
+          <span className="bg-surface text-foreground shrink-0 rounded-full px-3 py-1 text-xs font-medium">
+            Current lesson
+          </span>
         ) : null}
       </div>
 
-      {checkpointCopy ? <p className="text-muted text-sm">{checkpointCopy}</p> : null}
       <LessonDetails lesson={lesson} />
 
       {lesson.state === 'locked' ? null : (
@@ -151,18 +120,13 @@ function LessonCard({
 }
 
 export function CurriculumPathLadder({ progress }: { progress: CurriculumPathProgress }) {
-  const currentChapter = progress.summary.currentChapter
-    ? (progress.chapters.find(
-        ({ chapter }) => chapter.id === progress.summary.currentChapter?.id,
-      ) ?? null)
-    : null
   const currentLessonId = progress.summary.currentLesson?.id ?? null
 
   return (
     <PageShell width="reading" className="gap-8">
       <header className="flex min-w-0 flex-col gap-6">
         <div className="flex flex-col gap-2">
-          <p className="text-muted text-sm">Practice path</p>
+          <p className="text-muted text-sm">Track</p>
           <h1 className="prompt-display text-foreground text-2xl break-words">
             {progress.path.title}
           </h1>
@@ -175,62 +139,41 @@ export function CurriculumPathLadder({ progress }: { progress: CurriculumPathPro
             max={progress.summary.totalLessons}
             size="section"
           />
-          <div className="grid min-w-0 gap-6 sm:grid-cols-2">
-            <div className="flex min-w-0 flex-col gap-1">
-              <p className="text-muted text-sm">
-                {progress.summary.pathComplete ? 'Status' : 'Current chapter'}
-              </p>
-              {progress.summary.pathComplete ? (
-                <p className="text-foreground font-medium">Path complete</p>
-              ) : (
-                <>
-                  <p className="text-foreground font-medium break-words">
-                    {currentChapter?.chapter.title}
-                  </p>
-                  <p className="numeric text-muted text-sm">
-                    {currentChapter?.passedLessons ?? 0} / {currentChapter?.totalLessons ?? 10}{' '}
-                    passed
-                  </p>
-                </>
-              )}
-            </div>
-            <div className="flex min-w-0 flex-col gap-1">
-              <p className="text-muted text-sm">Path</p>
-              <p className="numeric text-foreground font-medium">
-                {progress.summary.passedLessons} / {progress.summary.totalLessons} passed
-              </p>
-              <p className="numeric text-muted text-sm">
-                {progress.summary.earnedStars} / {progress.summary.maximumStars} stars
-              </p>
-            </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <p className="text-muted text-sm">Track</p>
+            <p className="numeric text-foreground font-medium">
+              {progress.summary.passedLessons} / {progress.summary.totalLessons} passed
+            </p>
+            <p className="numeric text-muted text-sm">
+              {progress.summary.earnedStars} / {progress.summary.maximumStars} stars
+            </p>
+            {progress.summary.pathComplete ? (
+              <p className="text-positive pt-2 text-sm font-medium">Track complete</p>
+            ) : null}
           </div>
         </Card>
       </header>
 
       <div className="flex min-w-0 flex-col gap-12">
-        {progress.chapters.map((chapter, chapterIndex) => {
-          const requirement = chapterUnlockRequirement(progress.chapters, chapterIndex)
+        {progress.chapters.map((chapter) => {
           const chapterLessons = progress.lessons.filter(
             (lesson) => lesson.lesson.chapterId === chapter.chapter.id,
           )
 
           return (
             <section key={chapter.chapter.id} className="flex min-w-0 flex-col gap-4">
-              <div className="flex min-w-0 flex-col gap-2">
-                <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-foreground text-xl font-semibold break-words">
-                    {chapter.chapter.title}
-                  </h2>
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                <h2 className="text-foreground text-xl font-semibold break-words">
+                  {chapter.chapter.title}
+                </h2>
+                <div className="flex flex-wrap items-center justify-end gap-3">
+                  {!chapter.chapterUnlocked ? (
+                    <span className="text-muted text-sm font-medium">Chapter locked</span>
+                  ) : null}
                   <span className="numeric text-muted text-sm">
                     {chapter.passedLessons} / {chapter.totalLessons} passed
                   </span>
                 </div>
-                {!chapter.chapterUnlocked && requirement ? (
-                  <div className="flex flex-col gap-1">
-                    <p className="text-muted text-sm font-medium">Chapter locked</p>
-                    <p className="text-muted text-sm">{requirement}</p>
-                  </div>
-                ) : null}
               </div>
 
               <ol className="flex min-w-0 flex-col gap-4">
@@ -240,11 +183,6 @@ export function CurriculumPathLadder({ progress }: { progress: CurriculumPathPro
                       lesson={lesson}
                       current={lesson.lesson.id === currentLessonId}
                       pathSlug={progress.path.slug}
-                      checkpointCopy={
-                        lesson.checkpoint
-                          ? checkpointDescription(progress.chapters, chapterIndex)
-                          : null
-                      }
                     />
                   </li>
                 ))}

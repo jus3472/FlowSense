@@ -125,14 +125,20 @@ beforeEach(() => {
 
 describe('curriculum path ladder', () => {
   it('renders a fresh path with exact totals and locked future lesson numbers', () => {
-    renderLadder()
+    const { container } = renderLadder()
 
     expect(screen.getByRole('heading', { level: 1, name: 'General Speaking' })).toBeInTheDocument()
+    expect(screen.getAllByText('Track')).toHaveLength(2)
+    expect(screen.queryByText('Practice path')).not.toBeInTheDocument()
+    expect(container).not.toHaveTextContent(/\bPath\b/)
     expect(screen.getByText('0 / 30 passed')).toBeInTheDocument()
     expect(screen.getByText('0 / 90 stars')).toBeInTheDocument()
-    const currentChapter = screen.getByText('Current chapter').parentElement
-    if (!currentChapter) throw new Error('Missing current chapter summary.')
-    expect(within(currentChapter).getByText('0 / 10 passed')).toBeInTheDocument()
+    expect(screen.queryByText('Current chapter')).not.toBeInTheDocument()
+    const summary = screen
+      .getByRole('progressbar', { name: 'General Speaking lesson progress' })
+      .closest<HTMLElement>('.rounded-card')
+    if (!summary) throw new Error('Missing Track summary.')
+    expect(within(summary).queryByText('0 / 10 passed')).not.toBeInTheDocument()
 
     const current = screen.getByRole('link', { current: 'step' })
     expect(current).toHaveAttribute('aria-current', 'step')
@@ -148,17 +154,18 @@ describe('curriculum path ladder', () => {
     const intermediateSection = intermediate.closest('section')
     if (!intermediateSection) throw new Error('Missing Intermediate section.')
     const lockedLesson = within(intermediateSection).getAllByRole('heading', {
-      name: 'Lesson 1 of 10',
+      name: /^Lesson 1$/,
     })[0]
     if (!lockedLesson) throw new Error('Missing locked lesson.')
     expect(lockedLesson.closest('a')).toBeNull()
-    expect(lockedLesson.closest('[aria-disabled="true"]')).toHaveTextContent(
-      'Pass the previous lesson to unlock this one.',
-    )
+    expect(lockedLesson.closest('[aria-disabled="true"]')).toHaveTextContent('Locked')
+    expect(
+      screen.queryByText('Pass the previous lesson to unlock this one.'),
+    ).not.toBeInTheDocument()
     expect(screen.getAllByText('Chapter locked')).toHaveLength(2)
     expect(
-      screen.getByText('Pass the Beginner checkpoint to unlock this chapter.'),
-    ).toBeInTheDocument()
+      screen.queryByText('Pass the Beginner checkpoint to unlock this chapter.'),
+    ).not.toBeInTheDocument()
   })
 
   it('marks a retry as current while preserving one-star and two-star passes', () => {
@@ -196,10 +203,13 @@ describe('curriculum path ladder', () => {
     expect(screen.getByText('10 / 30 passed')).toBeInTheDocument()
     expect(screen.getByText('30 / 90 stars')).toBeInTheDocument()
     expect(screen.getAllByRole('img', { name: '3 of 3 stars' })).toHaveLength(10)
-    expect(screen.getAllByText('Checkpoint')).toHaveLength(3)
+    expect(screen.queryByText('Checkpoint')).not.toBeInTheDocument()
     expect(
-      screen.getByText('This checkpoint unlocks Intermediate when you pass with 70.'),
-    ).toBeInTheDocument()
+      screen.getAllByRole('heading', { name: 'Lesson 10, checkpoint', level: 3 }),
+    ).toHaveLength(3)
+    expect(
+      screen.queryByText('This checkpoint unlocks Intermediate when you pass with 70.'),
+    ).not.toBeInTheDocument()
 
     const intermediate = screen.getByRole('link', { current: 'step' })
     expect(intermediate).toHaveAttribute('aria-current', 'step')
@@ -208,8 +218,8 @@ describe('curriculum path ladder', () => {
       screen.queryByText('Pass the Beginner checkpoint to unlock this chapter.'),
     ).not.toBeInTheDocument()
     expect(
-      screen.getByText('Pass the Intermediate checkpoint to unlock this chapter.'),
-    ).toBeInTheDocument()
+      screen.queryByText('Pass the Intermediate checkpoint to unlock this chapter.'),
+    ).not.toBeInTheDocument()
   })
 
   it('unlocks Advanced after the Intermediate checkpoint passes', () => {
@@ -224,14 +234,15 @@ describe('curriculum path ladder', () => {
       screen.queryByText('Pass the Intermediate checkpoint to unlock this chapter.'),
     ).not.toBeInTheDocument()
     expect(
-      screen.getByText('This checkpoint completes the path when you pass with 70.'),
-    ).toBeInTheDocument()
+      screen.queryByText('This checkpoint completes the path when you pass with 70.'),
+    ).not.toBeInTheDocument()
   })
 
-  it('renders an exact completed path without a current lesson', () => {
-    renderLadder(buildProgress(Array.from({ length: 30 }, () => 86)))
+  it('renders an exact completed track without a current lesson', () => {
+    const { container } = renderLadder(buildProgress(Array.from({ length: 30 }, () => 86)))
 
-    expect(screen.getByText('Path complete')).toBeInTheDocument()
+    expect(screen.getByText('Track complete')).toBeInTheDocument()
+    expect(container).not.toHaveTextContent(/\bPath\b/)
     expect(screen.getByText('30 / 30 passed')).toBeInTheDocument()
     expect(screen.getByText('60 / 90 stars')).toBeInTheDocument()
     expect(screen.queryByRole('link', { current: 'step' })).not.toBeInTheDocument()
@@ -298,7 +309,8 @@ describe('curriculum path route outcomes', () => {
 
     await renderPage()
 
-    expect(screen.getByRole('heading', { name: 'This path did not load' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'This track did not load' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Track', level: 1 })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
     expect(screen.queryByText('Chapter locked')).not.toBeInTheDocument()
   })
@@ -318,7 +330,7 @@ describe('curriculum path route outcomes', () => {
       await renderPage()
 
       expect(
-        screen.getByRole('heading', { name: 'This path is not available' }),
+        screen.getByRole('heading', { name: 'This track is not available' }),
       ).toBeInTheDocument()
       expect(screen.queryByRole('heading', { name: 'General Speaking' })).not.toBeInTheDocument()
       expect(screen.queryByText('Beginner lesson 1')).not.toBeInTheDocument()

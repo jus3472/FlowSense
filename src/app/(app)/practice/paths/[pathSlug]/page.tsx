@@ -8,7 +8,7 @@ import type { CurriculumPathProgress } from '@/lib/curriculum/contracts'
 import { loadAuthenticatedCurriculumPath } from '@/lib/curriculum/server'
 
 export const metadata: Metadata = {
-  title: 'Practice Path',
+  title: 'Track',
 }
 
 function hasInactiveCurriculum(progress: CurriculumPathProgress): boolean {
@@ -34,10 +34,10 @@ export default async function CurriculumPathPage({
   if (outcome.status === 'failure') {
     return (
       <PageShell width="reading" className="gap-8">
-        <h1 className="prompt-display text-foreground text-2xl">Practice path</h1>
+        <h1 className="prompt-display text-foreground text-2xl">Track</h1>
         <ErrorState
-          title="This path did not load"
-          description="The connection to your path failed. Try loading it again."
+          title="This track did not load"
+          description="The connection to your track failed. Try loading it again."
         >
           <RetryButton />
         </ErrorState>
@@ -48,10 +48,10 @@ export default async function CurriculumPathPage({
   if (hasInactiveCurriculum(outcome.data)) {
     return (
       <PageShell width="reading" className="gap-8">
-        <h1 className="prompt-display text-foreground text-2xl">Practice path</h1>
+        <h1 className="prompt-display text-foreground text-2xl">Track</h1>
         <ErrorState
-          title="This path is not available"
-          description="This path is not available for practice right now."
+          title="This track is not available"
+          description="This track is not available for practice right now."
         />
       </PageShell>
     )
