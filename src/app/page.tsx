@@ -9,7 +9,7 @@ export default function LandingPage() {
   return (
     <div className="flex min-h-dvh flex-col">
       <MarketingHeader />
-      <main className="max-w-column mx-auto w-full flex-1 px-6">
+      <main className="max-w-page mx-auto w-full flex-1 px-4 sm:px-8 lg:px-12">
         <Hero />
         <HowItWorks />
         <ResultMock />

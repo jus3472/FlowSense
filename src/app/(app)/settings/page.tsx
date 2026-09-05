@@ -4,6 +4,9 @@ import { LogoutForm } from '@/components/settings/logout-form'
 import { SettingsForm } from '@/components/settings/settings-form'
 import { RetryButton } from '@/components/system/retry-button'
 import { ErrorState } from '@/components/ui/error-state'
+import { Card } from '@/components/ui/card'
+import { PageShell } from '@/components/ui/page-shell'
+import { PageTitle } from '@/components/ui/page-title'
 import { loadProfilePreferences, logProfilePreferencesLoadFailure } from '@/lib/profile-preferences'
 import { createClient } from '@/lib/supabase/server'
 
@@ -30,8 +33,8 @@ export default async function SettingsPage({
   if (profile.status === 'failure') {
     logProfilePreferencesLoadFailure('settings', profile)
     return (
-      <div className="flex flex-col gap-12 pt-4 pb-12">
-        <h1 className="prompt-display text-foreground text-2xl">Settings</h1>
+      <PageShell width="column">
+        <PageTitle>Settings</PageTitle>
         <ErrorState
           title="Your settings did not load"
           description="The connection to your account failed. Your saved settings are unchanged."
@@ -39,17 +42,31 @@ export default async function SettingsPage({
           <RetryButton />
         </ErrorState>
         <LogoutForm failed={query.logout === 'failed'} />
-      </div>
+      </PageShell>
     )
   }
 
   return (
-    <div className="flex flex-col gap-12 pt-4 pb-12">
-      <h1 className="prompt-display text-foreground text-2xl">Settings</h1>
+    <PageShell width="column">
+      <PageTitle>Settings</PageTitle>
 
-      <SettingsForm displayName={profile.data.displayName} />
+      <Card className="flex flex-col gap-6 sm:p-8">
+        <div className="flex flex-col gap-1">
+          <h2 className="prompt-display text-foreground text-xl">Profile</h2>
+          <p className="text-muted text-sm">Update how your name appears in FlowSense.</p>
+        </div>
+        <SettingsForm displayName={profile.data.displayName} />
+      </Card>
 
-      <LogoutForm failed={query.logout === 'failed'} />
-    </div>
+      <section
+        aria-labelledby="account-heading"
+        className="border-border flex flex-col gap-4 border-t pt-8"
+      >
+        <h2 id="account-heading" className="text-foreground text-lg font-medium">
+          Account
+        </h2>
+        <LogoutForm failed={query.logout === 'failed'} />
+      </section>
+    </PageShell>
   )
 }

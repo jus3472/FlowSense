@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Card } from '@/components/ui/card'
 
 interface StepFrameProps {
   step: 1 | 2
@@ -8,10 +9,10 @@ interface StepFrameProps {
 
 export function StepFrame({ step, title, children }: StepFrameProps) {
   return (
-    <div className="flex flex-col gap-6">
+    <Card className="flex flex-col gap-6 sm:p-8">
       <p className="numeric text-muted text-xs font-medium">Step {step} of 2</p>
-      <h1 className="text-foreground text-xl font-semibold">{title}</h1>
+      <h1 className="prompt-display text-foreground text-2xl">{title}</h1>
       {children}
-    </div>
+    </Card>
   )
 }

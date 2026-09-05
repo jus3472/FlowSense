@@ -6,7 +6,7 @@ type Variant = 'primary' | 'secondary' | 'ghost'
 type Size = 'md' | 'lg'
 
 const BASE =
-  'inline-flex items-center justify-center gap-2 rounded-full font-medium transition duration-150 ease-out disabled:pointer-events-none disabled:opacity-60'
+  'inline-flex items-center justify-center gap-2 rounded-input font-medium transition duration-150 ease-out disabled:pointer-events-none disabled:opacity-60'
 
 const VARIANTS: Record<Variant, string> = {
   /**
@@ -15,7 +15,7 @@ const VARIANTS: Record<Variant, string> = {
    * both directions rather than drifting under 4.5:1.
    */
   primary: 'bg-accent text-accent-fg hover:brightness-90 dark:hover:brightness-110',
-  secondary: 'bg-surface-sunken text-foreground hover:bg-accent-soft',
+  secondary: 'border-border bg-surface text-foreground border hover:bg-surface-sunken',
   ghost: 'text-foreground hover:bg-surface-sunken',
 }
 

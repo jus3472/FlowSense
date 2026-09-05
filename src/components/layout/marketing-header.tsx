@@ -3,8 +3,8 @@ import { Wordmark } from '@/components/layout/wordmark'
 
 export function MarketingHeader() {
   return (
-    <header className="bg-background">
-      <div className="max-w-column mx-auto flex min-h-14 w-full items-center justify-between gap-4 px-6 py-2">
+    <header className="border-border bg-background border-b">
+      <div className="max-w-page mx-auto flex min-h-16 w-full items-center justify-between gap-4 px-4 py-2 sm:px-8 lg:px-12">
         <Link href="/" className="rounded-input flex min-h-11 items-center">
           <Wordmark />
         </Link>

@@ -7,6 +7,8 @@ import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ErrorState } from '@/components/ui/error-state'
+import { PageShell } from '@/components/ui/page-shell'
+import { PageTitle } from '@/components/ui/page-title'
 import {
   formatExpectedDuration,
   parsePracticeBrowseParams,
@@ -34,7 +36,7 @@ function ModeHeader({ mode }: { mode: string }) {
       <Link href="/practice" className="text-accent text-sm hover:underline">
         Tracks
       </Link>
-      <h1 className="prompt-display text-foreground text-2xl">{modeTitle(mode)}</h1>
+      <PageTitle>{modeTitle(mode)}</PageTitle>
     </div>
   )
 }
@@ -52,7 +54,7 @@ export default async function PracticeModePage({
   const parsedFilters = parsePracticeBrowseParams(await searchParams)
   if (parsedFilters.status === 'invalid') {
     return (
-      <div className="flex flex-col gap-8 pt-4 pb-12">
+      <PageShell width="reading" className="gap-8">
         <ModeHeader mode={mode} />
         <ErrorState
           title="Those filters are not available"
@@ -62,7 +64,7 @@ export default async function PracticeModePage({
             Clear filters
           </ButtonLink>
         </ErrorState>
-      </div>
+      </PageShell>
     )
   }
 
@@ -80,7 +82,7 @@ export default async function PracticeModePage({
 
   if (browseOutcome.status === 'failure') {
     return (
-      <div className="flex flex-col gap-8 pt-4 pb-12">
+      <PageShell width="reading" className="gap-8">
         <ModeHeader mode={mode} />
         <ErrorState
           title="The prompt library did not load"
@@ -88,7 +90,7 @@ export default async function PracticeModePage({
         >
           <RetryButton />
         </ErrorState>
-      </div>
+      </PageShell>
     )
   }
 
@@ -99,7 +101,7 @@ export default async function PracticeModePage({
   const { difficulty, collectionId } = parsedFilters.filters
 
   return (
-    <div className="flex flex-col gap-8 pt-4 pb-12">
+    <PageShell width="reading" className="gap-8">
       <ModeHeader mode={mode} />
 
       {browse.recommended ? (
@@ -134,7 +136,7 @@ export default async function PracticeModePage({
             description="Choose another difficulty or collection."
           />
         ) : (
-          <div className="flex flex-col gap-4">
+          <div className="grid gap-4 md:grid-cols-2">
             {browse.prompts.map((prompt) => (
               <Card key={prompt.id} className="flex flex-col gap-3">
                 <p className="text-foreground text-base">{prompt.text}</p>
@@ -151,6 +153,6 @@ export default async function PracticeModePage({
           </div>
         )}
       </section>
-    </div>
+    </PageShell>
   )
 }

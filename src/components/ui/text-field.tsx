@@ -8,6 +8,9 @@ interface TextFieldProps extends Omit<ComponentProps<'input'>, 'id'> {
   error?: string | null
 }
 
+export const FIELD_CONTROL_CLASS =
+  'border-border bg-surface text-foreground rounded-input min-h-11 border px-4 text-base placeholder:text-muted transition duration-150 ease-out focus-visible:ring-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-muted'
+
 export function TextField({ id, label, hint, error, className, ...props }: TextFieldProps) {
   const hintId = hint ? `${id}-hint` : undefined
   const errorId = error ? `${id}-error` : undefined
@@ -29,10 +32,8 @@ export function TextField({ id, label, hint, error, className, ...props }: TextF
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy}
         className={cn(
-          'rounded-input bg-surface-sunken text-foreground min-h-11 px-4 text-base',
-          'placeholder:text-muted transition duration-150 ease-out',
-          'focus-visible:ring-accent ring-inset focus:outline-none focus-visible:ring-2',
-          error && 'ring-negative ring-2',
+          FIELD_CONTROL_CLASS,
+          error && 'border-negative ring-negative ring-1',
           className,
         )}
       />

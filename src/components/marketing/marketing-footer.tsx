@@ -4,11 +4,11 @@ import { Wordmark } from '@/components/layout/wordmark'
 
 export function MarketingFooter() {
   return (
-    <footer className="mt-12">
-      <div className="max-w-column mx-auto flex w-full flex-col gap-6 px-6 py-12">
+    <footer className="border-border mt-12 border-t">
+      <div className="max-w-page mx-auto flex w-full flex-col gap-6 px-4 py-16 sm:px-8 lg:px-12">
         <h2 className="prompt-display text-foreground text-xl">Answer one prompt today</h2>
-        <div>
-          <ButtonLink href="/login" size="lg" fullWidth>
+        <div className="self-start">
+          <ButtonLink href="/login" size="lg">
             Answer your first prompt
           </ButtonLink>
         </div>

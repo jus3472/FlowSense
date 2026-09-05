@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
+import { ScoreProgress } from '@/components/ui/score-progress'
 import type {
   CurriculumChapterSummary,
   CurriculumLessonProgress,
@@ -91,6 +92,13 @@ function SelectedPathProgress({ item }: { item: CurriculumOverviewPath }) {
         </div>
       </div>
 
+      <ScoreProgress
+        label={`${progress.path.title} lesson progress`}
+        value={progress.summary.passedLessons}
+        max={progress.summary.totalLessons}
+        size="section"
+      />
+
       {lesson && action.kind !== 'complete' ? (
         <div className="bg-surface-sunken rounded-card flex min-w-0 flex-col gap-2 p-4">
           <p className="text-muted text-xs font-medium">
@@ -141,7 +149,7 @@ function AvailablePathProgress({ item }: { item: CurriculumOverviewPath }) {
   return (
     <Link
       href={curriculumPathHref(progress.path.slug)}
-      className="bg-surface-sunken hover:bg-accent-soft rounded-card flex min-h-11 min-w-0 flex-col gap-3 p-4"
+      className="border-border bg-surface shadow-card rounded-card hover:bg-surface-sunken flex min-h-11 min-w-0 flex-col gap-3 border p-4"
     >
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <h3 className="text-foreground font-medium break-words">{progress.path.title}</h3>
@@ -166,15 +174,15 @@ export function CurriculumProgress({ overview }: { overview: CurriculumOverviewD
 
   return (
     <section aria-label="Track progress" className="flex flex-col gap-6">
-      <div className="flex min-w-0 flex-col gap-4">
+      <div className="grid min-w-0 gap-6 md:grid-cols-2">
         {selected.map((item) => (
           <SelectedPathProgress key={item.progress.path.id} item={item} />
         ))}
       </div>
 
       {available.length > 0 ? (
-        <div className="flex min-w-0 flex-col gap-3">
-          <h3 className="text-foreground font-medium">Other paths</h3>
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+          <h3 className="text-foreground font-medium sm:col-span-2">Other paths</h3>
           {available.map((item) => (
             <AvailablePathProgress key={item.progress.path.id} item={item} />
           ))}

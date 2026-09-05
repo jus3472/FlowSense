@@ -20,10 +20,10 @@ const SAMPLE_SECTIONS = ['What You Said', 'How You Sounded']
 
 export function ResultMock() {
   return (
-    <section className="flex flex-col gap-6 py-12">
+    <section className="border-border flex flex-col gap-8 border-t py-16">
       <h2 className="section-label text-muted">What you get back</h2>
 
-      <div className="rounded-card bg-surface flex flex-col gap-8 p-8">
+      <div className="border-border bg-surface shadow-card rounded-card grid gap-8 border p-6 sm:p-8 md:grid-cols-[minmax(0,1.35fr)_minmax(220px,0.65fr)] md:items-start">
         <p className="text-foreground text-lg leading-loose">
           {SAMPLE_TRANSCRIPT.map((segment, index) =>
             segment.highlight ? (
@@ -36,7 +36,7 @@ export function ResultMock() {
           )}
         </p>
 
-        <div className="flex flex-col gap-4">
+        <div className="border-border flex flex-col gap-4 border-t pt-6 md:border-t-0 md:border-l md:pt-0 md:pl-8">
           <p className="text-muted text-sm">Sample Interview result</p>
           <div className="flex items-baseline gap-2">
             <span className="numeric text-foreground text-2xl font-medium">{SAMPLE_SCORE}</span>

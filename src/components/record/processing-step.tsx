@@ -2,6 +2,7 @@
 
 import { AudioPlayer } from '@/components/record/audio-player'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { STAGE_LABEL, type ProcessingState, type WorkStage } from '@/lib/recording/processing'
 
 interface ProcessingStepProps {
@@ -28,19 +29,22 @@ export function ProcessingStep({
   const stage = state.failedStage ?? 'uploading'
 
   return (
-    <div className="flex flex-col gap-6">
-      <p className="text-muted text-base">{promptText}</p>
+    <div className="max-w-column mx-auto flex w-full flex-col gap-6">
+      <p className="prompt-display text-muted text-lg">{promptText}</p>
 
       {/* The player appears the moment the blob exists, so there is something
           to do while the rest of the pipeline runs. */}
       {audioUrl ? <AudioPlayer key={audioUrl} src={audioUrl} durationMs={durationMs} /> : null}
 
       {state.stage === 'failed' || state.stage === 'timed_out' ? (
-        <div className="flex flex-col gap-4">
+        <Card className="flex flex-col gap-4">
           <h2 className="text-foreground text-lg font-semibold">
             {STAGE_LABEL[stage]} {state.stage === 'timed_out' ? 'timed out' : 'failed'}
           </h2>
-          <p role="alert" className="text-negative text-sm">
+          <p
+            role="alert"
+            className="bg-negative-soft text-negative rounded-input px-4 py-3 text-sm"
+          >
             {state.message}
           </p>
           <p className="text-muted text-sm">{REASSURANCE[stage]}</p>
@@ -49,11 +53,13 @@ export function ProcessingStep({
               Try again
             </Button>
           </div>
-        </div>
+        </Card>
       ) : (
-        <p role="status" className="text-muted text-sm">
-          {state.stage === 'done' ? 'Opening your transcript' : STAGE_LABEL[state.stage]}
-        </p>
+        <Card>
+          <p role="status" className="text-muted text-sm">
+            {state.stage === 'done' ? 'Opening your transcript' : STAGE_LABEL[state.stage]}
+          </p>
+        </Card>
       )}
     </div>
   )

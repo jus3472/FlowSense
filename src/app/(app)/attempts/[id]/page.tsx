@@ -64,7 +64,7 @@ function resultLoadError() {
 
 function resultWithAudioStatus(content: ReactNode, audioUnavailable: boolean) {
   return (
-    <div className="flex flex-col gap-4">
+    <div className="max-w-column mx-auto flex w-full flex-col gap-4">
       {audioUnavailable ? (
         <p role="status" className="text-muted text-sm">
           Audio playback is unavailable for this response.

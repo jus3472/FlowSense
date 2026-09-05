@@ -52,7 +52,7 @@ export function RecordingStep({ promptText, maxDurationMs, getLevel, onStop }: R
   }, [maxDurationMs, getLevel])
 
   return (
-    <div className="flex min-h-[72vh] flex-col items-center justify-center gap-12">
+    <div className="max-w-column mx-auto flex min-h-[72vh] w-full flex-col items-center justify-center gap-12">
       <p className="prompt-display text-foreground max-w-[34rem] text-center text-xl">
         {promptText}
       </p>
@@ -94,7 +94,7 @@ export function RecordingStep({ promptText, maxDurationMs, getLevel, onStop }: R
         </p>
       </div>
 
-      <Button size="lg" variant="ghost" onClick={onStop}>
+      <Button size="lg" variant="secondary" onClick={onStop}>
         Stop
       </Button>
     </div>

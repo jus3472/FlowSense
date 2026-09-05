@@ -5,6 +5,7 @@ import { ProgressTrend } from '@/components/progress/progress-trend'
 import { RetryButton } from '@/components/system/retry-button'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
+import { PageShell } from '@/components/ui/page-shell'
 import { PageTitle } from '@/components/ui/page-title'
 import type { CurriculumOverviewData } from '@/lib/curriculum/overview'
 import { selectCategory, selectProgressDimension } from '@/lib/progress/display'
@@ -104,7 +105,7 @@ export function ProgressDashboard({
       v3MetricIds.some((metric) => v3Window.metrics[metric].state === 'insufficient_data'))
 
   return (
-    <div className="flex flex-col gap-12 pt-4 pb-12">
+    <PageShell>
       <PageTitle>Progress</PageTitle>
 
       {curriculum ? <CurriculumProgress overview={curriculum} /> : null}
@@ -122,7 +123,7 @@ export function ProgressDashboard({
 
       <section aria-labelledby="speaking-progress-heading" className="flex flex-col gap-6">
         <div className="flex flex-col gap-2">
-          <h2 id="speaking-progress-heading" className="text-foreground text-xl font-semibold">
+          <h2 id="speaking-progress-heading" className="prompt-display text-foreground text-xl">
             Speaking skill progress
           </h2>
           <p className="text-muted text-sm">These trends use compatible scored responses.</p>
@@ -137,10 +138,10 @@ export function ProgressDashboard({
                 href={progressHref(value)}
                 aria-current={selected ? 'page' : undefined}
                 className={cn(
-                  'text-foreground flex min-h-11 items-center rounded-full px-4 text-sm font-medium',
+                  'border-border text-foreground rounded-input flex min-h-11 items-center border px-4 text-sm font-medium',
                   selected
-                    ? 'bg-accent-soft ring-accent ring-2 ring-inset'
-                    : 'bg-surface-sunken hover:bg-accent-soft',
+                    ? 'border-accent bg-accent-soft ring-accent ring-1'
+                    : 'bg-surface hover:bg-surface-sunken',
                 )}
               >
                 {value === 'all' ? 'All' : labels[value]}
@@ -167,22 +168,25 @@ export function ProgressDashboard({
               </Card>
             ) : null}
 
-            <section className="bg-surface rounded-card p-6">
+            <Card>
               <h3 className="text-foreground font-medium">Overall trend</h3>
               <div className="mt-3">
                 <ProgressTrend label="Overall" series={v3Window.overall} />
               </div>
-            </section>
+            </Card>
 
-            <section aria-label="Current metric trends" className="grid gap-3 sm:grid-cols-2">
+            <section
+              aria-label="Current metric trends"
+              className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+            >
               {v3MetricIds.map((metric) => (
-                <div key={metric} className="bg-surface rounded-card p-4">
+                <Card key={metric} className="p-4">
                   <h3 className="text-muted text-sm">{V3_METRIC_LABELS[metric]}</h3>
                   <ProgressTrend
                     label={V3_METRIC_LABELS[metric]}
                     series={v3Window.metrics[metric]}
                   />
-                </div>
+                </Card>
               ))}
             </section>
 
@@ -218,7 +222,7 @@ export function ProgressDashboard({
                     <Link
                       key={retry.attemptId}
                       href={attemptHref(retry.attemptId)}
-                      className="bg-surface rounded-card hover:bg-surface-sunken flex flex-col gap-2 p-4"
+                      className="border-border bg-surface shadow-card rounded-card hover:bg-surface-sunken flex flex-col gap-2 border p-4"
                     >
                       {retry.comparison.rows.slice(0, 3).map((row) => (
                         <div key={row.category} className="flex items-center justify-between gap-4">
@@ -266,19 +270,22 @@ export function ProgressDashboard({
                 </Card>
               ) : null}
 
-              <section className="bg-surface rounded-card p-6">
+              <Card>
                 <h2 className="text-foreground font-medium">Overall trend</h2>
                 <div className="mt-3">
                   <ProgressTrend label="Overall" series={window.overall} />
                 </div>
-              </section>
+              </Card>
 
-              <section aria-label="Category trends" className="grid gap-3 sm:grid-cols-2">
+              <section
+                aria-label="Category trends"
+                className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+              >
                 {SKILL_CATEGORIES.map((category) => (
-                  <div key={category} className="bg-surface rounded-card p-4">
+                  <Card key={category} className="p-4">
                     <h2 className="text-muted text-sm">{labels[category]}</h2>
                     <ProgressTrend label={labels[category]} series={window.categories[category]} />
-                  </div>
+                  </Card>
                 ))}
               </section>
 
@@ -316,7 +323,7 @@ export function ProgressDashboard({
                       <Link
                         key={retry.attemptId}
                         href={attemptHref(retry.attemptId)}
-                        className="bg-surface rounded-card hover:bg-surface-sunken flex flex-col gap-2 p-4"
+                        className="border-border bg-surface shadow-card rounded-card hover:bg-surface-sunken flex flex-col gap-2 border p-4"
                       >
                         {retry.comparison.rows.slice(0, 3).map((row) => (
                           <div
@@ -354,6 +361,6 @@ export function ProgressDashboard({
           </p>
         ) : null}
       </section>
-    </div>
+    </PageShell>
   )
 }

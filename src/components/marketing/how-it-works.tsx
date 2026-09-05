@@ -19,12 +19,17 @@ const STEPS = [
 
 export function HowItWorks() {
   return (
-    <section className="flex flex-col gap-6 py-12">
+    <section className="border-border flex flex-col gap-8 border-t py-16">
       <h2 className="section-label text-muted">How it works</h2>
-      <ol className="flex flex-col gap-6">
+      <ol className="grid gap-6 md:grid-cols-2">
         {STEPS.map((step, index) => (
-          <li key={step.title} className="grid grid-cols-[24px_minmax(0,1fr)] gap-4">
-            <span className="numeric text-accent text-sm">{index + 1}</span>
+          <li
+            key={step.title}
+            className="border-border bg-surface shadow-card rounded-card grid grid-cols-[32px_minmax(0,1fr)] gap-4 border p-6"
+          >
+            <span className="numeric bg-accent-soft text-accent flex size-8 items-center justify-center rounded-full text-sm font-medium">
+              {index + 1}
+            </span>
             <span className="flex flex-col gap-1">
               <h3 className="text-foreground text-base font-medium">{step.title}</h3>
               <p className="text-muted text-sm">{step.body}</p>

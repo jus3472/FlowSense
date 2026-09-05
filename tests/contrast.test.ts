@@ -47,6 +47,7 @@ describe.each([
       'highlight-fg',
       'positive',
       'negative',
+      'negative-soft',
     ]
     expect(Object.keys(tokens).sort()).toEqual(required.sort())
   })

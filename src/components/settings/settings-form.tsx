@@ -20,7 +20,7 @@ export function SettingsForm({ displayName }: SettingsFormProps) {
   }, [])
 
   return (
-    <form action={formAction} className="flex flex-col gap-8">
+    <form action={formAction} className="flex flex-col gap-6">
       <TextField
         id="display_name"
         name="display_name"
@@ -36,7 +36,11 @@ export function SettingsForm({ displayName }: SettingsFormProps) {
       {state.message ? (
         <p
           role="status"
-          className={state.status === 'error' ? 'text-negative text-sm' : 'text-muted text-sm'}
+          className={
+            state.status === 'error'
+              ? 'bg-negative-soft text-negative rounded-input px-4 py-3 text-sm'
+              : 'bg-surface-sunken text-muted rounded-input px-4 py-3 text-sm'
+          }
         >
           {state.message}
         </p>

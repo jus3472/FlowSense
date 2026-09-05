@@ -4,6 +4,7 @@ import { RetryButton } from '@/components/system/retry-button'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { ErrorState } from '@/components/ui/error-state'
+import { PageShell } from '@/components/ui/page-shell'
 import type { CurriculumLessonAccessOutcome } from '@/lib/curriculum/server'
 import { curriculumLessonRecordHref, curriculumPathHref } from '@/lib/curriculum/routes'
 import { formatExpectedDuration } from '@/lib/practice/navigation'
@@ -49,65 +50,67 @@ export function CurriculumLessonDetail({ data }: { data: AllowedLessonData }) {
     lesson.state === 'retry_required' || lesson.state === 'passed' ? lesson.bestAttemptId : null
 
   return (
-    <article className="flex min-w-0 flex-col gap-8 pt-4 pb-12">
-      <header className="flex min-w-0 flex-col gap-3">
-        <Link
-          href={curriculumPathHref(pathSlug)}
-          className="text-accent inline-flex min-h-11 w-fit items-center text-sm hover:underline"
-        >
-          {pathName}
-        </Link>
-        <div className="flex min-w-0 flex-col gap-2">
-          <h1 className="prompt-display text-foreground text-2xl">
-            {chapterName} · Lesson {lesson.lesson.position} of 10
-          </h1>
-          <p className="text-muted text-base break-words">{lesson.lesson.skillFocus}</p>
-        </div>
-      </header>
-
-      <Card className="flex min-w-0 flex-col gap-4">
-        <h2 className="section-label text-muted">Your prompt</h2>
-        <p className="text-foreground text-lg break-words">{session.promptText}</p>
-        <div className="text-muted flex flex-wrap gap-x-4 gap-y-2 text-sm">
-          <span>Target: {targetDuration(session.targetDurationSeconds)}</span>
-          <span>Pass: 70</span>
-        </div>
-      </Card>
-
-      <Card className="flex min-w-0 flex-col gap-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex min-w-0 flex-col gap-1">
-            <h2 className="section-label text-muted">Lesson state</h2>
-            <p className="text-foreground font-medium">
-              {lesson.state === 'locked' ? 'Locked' : STATE_LABELS[lesson.state]}
-            </p>
-          </div>
-          {lesson.attemptStatus === 'scored' && lesson.bestScore !== null ? (
-            <div className="flex flex-wrap items-center justify-end gap-3 text-sm">
-              <span className="text-foreground">
-                Best: <span className="numeric">{lesson.bestScore}</span>
-              </span>
-              <CurriculumStars stars={lesson.stars} />
-            </div>
-          ) : null}
-        </div>
-
-        {lesson.state === 'retry_required' ? (
-          <p className="text-muted text-sm">Need 70 to continue.</p>
-        ) : null}
-        {lesson.attemptStatus === 'neutral' ? (
-          <p className="text-muted text-sm">You have activity here, but no score.</p>
-        ) : null}
-
-        {label ? (
-          <ButtonLink
-            href={curriculumLessonRecordHref(pathSlug, session.lessonSlug, retryOfAttemptId)}
-            fullWidth
+    <article className="w-full min-w-0">
+      <PageShell width="column" className="gap-8">
+        <header className="flex min-w-0 flex-col gap-3">
+          <Link
+            href={curriculumPathHref(pathSlug)}
+            className="text-accent inline-flex min-h-11 w-fit items-center text-sm hover:underline"
           >
-            {label}
-          </ButtonLink>
-        ) : null}
-      </Card>
+            {pathName}
+          </Link>
+          <div className="flex min-w-0 flex-col gap-2">
+            <h1 className="prompt-display text-foreground text-2xl">
+              {chapterName} · Lesson {lesson.lesson.position} of 10
+            </h1>
+            <p className="text-muted text-base break-words">{lesson.lesson.skillFocus}</p>
+          </div>
+        </header>
+
+        <Card className="flex min-w-0 flex-col gap-4">
+          <h2 className="section-label text-muted">Your prompt</h2>
+          <p className="text-foreground text-lg break-words">{session.promptText}</p>
+          <div className="text-muted flex flex-wrap gap-x-4 gap-y-2 text-sm">
+            <span>Target: {targetDuration(session.targetDurationSeconds)}</span>
+            <span>Pass: 70</span>
+          </div>
+        </Card>
+
+        <Card className="flex min-w-0 flex-col gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex min-w-0 flex-col gap-1">
+              <h2 className="section-label text-muted">Lesson state</h2>
+              <p className="text-foreground font-medium">
+                {lesson.state === 'locked' ? 'Locked' : STATE_LABELS[lesson.state]}
+              </p>
+            </div>
+            {lesson.attemptStatus === 'scored' && lesson.bestScore !== null ? (
+              <div className="flex flex-wrap items-center justify-end gap-3 text-sm">
+                <span className="text-foreground">
+                  Best: <span className="numeric">{lesson.bestScore}</span>
+                </span>
+                <CurriculumStars stars={lesson.stars} />
+              </div>
+            ) : null}
+          </div>
+
+          {lesson.state === 'retry_required' ? (
+            <p className="text-muted text-sm">Need 70 to continue.</p>
+          ) : null}
+          {lesson.attemptStatus === 'neutral' ? (
+            <p className="text-muted text-sm">You have activity here, but no score.</p>
+          ) : null}
+
+          {label ? (
+            <ButtonLink
+              href={curriculumLessonRecordHref(pathSlug, session.lessonSlug, retryOfAttemptId)}
+              fullWidth
+            >
+              {label}
+            </ButtonLink>
+          ) : null}
+        </Card>
+      </PageShell>
     </article>
   )
 }
@@ -115,17 +118,17 @@ export function CurriculumLessonDetail({ data }: { data: AllowedLessonData }) {
 export function CurriculumLessonDeniedState({ reason }: { reason: DeniedLessonReason }) {
   if (reason === 'locked') {
     return (
-      <div className="flex flex-col gap-8 pt-4 pb-12">
+      <PageShell width="column" className="gap-8">
         <ErrorState
           title="Lesson locked"
           description="Pass the previous lesson to unlock this lesson."
         />
-      </div>
+      </PageShell>
     )
   }
 
   return (
-    <div className="flex flex-col gap-8 pt-4 pb-12">
+    <PageShell width="column" className="gap-8">
       <ErrorState
         title="Lesson unavailable"
         description={
@@ -134,19 +137,19 @@ export function CurriculumLessonDeniedState({ reason }: { reason: DeniedLessonRe
             : 'This lesson is not available.'
         }
       />
-    </div>
+    </PageShell>
   )
 }
 
 export function CurriculumLessonFailureState() {
   return (
-    <div className="flex flex-col gap-8 pt-4 pb-12">
+    <PageShell width="column" className="gap-8">
       <ErrorState
         title="Lesson did not load"
         description="The lesson could not be loaded. Try again in a moment."
       >
         <RetryButton />
       </ErrorState>
-    </div>
+    </PageShell>
   )
 }

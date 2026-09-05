@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { CurriculumStars } from '@/components/curriculum/stars'
 import { Card } from '@/components/ui/card'
+import { PageShell } from '@/components/ui/page-shell'
+import { ScoreProgress } from '@/components/ui/score-progress'
 import type {
   CurriculumChapterSummary,
   CurriculumLessonProgress,
@@ -80,9 +82,9 @@ function LessonCard({
   const content = (
     <div
       className={cn(
-        'rounded-card flex min-w-0 flex-col gap-4 p-4',
+        'border-border shadow-card rounded-card flex min-w-0 flex-col gap-4 border p-4',
         current
-          ? 'border-accent bg-accent-soft border'
+          ? 'border-accent bg-accent-soft'
           : lesson.state === 'locked'
             ? 'bg-surface-sunken'
             : 'bg-surface',
@@ -157,7 +159,7 @@ export function CurriculumPathLadder({ progress }: { progress: CurriculumPathPro
   const currentLessonId = progress.summary.currentLesson?.id ?? null
 
   return (
-    <div className="flex min-w-0 flex-col gap-8 pt-4 pb-12">
+    <PageShell width="reading" className="gap-8">
       <header className="flex min-w-0 flex-col gap-6">
         <div className="flex flex-col gap-2">
           <p className="text-muted text-sm">Practice path</p>
@@ -166,32 +168,41 @@ export function CurriculumPathLadder({ progress }: { progress: CurriculumPathPro
           </h1>
         </div>
 
-        <Card className="grid min-w-0 gap-6 sm:grid-cols-2">
-          <div className="flex min-w-0 flex-col gap-1">
-            <p className="text-muted text-sm">
-              {progress.summary.pathComplete ? 'Status' : 'Current chapter'}
-            </p>
-            {progress.summary.pathComplete ? (
-              <p className="text-foreground font-medium">Path complete</p>
-            ) : (
-              <>
-                <p className="text-foreground font-medium break-words">
-                  {currentChapter?.chapter.title}
-                </p>
-                <p className="numeric text-muted text-sm">
-                  {currentChapter?.passedLessons ?? 0} / {currentChapter?.totalLessons ?? 10} passed
-                </p>
-              </>
-            )}
-          </div>
-          <div className="flex min-w-0 flex-col gap-1">
-            <p className="text-muted text-sm">Path</p>
-            <p className="numeric text-foreground font-medium">
-              {progress.summary.passedLessons} / {progress.summary.totalLessons} passed
-            </p>
-            <p className="numeric text-muted text-sm">
-              {progress.summary.earnedStars} / {progress.summary.maximumStars} stars
-            </p>
+        <Card className="flex min-w-0 flex-col gap-6 sm:p-8">
+          <ScoreProgress
+            label={`${progress.path.title} lesson progress`}
+            value={progress.summary.passedLessons}
+            max={progress.summary.totalLessons}
+            size="section"
+          />
+          <div className="grid min-w-0 gap-6 sm:grid-cols-2">
+            <div className="flex min-w-0 flex-col gap-1">
+              <p className="text-muted text-sm">
+                {progress.summary.pathComplete ? 'Status' : 'Current chapter'}
+              </p>
+              {progress.summary.pathComplete ? (
+                <p className="text-foreground font-medium">Path complete</p>
+              ) : (
+                <>
+                  <p className="text-foreground font-medium break-words">
+                    {currentChapter?.chapter.title}
+                  </p>
+                  <p className="numeric text-muted text-sm">
+                    {currentChapter?.passedLessons ?? 0} / {currentChapter?.totalLessons ?? 10}{' '}
+                    passed
+                  </p>
+                </>
+              )}
+            </div>
+            <div className="flex min-w-0 flex-col gap-1">
+              <p className="text-muted text-sm">Path</p>
+              <p className="numeric text-foreground font-medium">
+                {progress.summary.passedLessons} / {progress.summary.totalLessons} passed
+              </p>
+              <p className="numeric text-muted text-sm">
+                {progress.summary.earnedStars} / {progress.summary.maximumStars} stars
+              </p>
+            </div>
           </div>
         </Card>
       </header>
@@ -242,6 +253,6 @@ export function CurriculumPathLadder({ progress }: { progress: CurriculumPathPro
           )
         })}
       </div>
-    </div>
+    </PageShell>
   )
 }

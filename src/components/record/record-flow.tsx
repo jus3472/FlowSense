@@ -360,7 +360,7 @@ export function RecordFlow({ session }: RecordFlowProps) {
 
   if (phase.name === 'unavailable') {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="max-w-column mx-auto flex w-full flex-col gap-6">
         <h1 className="text-foreground text-xl font-semibold">
           {titleForUnavailable(phase.reason)}
         </h1>
@@ -376,7 +376,7 @@ export function RecordFlow({ session }: RecordFlowProps) {
 
   if (phase.name === 'blocked') {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="max-w-column mx-auto flex w-full flex-col gap-6">
         <h1 className="text-foreground text-xl font-semibold">{MICROPHONE_BLOCKED_TITLE}</h1>
         <MicrophoneRecovery onRetry={() => void start()}>{backHome}</MicrophoneRecovery>
       </div>
@@ -385,9 +385,9 @@ export function RecordFlow({ session }: RecordFlowProps) {
 
   if (phase.name === 'recorder-failed') {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="max-w-column mx-auto flex w-full flex-col gap-6">
         <h1 className="text-foreground text-xl font-semibold">Recording stopped</h1>
-        <p role="alert" className="text-negative text-sm">
+        <p role="alert" className="bg-negative-soft text-negative rounded-input px-4 py-3 text-sm">
           {phase.message}
         </p>
         <p className="text-muted text-base">Start again when you are ready.</p>
@@ -435,8 +435,15 @@ export function RecordFlow({ session }: RecordFlowProps) {
   }
 
   return (
-    <div role="status" aria-live="polite" className="flex min-h-[68vh] items-center justify-center">
-      <p className="text-muted text-sm">Preparing your microphone</p>
+    <div
+      role="status"
+      aria-live="polite"
+      className="max-w-column mx-auto flex min-h-[68vh] w-full items-center justify-center"
+    >
+      <div className="border-border bg-surface shadow-card rounded-card flex items-center gap-3 border px-6 py-4">
+        <span aria-hidden="true" className="animate-skeleton bg-accent size-2 rounded-full" />
+        <p className="text-muted text-sm">Preparing your microphone</p>
+      </div>
     </div>
   )
 }

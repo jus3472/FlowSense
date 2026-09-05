@@ -10,7 +10,9 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 import { Card } from '@/components/ui/card'
+import { buttonClasses } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
+import { FIELD_CONTROL_CLASS } from '@/components/ui/text-field'
 import { deleteAttempt } from '@/lib/results/api'
 import {
   METADATA_FILTER_LABEL,
@@ -201,8 +203,11 @@ export function HistoryList({
       <p role="status" aria-live="polite" className="sr-only">
         {announcement}
       </p>
-      <div className="flex flex-col gap-3">
-        <label className="text-muted flex flex-col gap-1 text-sm" htmlFor="history-metadata-filter">
+      <Card className="p-4 sm:p-6">
+        <label
+          className="text-foreground flex flex-col gap-2 text-sm font-medium"
+          htmlFor="history-metadata-filter"
+        >
           Show responses
           <select
             id="history-metadata-filter"
@@ -215,7 +220,7 @@ export function HistoryList({
                 }),
               )
             }
-            className="bg-surface text-foreground rounded-input min-h-11 px-3 text-sm"
+            className={FIELD_CONTROL_CLASS}
           >
             {METADATA_FILTERS.map((value) => (
               <option key={value} value={value}>
@@ -224,7 +229,7 @@ export function HistoryList({
             ))}
           </select>
         </label>
-      </div>
+      </Card>
 
       {error ? (
         <p role="alert" className="text-negative text-sm">
@@ -243,7 +248,7 @@ export function HistoryList({
 
       {groups.map((group) => (
         <section key={group.key} className="flex flex-col gap-2">
-          <h2 className="bg-background text-muted sticky top-0 z-10 py-2 text-sm font-medium">
+          <h2 className="bg-background border-border text-muted sticky top-0 z-10 border-b py-2 text-sm font-medium">
             {group.label}
           </h2>
 
@@ -254,7 +259,7 @@ export function HistoryList({
                   href={attemptHref(entry.id)}
                   aria-hidden={confirming === entry.id || undefined}
                   tabIndex={confirming === entry.id ? -1 : undefined}
-                  className="bg-surface rounded-card hover:bg-surface-sunken focus:ring-accent-soft flex min-h-20 cursor-pointer items-start justify-between gap-4 p-6 pr-16 transition duration-150 ease-out focus:ring-2"
+                  className="border-border bg-surface shadow-card rounded-card hover:bg-surface-sunken focus:ring-accent flex min-h-20 cursor-pointer items-start justify-between gap-4 border p-6 pr-16 transition duration-150 ease-out focus:ring-2 focus:outline-none"
                 >
                   <div className="min-w-0 flex-1">
                     {entry.lesson ? (
@@ -308,7 +313,7 @@ export function HistoryList({
                     aria-labelledby={`delete-confirmation-${entry.id}`}
                     aria-busy={busy === entry.id || undefined}
                     onKeyDown={trapConfirmationFocus}
-                    className="bg-surface rounded-card absolute inset-0 z-10 flex items-center justify-between gap-4 px-6"
+                    className="border-negative bg-negative-soft rounded-card absolute inset-0 z-10 flex items-center justify-between gap-4 border px-6"
                   >
                     <p id={`delete-confirmation-${entry.id}`} className="text-foreground text-sm">
                       Delete this response?
@@ -372,7 +377,7 @@ export function HistoryList({
           {hasPrevious ? (
             <Link
               href={historyHref({ ...query, page: query.page - 1 })}
-              className="bg-surface-sunken text-foreground rounded-full px-4 py-3 text-sm font-medium"
+              className={buttonClasses({ variant: 'secondary' })}
             >
               Newer responses
             </Link>
@@ -382,7 +387,7 @@ export function HistoryList({
           {hasNext ? (
             <Link
               href={historyHref({ ...query, page: query.page + 1 })}
-              className="bg-surface-sunken text-foreground rounded-full px-4 py-3 text-sm font-medium"
+              className={buttonClasses({ variant: 'secondary' })}
             >
               Older responses
             </Link>

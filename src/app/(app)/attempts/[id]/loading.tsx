@@ -3,7 +3,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 export default function AttemptLoading() {
   return (
-    <div className="flex flex-col gap-8">
+    <div className="max-w-column mx-auto flex w-full flex-col gap-8">
       <Skeleton className="h-4 w-3/4" />
 
       <div className="flex flex-col gap-4">
@@ -36,7 +36,7 @@ export default function AttemptLoading() {
         </div>
       ))}
 
-      <Skeleton className="h-14 w-full rounded-full" />
+      <Skeleton className="rounded-input h-14 w-full" />
     </div>
   )
 }

@@ -5,7 +5,7 @@ export function LogoutForm({ failed = false }: { failed?: boolean }) {
   return (
     <div className="flex flex-col gap-3">
       {failed ? (
-        <p role="alert" className="text-negative text-sm">
+        <p role="alert" className="bg-negative-soft text-negative rounded-input px-4 py-3 text-sm">
           You&apos;re still logged in. Try again.
         </p>
       ) : null}

@@ -32,7 +32,7 @@ const ITEMS: ReadonlyArray<{
 ]
 
 const BASE_CLASS =
-  'flex min-h-11 items-center justify-center rounded-full px-1.5 text-xs font-medium transition duration-150 ease-out sm:px-3 sm:text-sm'
+  'flex min-h-11 items-center justify-center rounded-input px-2 text-xs font-medium transition duration-150 ease-out sm:px-3 sm:text-sm'
 
 export function PrimaryNavigation() {
   const pathname = usePathname()
@@ -40,7 +40,7 @@ export function PrimaryNavigation() {
   return (
     <nav
       aria-label="Main"
-      className="col-span-3 row-start-2 flex min-w-0 items-center justify-between gap-0.5 sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:justify-end sm:gap-1"
+      className="col-span-3 row-start-2 flex min-w-0 items-center justify-between gap-1 sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:justify-end"
     >
       {ITEMS.map((item) => {
         const active = item.active(pathname)

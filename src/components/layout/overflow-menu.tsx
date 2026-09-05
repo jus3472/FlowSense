@@ -101,7 +101,7 @@ export function OverflowMenu() {
           role="menu"
           aria-label="Account"
           onKeyDown={onMenuKeyDown}
-          className="rounded-card bg-surface shadow-float absolute top-full right-0 z-10 mt-2 w-[220px] p-2"
+          className="border-border bg-surface shadow-float rounded-card absolute top-full right-0 z-10 mt-2 w-[220px] border p-2"
         >
           <button
             type="button"

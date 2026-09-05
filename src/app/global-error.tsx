@@ -25,16 +25,16 @@ export default function GlobalError({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="bg-background min-h-dvh">
-        <main className="max-w-column mx-auto flex w-full flex-col gap-6 px-4 py-12">
-          <h1 className="text-foreground text-xl font-semibold">FlowSense did not load</h1>
-          <p className="text-muted text-base">
-            Reload the page. If it keeps failing, try again in a few minutes.
-          </p>
-          <div>
+        <main className="max-w-column mx-auto flex w-full px-4 py-12 sm:px-8 sm:py-16">
+          <div className="border-border bg-surface shadow-card rounded-card flex w-full flex-col gap-6 border p-6 sm:p-8">
+            <h1 className="prompt-display text-foreground text-2xl">FlowSense did not load</h1>
+            <p className="text-muted text-base">
+              Reload the page. If it keeps failing, try again in a few minutes.
+            </p>
             <button
               type="button"
               onClick={reset}
-              className="bg-accent text-accent-fg inline-flex min-h-14 items-center justify-center rounded-full px-8 text-base font-medium"
+              className="bg-accent text-accent-fg rounded-input inline-flex min-h-14 items-center justify-center px-8 text-base font-medium"
             >
               Reload
             </button>

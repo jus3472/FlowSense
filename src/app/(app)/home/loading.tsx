@@ -1,23 +1,17 @@
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { PageShell } from '@/components/ui/page-shell'
 
 export default function HomeLoading() {
   return (
-    <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-6 w-[180px]" />
-        <Skeleton className="h-4 w-[240px]" />
-      </div>
-
-      <Skeleton className="h-14 w-full rounded-full" />
-
-      {[0, 1].map((index) => (
-        <Card key={index} className="flex flex-col gap-4">
-          <Skeleton className="h-4 w-[96px]" />
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-2/3" />
-        </Card>
-      ))}
-    </div>
+    <PageShell width="column" className="gap-8">
+      <Skeleton className="h-12 w-[180px]" />
+      <Card className="flex flex-col gap-4 sm:p-8">
+        <Skeleton className="h-8 w-[240px]" />
+        <Skeleton className="h-4 w-[180px]" />
+        <Skeleton className="h-2 w-full rounded-full" />
+        <Skeleton className="rounded-input h-14 w-full" />
+      </Card>
+    </PageShell>
   )
 }

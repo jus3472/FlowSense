@@ -72,7 +72,7 @@ export function AuthForm({ initialMode = 'signup' }: { initialMode?: AuthMode })
       <div
         role="group"
         aria-label="Sign up or log in"
-        className="bg-surface-sunken flex gap-1 rounded-full p-1"
+        className="bg-surface-sunken rounded-input flex gap-1 p-1"
       >
         {(['signup', 'login'] as const).map((value) => (
           <button
@@ -81,8 +81,10 @@ export function AuthForm({ initialMode = 'signup' }: { initialMode?: AuthMode })
             aria-pressed={mode === value}
             onClick={() => switchMode(value)}
             className={cn(
-              'min-h-11 flex-1 rounded-full px-4 text-sm font-medium transition duration-150 ease-out',
-              mode === value ? 'bg-accent text-accent-fg' : 'text-foreground hover:bg-accent-soft',
+              'rounded-input min-h-11 flex-1 px-4 text-sm font-medium transition duration-150 ease-out',
+              mode === value
+                ? 'bg-surface shadow-card text-foreground'
+                : 'text-muted hover:text-foreground',
             )}
           >
             {value === 'signup' ? 'Sign up' : 'Log in'}
@@ -90,7 +92,7 @@ export function AuthForm({ initialMode = 'signup' }: { initialMode?: AuthMode })
         ))}
       </div>
 
-      <h1 className="prompt-display text-foreground text-xl">{copy.heading}</h1>
+      <h1 className="prompt-display text-foreground text-2xl">{copy.heading}</h1>
 
       <form action={formAction} onSubmit={onSubmit} noValidate className="flex flex-col gap-6">
         <input type="hidden" name="mode" value={mode} />
@@ -119,13 +121,16 @@ export function AuthForm({ initialMode = 'signup' }: { initialMode?: AuthMode })
         />
 
         {state.formError ? (
-          <p role="alert" className="text-negative text-sm">
+          <p
+            role="alert"
+            className="bg-negative-soft text-negative rounded-input px-4 py-3 text-sm"
+          >
             {state.formError}
           </p>
         ) : null}
 
         {state.notice ? (
-          <p role="status" className="text-muted text-sm">
+          <p role="status" className="bg-surface-sunken text-muted rounded-input px-4 py-3 text-sm">
             {state.notice}
           </p>
         ) : null}

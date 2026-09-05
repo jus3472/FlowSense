@@ -1,7 +1,9 @@
 import { CurriculumStars } from '@/components/curriculum/stars'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { PageShell } from '@/components/ui/page-shell'
 import { PageTitle } from '@/components/ui/page-title'
+import { ScoreProgress } from '@/components/ui/score-progress'
 import type { CurriculumLessonProgress, CurriculumPathProgress } from '@/lib/curriculum/contracts'
 import type { CurriculumOverviewData } from '@/lib/curriculum/overview'
 import { curriculumLessonRecordHref, curriculumPathHref } from '@/lib/curriculum/routes'
@@ -41,9 +43,7 @@ function PathCard({ item }: { item: CurriculumOverviewData['paths'][number] }) {
   const action = pathAction(progress)
 
   return (
-    <Card
-      className={`flex min-w-0 flex-col gap-6 ${selection === 'primary' ? 'shadow-float' : ''}`}
-    >
+    <Card className="flex min-w-0 flex-col gap-6 sm:p-8">
       <h2 className="text-foreground min-w-0 text-lg font-semibold break-words">
         {progress.path.title}
       </h2>
@@ -69,6 +69,13 @@ function PathCard({ item }: { item: CurriculumOverviewData['paths'][number] }) {
           {progress.summary.earnedStars} / {progress.summary.maximumStars} stars
         </span>
       </div>
+
+      <ScoreProgress
+        label={`${progress.path.title} lesson progress`}
+        value={progress.summary.passedLessons}
+        max={progress.summary.totalLessons}
+        size="section"
+      />
 
       {lesson ? (
         <div className="border-border flex min-w-0 flex-col gap-2 border-t pt-4">
@@ -104,27 +111,29 @@ function PathCard({ item }: { item: CurriculumOverviewData['paths'][number] }) {
 
 export function PracticeOverview({ overview }: { overview: CurriculumOverviewData }) {
   return (
-    <div className="flex flex-col gap-12">
+    <PageShell>
       <PageTitle id="tracks-heading">Tracks</PageTitle>
       <section aria-labelledby="tracks-heading" className="flex flex-col gap-4">
-        <div className="flex min-w-0 flex-col gap-4">
+        <div className="grid min-w-0 gap-6 md:grid-cols-2">
           {overview.paths.map((item) => (
             <PathCard key={item.progress.path.id} item={item} />
           ))}
         </div>
       </section>
 
-      <section aria-labelledby="custom-prompt-heading" className="flex flex-col gap-3">
-        <div className="flex flex-col gap-2">
-          <h2 id="custom-prompt-heading" className="text-foreground text-lg font-semibold">
-            Custom Prompt
-          </h2>
-          <p className="text-muted text-sm">Practice with your own custom prompt</p>
-        </div>
-        <ButtonLink href="/practice/custom" variant="secondary" fullWidth>
-          Enter a custom prompt
-        </ButtonLink>
+      <section aria-labelledby="custom-prompt-heading">
+        <Card className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
+          <div className="flex flex-col gap-2">
+            <h2 id="custom-prompt-heading" className="text-foreground text-lg font-semibold">
+              Custom Prompt
+            </h2>
+            <p className="text-muted text-sm">Practice with your own custom prompt</p>
+          </div>
+          <ButtonLink href="/practice/custom" variant="secondary">
+            Enter a custom prompt
+          </ButtonLink>
+        </Card>
       </section>
-    </div>
+    </PageShell>
   )
 }

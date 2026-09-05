@@ -4,6 +4,7 @@ import { HistoryList } from '@/components/history/history-list'
 import { RetryButton } from '@/components/system/retry-button'
 import { ErrorState } from '@/components/ui/error-state'
 import { PageTitle } from '@/components/ui/page-title'
+import { PageShell } from '@/components/ui/page-shell'
 import { focusPhrase, sanitizeFocusAreas } from '@/lib/focus-areas'
 import { historyHref, parseHistoryQuery, type HistorySearchParams } from '@/lib/results/history'
 import { loadHistoryPage, safeHistoryErrorCode } from '@/lib/results/history-server'
@@ -46,7 +47,7 @@ export default async function HistoryPage({
       code: safeHistoryErrorCode(historyResult.error),
     })
     return (
-      <div className="flex flex-col gap-12 pt-4 pb-12">
+      <PageShell width="reading">
         <PageTitle>History</PageTitle>
         <ErrorState
           title="Your history did not load"
@@ -54,12 +55,12 @@ export default async function HistoryPage({
         >
           <RetryButton />
         </ErrorState>
-      </div>
+      </PageShell>
     )
   }
 
   return (
-    <div className="flex flex-col gap-12 pt-4 pb-12">
+    <PageShell width="reading">
       <PageTitle>History</PageTitle>
       <HistoryList
         entries={historyResult.data.entries}
@@ -69,6 +70,6 @@ export default async function HistoryPage({
         hasPrevious={historyResult.data.hasPrevious}
         hasNext={historyResult.data.hasNext}
       />
-    </div>
+    </PageShell>
   )
 }

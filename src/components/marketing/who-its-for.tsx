@@ -8,13 +8,16 @@ const CASES = [
 
 export function WhoItsFor() {
   return (
-    <section className="flex flex-col gap-6 py-12">
+    <section className="border-border flex flex-col gap-8 border-t py-16">
       <h2 className="prompt-display text-foreground text-xl">Choose what you want to practice</h2>
-      <ul className="flex flex-col gap-4">
+      <ul className="grid gap-3 sm:grid-cols-2">
         {CASES.map((item) => (
-          <li key={item} className="flex items-start gap-3">
-            <span aria-hidden="true" className="text-accent mt-0.5 shrink-0 text-lg" />
-            <span className="text-foreground text-base">{item}</span>
+          <li
+            key={item}
+            className="border-border bg-surface rounded-card flex items-start gap-3 border p-4"
+          >
+            <span aria-hidden="true" className="bg-accent mt-2 size-2 shrink-0 rounded-full" />
+            <span className="text-foreground text-sm">{item}</span>
           </li>
         ))}
       </ul>

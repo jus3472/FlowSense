@@ -12,8 +12,8 @@ export function StreakDisplay({ summary }: { summary: PracticeActivitySummary })
       aria-label={label}
       title={label}
       data-today-active={summary.todayActive ? 'true' : 'false'}
-      className={`flex min-h-11 items-center gap-1.5 rounded-full px-2.5 ${
-        summary.todayActive ? 'bg-accent-soft text-accent' : 'text-muted'
+      className={`flex min-h-11 items-center gap-1.5 rounded-full px-3 ${
+        summary.todayActive ? 'bg-accent-soft text-accent' : 'bg-surface-sunken text-muted'
       }`}
     >
       <span className="relative flex size-5 items-center justify-center" aria-hidden="true">

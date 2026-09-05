@@ -1,19 +1,20 @@
 import Link from 'next/link'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { ScoreProgress } from '@/components/ui/score-progress'
 import type { HomeCurriculumModel } from '@/lib/home/progression'
 
 export function HomePrimaryPath({ primary }: { primary: HomeCurriculumModel['primary'] }) {
   return (
     <section aria-labelledby="primary-path-heading">
-      <Card className="shadow-float flex min-w-0 flex-col gap-6">
+      <Card className="flex min-w-0 flex-col gap-6 sm:p-8">
         <div className="flex min-w-0 flex-col gap-2">
-          <h1
+          <h2
             id="primary-path-heading"
             className="prompt-display text-foreground text-xl break-words"
           >
             {primary.heading}
-          </h1>
+          </h2>
         </div>
 
         {primary.pathComplete ? (
@@ -28,13 +29,21 @@ export function HomePrimaryPath({ primary }: { primary: HomeCurriculumModel['pri
           </div>
         )}
 
-        <div className="border-border text-muted flex flex-wrap gap-x-6 gap-y-2 border-t pt-4 text-sm">
-          <span className="numeric">
-            {primary.passedLessons} / {primary.totalLessons} lessons passed
-          </span>
-          <span className="numeric">
-            {primary.earnedStars} / {primary.maximumStars} stars
-          </span>
+        <div className="flex flex-col gap-3">
+          <ScoreProgress
+            label={`${primary.heading} lesson progress`}
+            value={primary.passedLessons}
+            max={primary.totalLessons}
+            size="section"
+          />
+          <div className="text-muted flex flex-wrap gap-x-6 gap-y-2 text-sm">
+            <span className="numeric">
+              {primary.passedLessons} / {primary.totalLessons} lessons passed
+            </span>
+            <span className="numeric">
+              {primary.earnedStars} / {primary.maximumStars} stars
+            </span>
+          </div>
         </div>
 
         <ButtonLink href={primary.action.href} size="lg" fullWidth>
@@ -50,7 +59,7 @@ export function HomeSecondaryPaths({ paths }: { paths: HomeCurriculumModel['seco
 
   return (
     <section aria-labelledby="secondary-paths-heading" className="flex min-w-0 flex-col gap-4">
-      <h2 id="secondary-paths-heading" className="text-foreground text-lg font-semibold">
+      <h2 id="secondary-paths-heading" className="prompt-display text-foreground text-xl">
         Your other paths
       </h2>
       <div className="flex min-w-0 flex-col gap-3">
@@ -58,7 +67,7 @@ export function HomeSecondaryPaths({ paths }: { paths: HomeCurriculumModel['seco
           <Link
             key={path.id}
             href={path.href}
-            className="rounded-card bg-surface hover:bg-surface-sunken flex min-h-11 min-w-0 items-center justify-between gap-4 p-4 transition duration-150 ease-out"
+            className="border-border bg-surface shadow-card rounded-card hover:bg-surface-sunken flex min-h-14 min-w-0 items-center justify-between gap-4 border p-4 transition duration-150 ease-out"
           >
             <span className="flex min-w-0 flex-col gap-1">
               <span className="text-foreground text-sm font-medium break-words">{path.title}</span>

@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation'
 import { HomePrimaryPath, HomeSecondaryPaths } from '@/components/home/path-progress'
 import { RetryButton } from '@/components/system/retry-button'
 import { ErrorState } from '@/components/ui/error-state'
+import { PageShell } from '@/components/ui/page-shell'
+import { PageTitle } from '@/components/ui/page-title'
 import { loadCurriculumOverviewForUser } from '@/lib/curriculum/server'
 import { buildHomeCurriculumModel } from '@/lib/home/progression'
 import {
@@ -38,7 +40,8 @@ export default async function HomePage() {
       : null
 
   return (
-    <div className="flex min-w-0 flex-col gap-12 pt-4 pb-12">
+    <PageShell width="column">
+      <PageTitle>Home</PageTitle>
       {curriculum ? (
         <>
           <HomePrimaryPath primary={curriculum.primary} />
@@ -52,6 +55,6 @@ export default async function HomePage() {
           <RetryButton />
         </ErrorState>
       )}
-    </div>
+    </PageShell>
   )
 }

@@ -166,7 +166,7 @@ export function AudioPlayer({ src, durationMs, label = 'Your answer' }: AudioPla
   const percent = totalMs > 0 ? Math.min(100, (positionMs / totalMs) * 100) : 0
 
   return (
-    <div className="bg-surface rounded-card flex flex-col gap-3 p-4 sm:p-6">
+    <div className="border-border bg-surface shadow-card rounded-card flex flex-col gap-3 border p-4 sm:p-6">
       {/*
         Hidden on purpose. A controls-less <audio> is display:none in every
         browser's own stylesheet anyway, and unlike <video> that does not stop

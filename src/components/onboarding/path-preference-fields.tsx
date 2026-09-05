@@ -49,8 +49,8 @@ export function PathPreferenceFields({
               <label
                 key={path.id}
                 className={cn(
-                  'rounded-card bg-surface-sunken flex min-h-14 cursor-pointer items-center px-4 py-3 text-sm font-medium transition duration-150 ease-out',
-                  selected && 'bg-accent-soft ring-accent ring-2 ring-inset',
+                  'border-border rounded-input bg-surface flex min-h-14 cursor-pointer items-center border px-4 py-3 text-sm font-medium transition duration-150 ease-out',
+                  selected && 'border-accent bg-accent-soft ring-accent ring-1',
                 )}
               >
                 <input
@@ -80,9 +80,9 @@ export function PathPreferenceFields({
               <label
                 key={path.id}
                 className={cn(
-                  'rounded-input bg-surface-sunken flex min-h-11 items-center justify-between px-4 py-3 text-sm',
+                  'border-border rounded-input bg-surface flex min-h-11 items-center justify-between border px-4 py-3 text-sm',
                   isPrimary ? 'cursor-default opacity-60' : 'cursor-pointer',
-                  selected && 'bg-accent-soft ring-accent ring-2 ring-inset',
+                  selected && 'border-accent bg-accent-soft ring-accent ring-1',
                 )}
               >
                 <span className="text-foreground font-medium">{path.title}</span>
