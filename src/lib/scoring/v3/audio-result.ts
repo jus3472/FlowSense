@@ -13,7 +13,7 @@ import type {
 
 const PERSISTED_MEASUREMENT_KEYS: Readonly<Record<HowYouSoundedMetricId, readonly string[]>> =
   Object.freeze({
-    pace: ['words_per_minute', 'word_count', 'active_speaking_ms'],
+    pace: ['words_per_minute', 'word_count', 'pace_duration_ms', 'excluded_excessive_pause_ms'],
     paused_time: [
       'total_unnatural_pause_ms',
       'beginning_excessive_pause_ms',

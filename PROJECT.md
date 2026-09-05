@@ -73,12 +73,12 @@ contain only score inputs and user-facing or audit-relevant values. Raw audio-an
 computed transiently. `content_result` stores the compact `v3.content-audit.1` provider record, while
 historical full content results and historical `metrics.v3` copies remain readable and untouched.
 
-- Pace is articulation rate: timed words divided by active speaking time after detected silence is removed.
+- Pace is perceived delivery rate: timed words divided by the response span from selected speech onset through the final word. Normal phrase and sentence spacing stays in the denominator. Only interword duration beyond Paused Time's contextual allowance is removed, so a long hesitation is not charged again as slow Pace.
 - Paused Time combines excessive beginning hesitation and excessive interword pauses. It uses the same hardened first-word onset as Pace, allows more time at the beginning and natural sentence boundaries than mid-thought, adds only duration beyond each allowance, and never counts trailing silence.
 - Articulation uses the proportion of eligible words with low final recognition confidence, gated by confidence coverage and audio signal separation. It does not use accent labels or native similarity.
 - Energy combines a robust central pitch range, typical pitch variation, temporal non-monotony, and active-speech cadence variation. Loudness is not scored.
 
-Energy analysis version `v3.audio.3` requires at least 8 timed words, 48 voiced frames, and pitch
+Audio analysis version `v3.audio.4` uses that Pace denominator and makes locally flat Energy windows available as deduction evidence. Energy requires at least 8 timed words, 48 voiced frames, and pitch
 coverage in at least 3 of 4 word-order bins. All four subcomponents must be valid; missing signals are
 never treated as zero or silently reweighted. After octave correction, Pitch Range is the 10th-to-90th
 percentile span in speaker-relative semitones, while Pitch Variation is the scaled median absolute

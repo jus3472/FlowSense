@@ -1,4 +1,4 @@
-import { readAttemptResult } from '@/lib/results/attempt-result'
+import { readAttemptResult, storedTranscriptWords } from '@/lib/results/attempt-result'
 import { DELIVERY_POINTS } from '@/lib/scoring/mechanical'
 import { V2_SCORE_PAYLOAD_VERSION } from '@/lib/scoring/v2/assemble'
 import { describe, expect, it } from 'vitest'
@@ -257,5 +257,14 @@ describe('attempt result reader', () => {
         legacyInput({ metrics: withWords([{ word: 'hello', start: 0, end: 0.4, confidence: 2 }]) }),
       ).kind,
     ).toBe('malformed')
+  })
+
+  it('exposes only structurally valid stored transcript words for current result annotations', () => {
+    const words = [{ word: 'hello', start: 0, end: 0.4, confidence: 0.9 }]
+    expect(storedTranscriptWords({ transcript: { words } })).toEqual(words)
+    expect(
+      storedTranscriptWords({ transcript: { words: [{ word: 'hello', start: 0.4, end: 0 }] } }),
+    ).toEqual([])
+    expect(storedTranscriptWords(null)).toEqual([])
   })
 })

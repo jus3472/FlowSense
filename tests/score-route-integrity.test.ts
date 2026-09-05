@@ -155,7 +155,7 @@ function audioMetric(id: string, component = 0.8) {
 }
 
 const V3_AUDIO = {
-  version: 'v3.audio.3',
+  version: 'v3.audio.4',
   mode: 'practice',
   metrics: {
     pace: audioMetric('pace'),

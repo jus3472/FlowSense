@@ -27,8 +27,14 @@ export interface Highlight {
 
 export type Segment =
   | { type: 'text'; text: string }
-  | { type: 'highlight'; text: string; kind: HighlightKind; label: string }
-  | { type: 'marker'; text: string; label: string }
+  | {
+      type: 'highlight'
+      text: string
+      kind: HighlightKind
+      label: string
+      details?: readonly string[]
+    }
+  | { type: 'marker'; text: string; label: string; details?: readonly string[] }
 
 export interface HighlightInput {
   transcript: string

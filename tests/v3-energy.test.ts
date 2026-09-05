@@ -89,6 +89,7 @@ describe('v3 Energy temporal monotony', () => {
 
     expect(energyMonotonySignal(flat, 'practice')).toMatchObject({
       flat_window_count: 6,
+      flat_window_indices: [0, 1, 2, 3, 4, 5],
       flat_window_proportion: 1,
       component: 0,
     })

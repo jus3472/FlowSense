@@ -332,6 +332,8 @@ test('records once, shows processing and v3 results, retries, compares, filters,
   await expect(page.getByRole('heading', { name: 'Recommendation' })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'What You Said' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'How You Sounded' })).toBeVisible()
+  await expect(page.getByText(/for What You Said/)).toHaveCount(0)
+  await expect(page.getByText(/for How You Sounded/)).toHaveCount(0)
   const overallProgress = page.getByRole('progressbar', { name: 'Overall score' })
   await expect(overallProgress).toHaveAttribute('aria-valuemin', '0')
   await expect(overallProgress).toHaveAttribute('aria-valuemax', '100')

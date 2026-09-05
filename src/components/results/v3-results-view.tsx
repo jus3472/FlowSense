@@ -6,6 +6,7 @@ import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Disclosure } from '@/components/ui/disclosure'
 import { ScoreProgress } from '@/components/ui/score-progress'
+import type { TranscriptWord } from '@/lib/deepgram/parse'
 import type { StructuredLessonResultModel } from '@/lib/curriculum/result'
 import type { RetryComparison } from '@/lib/results/retry-comparison'
 import {
@@ -32,6 +33,7 @@ interface V3ResultsViewProps {
   promptText: string
   additionalContext: string | null
   transcript: string
+  words?: readonly TranscriptWord[]
   durationMs: number
   audioUrl: string | null
   audioUnavailable?: boolean
@@ -150,6 +152,7 @@ export function V3ResultsView({
   promptText,
   additionalContext,
   transcript,
+  words = [],
   durationMs,
   audioUrl,
   audioUnavailable = false,
@@ -159,10 +162,8 @@ export function V3ResultsView({
   curriculumResult = null,
 }: V3ResultsViewProps) {
   const complete = payload.total_earned_points !== null
-  const transcriptSegments = v3TranscriptSegments(transcript, payload)
+  const transcriptSegments = v3TranscriptSegments(transcript, payload, words)
   const sectionViews = v3SectionViews(payload)
-  const whatYouSaid = payload.sections.what_you_said.earned_points
-  const howYouSounded = payload.sections.how_you_sounded.earned_points
 
   return (
     <div className="flex flex-col gap-12 pb-12">
@@ -192,13 +193,6 @@ export function V3ResultsView({
             max={payload.total_max_points}
             size="overall"
           />
-
-          {whatYouSaid !== null && howYouSounded !== null ? (
-            <p className="text-muted text-base">
-              <span className="numeric">{whatYouSaid}</span> for What You Said,{' '}
-              <span className="numeric">{howYouSounded}</span> for How You Sounded
-            </p>
-          ) : null}
         </div>
 
         {curriculumResult ? (

@@ -1,4 +1,5 @@
 import type { StoredContentResult } from '@/lib/scoring/assemble'
+import type { TranscriptWord } from '@/lib/deepgram/parse'
 import { CHECK_NAMES } from '@/lib/scoring/content'
 import {
   DELIVERY_POINTS,
@@ -157,24 +158,36 @@ function isLegacyStatistics(value: unknown): boolean {
   )
 }
 
-function isTranscriptWords(value: unknown): boolean {
-  return (
-    Array.isArray(value) &&
-    value.every((word) => {
-      if (
-        !isRecord(word) ||
-        typeof word.word !== 'string' ||
-        !finiteNumber(word.start) ||
-        !finiteNumber(word.end)
-      ) {
-        return false
-      }
-      return (
-        !('confidence' in word) ||
-        (finiteNumber(word.confidence) && word.confidence >= 0 && word.confidence <= 1)
-      )
-    })
-  )
+function isTranscriptWords(value: unknown): value is TranscriptWord[] {
+  if (!Array.isArray(value)) return false
+  let previousStart = -1
+  let previousEnd = -1
+  for (const word of value) {
+    if (
+      !isRecord(word) ||
+      typeof word.word !== 'string' ||
+      word.word.trim().length === 0 ||
+      !finiteNumber(word.start) ||
+      !finiteNumber(word.end) ||
+      word.start < 0 ||
+      word.end <= word.start ||
+      word.start < previousStart ||
+      word.end < previousEnd ||
+      ('confidence' in word &&
+        (!finiteNumber(word.confidence) || word.confidence < 0 || word.confidence > 1))
+    ) {
+      return false
+    }
+    previousStart = word.start
+    previousEnd = word.end
+  }
+  return true
+}
+
+/** Safely narrows stored timed words for deduction annotations without reinterpreting scores. */
+export function storedTranscriptWords(metrics: unknown): TranscriptWord[] {
+  if (!isRecord(metrics) || !isRecord(metrics.transcript)) return []
+  return isTranscriptWords(metrics.transcript.words) ? metrics.transcript.words : []
 }
 
 function isLegacyMetrics(value: unknown): value is AttemptMetrics {

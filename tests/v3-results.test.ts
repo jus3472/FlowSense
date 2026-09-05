@@ -17,6 +17,7 @@ import {
   v3TranscriptSegments,
 } from '@/lib/results/v3'
 import { legacyV3Snapshot, v3Snapshot } from './helpers/result-snapshots'
+import { wordsFrom } from './helpers/transcript'
 
 describe('v3 result presentation helpers', () => {
   it('marks only exact transcript evidence for a metric that lost points', () => {
@@ -41,7 +42,11 @@ describe('v3 result presentation helpers', () => {
         type: 'highlight',
         text: 'vague',
         kind: 'word_choice',
-        label: 'Word Choice: This word does not identify the choice.',
+        label: 'Word Choice: wording that could be more precise',
+        details: [
+          'Word Choice: wording that could be more precise',
+          'This word does not identify the choice.',
+        ],
       },
       { type: 'text', text: ' phrase.' },
     ])
@@ -121,16 +126,17 @@ describe('v3 result presentation helpers', () => {
       ...payload.sections.how_you_sounded.metrics.pace,
       measurements: {
         words_per_minute: 194.2,
-        active_speaking_ms: 15_800,
+        pace_duration_ms: 15_800,
         word_count: 51,
-        excluded_silence_ms: 3_000,
+        excluded_excessive_pause_ms: 1_200,
       },
     }
     expect(v3MetricSummary('pace', pace, 'practice')).toBe('You spoke faster than the ideal range.')
     expect(v3MetricDetails('pace', pace, 'practice').measurements).toEqual([
       { label: 'Speaking pace', value: '194 WPM', help: null },
       { label: 'Ideal range', value: '120 to 175 WPM', help: null },
-      { label: 'Active speaking time', value: '15.8 sec', help: null },
+      { label: 'Measured response time', value: '15.8 sec', help: null },
+      { label: 'Excessive hesitation excluded', value: '1.2 sec', help: null },
       { label: 'Words spoken', value: '51', help: null },
     ])
 
@@ -395,8 +401,30 @@ describe('v3 result presentation helpers', () => {
       'central pitch range: 5.2 semitones',
       'typical pitch variation: 2.2 semitones',
       'flatter vocal windows: 33%',
-      'active-speech timing: varied',
+      'speaking rhythm: varied',
     ])
+    const translated = v3MetricDetails(
+      'energy',
+      {
+        ...current,
+        details: [
+          {
+            kind: 'energy',
+            source: 'audio',
+            quote: null,
+            observation:
+              'Pitch and active-speech timing were less varied than the configured range.',
+            suggestion: null,
+            evidence: [],
+          },
+        ],
+      },
+      'practice',
+    )
+    expect(translated.findings.map((finding) => finding.observation)).toEqual([
+      'Try adding a little more natural variation in your voice and rhythm.',
+    ])
+    expect(JSON.stringify(translated)).not.toMatch(/active-speech timing|configured range/i)
 
     const historical = v3Snapshot({
       evidenceMetric: 'energy',
@@ -433,7 +461,11 @@ describe('v3 result presentation helpers', () => {
       type: 'highlight',
       text: 'Um,',
       kind: 'word_choice',
-      label: 'Conciseness: This opening functions as unnecessary filler.',
+      label: 'Conciseness: unnecessary wording',
+      details: [
+        'Conciseness: unnecessary wording',
+        'This opening functions as unnecessary filler.',
+      ],
     })
   })
 
@@ -483,5 +515,262 @@ describe('v3 result presentation helpers', () => {
         .filter((segment) => segment.type === 'highlight')
         .map((segment) => segment.text),
     ).toEqual(['I like my car', 'I enjoy spending time in my car'])
+  })
+
+  it.each(['answered_prompt', 'specificity', 'structure'] as const)(
+    'never localizes response-level %s evidence in the transcript',
+    (metric) => {
+      const transcript = 'I gave one clear example.'
+      const payload = v3Snapshot({
+        component: 0.5,
+        evidenceMetric: metric,
+        evidence: [
+          {
+            source: 'transcript',
+            start: 7,
+            end: 10,
+            coordinate: { space: 'transcript', unit: 'utf16_code_unit' },
+            quote: 'one',
+            detail: 'Whole-response evidence should stay in the disclosure.',
+          },
+        ],
+      })
+
+      expect(v3TranscriptSegments(transcript, payload)).toEqual([
+        { type: 'text', text: transcript },
+      ])
+    },
+  )
+
+  it('shows exact Conciseness, Word Choice, and Grammar evidence with useful context', () => {
+    const transcript = 'Honestly, I handled some stuff and find it difficult.'
+    const payload = v3Snapshot({ component: 1 })
+    const findings = [
+      {
+        metric: 'conciseness' as const,
+        max: 8,
+        kind: 'filler',
+        quote: 'Honestly,',
+        observation: 'This opening does not add meaning here.',
+        suggestion: 'Begin with the main point.',
+      },
+      {
+        metric: 'word_choice' as const,
+        max: 7,
+        kind: 'vague_wording',
+        quote: 'some stuff',
+        observation: 'This phrase does not identify what you handled.',
+        suggestion: 'two scheduling conflicts',
+      },
+      {
+        metric: 'grammar' as const,
+        max: 7,
+        kind: 'missing_subject',
+        quote: 'find it difficult',
+        observation: 'This phrase needs a clear subject before “find.”',
+        suggestion: 'I find it difficult',
+      },
+    ]
+    for (const finding of findings) {
+      const start = transcript.indexOf(finding.quote)
+      const result = payload.sections.what_you_said.metrics[finding.metric]
+      const evidence = {
+        source: 'transcript',
+        start,
+        end: start + finding.quote.length,
+        coordinate: { space: 'transcript', unit: 'utf16_code_unit' } as const,
+        quote: finding.quote,
+        detail: finding.observation,
+      }
+      Object.assign(result, {
+        component: 0.7,
+        earned_points: Math.round(finding.max * 0.7),
+        evidence: [evidence],
+        details: [
+          {
+            kind: finding.kind,
+            source: 'ai' as const,
+            quote: finding.quote,
+            observation: finding.observation,
+            suggestion: finding.suggestion,
+            evidence: [evidence],
+          },
+        ],
+      })
+    }
+
+    const highlights = v3TranscriptSegments(transcript, payload).filter(
+      (segment) => segment.type === 'highlight',
+    )
+    expect(highlights.map((segment) => segment.text)).toEqual([
+      'Honestly,',
+      'some stuff',
+      'find it difficult',
+    ])
+    expect(highlights[0]?.details).toEqual([
+      'Conciseness: unnecessary filler',
+      'This opening does not add meaning here.',
+      'Try: Begin with the main point.',
+    ])
+    expect(highlights[1]?.details).toContain('More precise: two scheduling conflicts')
+    expect(highlights[2]?.details).toContain('Clearer form: I find it difficult')
+  })
+
+  it('places only excessive Paused Time evidence at authoritative timed-word boundaries', () => {
+    const transcript = 'I can relax but I also work.'
+    const words = wordsFrom(transcript, 2, 2).map((word, index) =>
+      index < 2 ? word : { ...word, start: word.start + 1.5, end: word.end + 1.5 },
+    )
+    const payload = v3Snapshot({ component: 1 })
+    Object.assign(payload.sections.how_you_sounded.metrics.paused_time, {
+      component: 0.5,
+      earned_points: 8,
+      evidence: [
+        {
+          source: 'transcript_and_audio_timeline',
+          start: 1_100,
+          end: 2_000,
+          coordinate: { space: 'audio_timeline', unit: 'millisecond' } as const,
+          quote: 'I',
+          detail: 'Beginning excessive pause.',
+        },
+        {
+          source: 'audio_timeline',
+          start: 3_000,
+          end: 4_500,
+          coordinate: { space: 'audio_timeline', unit: 'millisecond' } as const,
+          quote: 'can',
+          detail: 'Mid-thought excessive pause.',
+        },
+      ],
+    })
+
+    const segments = v3TranscriptSegments(transcript, payload, words)
+    const markers = segments.filter((segment) => segment.type === 'marker')
+    expect(markers).toEqual([
+      {
+        type: 'marker',
+        text: '+0.9 sec',
+        label: 'Paused Time',
+        details: ['Paused Time', '0.9 sec excessive pause before you started.'],
+      },
+      {
+        type: 'marker',
+        text: '+1.5 sec',
+        label: 'Paused Time',
+        details: ['Paused Time', '1.5 sec excessive pause.'],
+      },
+    ])
+    expect(segments.map((segment) => segment.text).join('')).toBe(
+      '+0.9 secI can+1.5 sec relax but I also work.',
+    )
+
+    Object.assign(payload.sections.how_you_sounded.metrics.paused_time, {
+      component: 1,
+      earned_points: 15,
+      evidence: [],
+    })
+    expect(v3TranscriptSegments(transcript, payload, words)).toEqual([
+      { type: 'text', text: transcript },
+    ])
+  })
+
+  it('localizes deducted Articulation and flat Energy windows without inventing global highlights', () => {
+    const transcript = 'This section stays even before the final words change.'
+    const words = wordsFrom(transcript, 2, 1)
+    const payload = v3Snapshot({ component: 1 })
+    const articulation = payload.sections.how_you_sounded.metrics.articulation
+    const hardWord = 'section'
+    const hardStart = transcript.indexOf(hardWord)
+    Object.assign(articulation, {
+      component: 0.7,
+      earned_points: 9,
+      evidence: [
+        {
+          source: 'deepgram_word_confidence',
+          start: hardStart,
+          end: hardStart + hardWord.length,
+          coordinate: { space: 'transcript', unit: 'utf16_code_unit' } as const,
+          quote: hardWord,
+          detail: 'Final recognition confidence was 0.52.',
+        },
+      ],
+    })
+    const energy = payload.sections.how_you_sounded.metrics.energy
+    Object.assign(energy, {
+      component: 0.6,
+      earned_points: 6,
+      evidence: [
+        {
+          source: 'energy_flat_window',
+          start: words[3]!.start * 1_000,
+          end: words[5]!.end * 1_000,
+          coordinate: { space: 'audio_timeline', unit: 'millisecond' } as const,
+          quote: null,
+          detail: 'Your voice stayed fairly flat through this section.',
+        },
+      ],
+    })
+
+    let highlights = v3TranscriptSegments(transcript, payload, words).filter(
+      (segment) => segment.type === 'highlight',
+    )
+    expect(highlights.some((segment) => segment.text === hardWord)).toBe(true)
+    expect(highlights.some((segment) => segment.details?.includes('Energy'))).toBe(true)
+
+    Object.assign(energy, {
+      evidence: [
+        {
+          source: 'audio_timeline',
+          start: words[0]!.start * 1_000,
+          end: words.at(-1)!.end * 1_000,
+          coordinate: { space: 'audio_timeline', unit: 'millisecond' } as const,
+          quote: null,
+          detail: 'Pitch variation was limited overall.',
+        },
+      ],
+    })
+    highlights = v3TranscriptSegments(transcript, payload, words).filter(
+      (segment) => segment.type === 'highlight',
+    )
+    expect(highlights.some((segment) => segment.details?.includes('Energy'))).toBe(false)
+  })
+
+  it('combines legitimate overlapping annotations and omits unavailable evidence', () => {
+    const transcript = 'I used a vague phrase.'
+    const payload = v3Snapshot({ component: 1 })
+    const start = transcript.indexOf('vague phrase')
+    const evidence = {
+      source: 'transcript',
+      start,
+      end: start + 'vague phrase'.length,
+      coordinate: { space: 'transcript', unit: 'utf16_code_unit' } as const,
+      quote: 'vague phrase',
+      detail: 'This phrase reduced clarity.',
+    }
+    for (const metric of ['conciseness', 'word_choice'] as const) {
+      Object.assign(payload.sections.what_you_said.metrics[metric], {
+        component: 0.5,
+        earned_points: 4,
+        evidence: [evidence],
+      })
+    }
+    Object.assign(payload.sections.what_you_said.metrics.grammar, {
+      status: 'not_checked',
+      component: null,
+      earned_points: null,
+      evidence: [evidence],
+    })
+
+    const highlights = v3TranscriptSegments(transcript, payload).filter(
+      (segment) => segment.type === 'highlight',
+    )
+    expect(highlights).toHaveLength(1)
+    expect(highlights[0]?.text).toBe('vague phrase')
+    expect(highlights[0]?.details).toEqual([
+      'Conciseness: unnecessary wording',
+      'This phrase reduced clarity.',
+      'Word Choice: wording that could be more precise',
+    ])
   })
 })

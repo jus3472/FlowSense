@@ -31,6 +31,7 @@ export function TranscriptPanel({
             if (segment.type === 'text') return <span key={index}>{segment.text}</span>
 
             const isMarker = segment.type === 'marker'
+            const details = segment.details ?? [segment.label]
             const toggle = () => setOpen((current) => (current === index ? null : index))
 
             return (
@@ -38,7 +39,7 @@ export function TranscriptPanel({
                 <mark
                   role="button"
                   tabIndex={0}
-                  aria-label={`${segment.text}. ${segment.label}`}
+                  aria-label={`${segment.text}. ${details.join(' ')}`}
                   aria-expanded={open === index}
                   onPointerEnter={() => setOpen(index)}
                   onPointerLeave={() => setOpen((current) => (current === index ? null : current))}
@@ -64,9 +65,13 @@ export function TranscriptPanel({
                 {open === index ? (
                   <span
                     role="tooltip"
-                    className="bg-surface text-foreground shadow-float rounded-card absolute bottom-full left-0 z-10 mb-2 w-max max-w-[240px] px-3 py-2 text-xs leading-normal"
+                    className="bg-surface text-foreground shadow-float rounded-card fixed inset-x-6 bottom-6 z-20 px-3 py-2 text-xs leading-normal sm:absolute sm:inset-x-auto sm:bottom-full sm:left-0 sm:z-10 sm:mb-2 sm:w-max sm:max-w-[240px]"
                   >
-                    {segment.label}
+                    {details.map((detail) => (
+                      <span key={detail} className="block [&+&]:mt-1">
+                        {detail}
+                      </span>
+                    ))}
                   </span>
                 ) : null}
               </span>

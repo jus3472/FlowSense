@@ -79,6 +79,8 @@ describe('V3ResultsView', () => {
     expect(screen.queryByText('Your prompt')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Overall score' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Recommendation' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/for What You Said/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/for How You Sounded/)).not.toBeInTheDocument()
     expect(screen.getByText(/^You did well at .+ To improve/)).toBeInTheDocument()
     expect(screen.queryByText(/^Based on /)).not.toBeInTheDocument()
     for (const metric of V3_METRIC_IDS) {
@@ -296,9 +298,9 @@ describe('V3ResultsView', () => {
     Object.assign(payload.sections.how_you_sounded.metrics.pace, {
       measurements: {
         words_per_minute: 194.2,
-        active_speaking_ms: 15_800,
+        pace_duration_ms: 15_800,
         word_count: 51,
-        excluded_silence_ms: 2_000,
+        excluded_excessive_pause_ms: 1_200,
       },
     })
     Object.assign(payload.sections.how_you_sounded.metrics.paused_time, {
@@ -344,10 +346,23 @@ describe('V3ResultsView', () => {
         pitch_range_semitones: 6,
         pitch_variation_semitones: 1.8,
         flat_window_proportion: 0,
-        rhythm_cadence_component: 0.83,
+        rhythm_cadence_component: 1,
+        pitch_range_component: 1,
+        pitch_variation_component: 0.35,
+        non_monotony_component: 1,
         voiced_frame_count: 72,
         temporal_bin_count: 4,
       },
+      details: [
+        {
+          kind: 'energy',
+          source: 'audio' as const,
+          quote: null,
+          observation: 'Pitch and active-speech timing were less varied than the configured range.',
+          suggestion: null,
+          evidence: [],
+        },
+      ],
     })
 
     render(<V3ResultsView {...props} payload={payload} />)
@@ -356,6 +371,7 @@ describe('V3ResultsView', () => {
     expect(screen.getByText('194 WPM')).toBeInTheDocument()
     expect(screen.getByText('120 to 175 WPM')).toBeInTheDocument()
     expect(screen.getByText('15.8 sec')).toBeInTheDocument()
+    expect(screen.getByText('1.2 sec')).toBeInTheDocument()
     expect(screen.getByText('51')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Show Paused Time details' }))
@@ -374,7 +390,12 @@ describe('V3ResultsView', () => {
     expect(screen.getByText('0%')).toBeInTheDocument()
     expect(screen.getByText('Varied')).toBeInTheDocument()
     expect(
-      screen.queryByText(/excluded silence|speech to noise|voiced frame|temporal bin/i),
+      screen.getByText('Your pitch could vary a little more throughout the response.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        /excluded silence|speech to noise|voiced frame|temporal bin|active-speech timing|configured range/i,
+      ),
     ).not.toBeInTheDocument()
   })
 
@@ -444,12 +465,43 @@ describe('V3ResultsView', () => {
     expect(screen.queryByText('Lesson 2 is available.')).not.toBeInTheDocument()
     const mark = screen.getByRole('button', { name: /vague\. Word Choice:/ })
     fireEvent.click(mark)
-    expect(screen.getByRole('tooltip')).toHaveTextContent(
-      'Word Choice: This word does not identify the choice.',
-    )
+    const tooltip = screen.getByRole('tooltip')
+    expect(
+      within(tooltip).getByText('Word Choice: wording that could be more precise'),
+    ).toBeVisible()
+    expect(within(tooltip).getByText('This word does not identify the choice.')).toBeVisible()
     expect(container.querySelectorAll('mark')).toHaveLength(1)
     expect(screen.getByRole('link', { name: 'Continue' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Try Again' })).not.toBeInTheDocument()
+  })
+
+  it('makes transcript evidence keyboard reachable and dismissible', () => {
+    const payload = v3Snapshot({
+      component: 0.5,
+      evidenceMetric: 'word_choice',
+      evidence: [
+        {
+          source: 'transcript',
+          start: 9,
+          end: 14,
+          coordinate: { space: 'transcript', unit: 'utf16_code_unit' },
+          quote: 'vague',
+          detail: 'This word does not identify the choice.',
+        },
+      ],
+    })
+    render(<V3ResultsView {...props} payload={payload} />)
+
+    const mark = screen.getByRole('button', { name: /vague\. Word Choice:/ })
+    expect(mark).toHaveAttribute('tabindex', '0')
+    expect(mark).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.focus(mark)
+    expect(mark).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('tooltip')).toBeVisible()
+    fireEvent.keyDown(mark, { key: 'Escape' })
+    expect(mark).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.keyDown(mark, { key: ' ' })
+    expect(mark).toHaveAttribute('aria-expanded', 'true')
   })
 
   it('keeps neutral lesson progress explicit without showing a fabricated score', () => {

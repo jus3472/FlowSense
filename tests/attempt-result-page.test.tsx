@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   logAttemptDiagnostic: vi.fn(),
   notFound: vi.fn(),
   readAttemptResult: vi.fn(),
+  storedTranscriptWords: vi.fn(),
   reconcileCurrentUserStaleAttempts: vi.fn(),
   redirect: vi.fn(),
   refresh: vi.fn(),
@@ -25,7 +26,10 @@ vi.mock('@/lib/attempts/server', () => ({ logAttemptDiagnostic: mocks.logAttempt
 vi.mock('@/lib/attempts/reconciliation', () => ({
   reconcileCurrentUserStaleAttempts: mocks.reconcileCurrentUserStaleAttempts,
 }))
-vi.mock('@/lib/results/attempt-result', () => ({ readAttemptResult: mocks.readAttemptResult }))
+vi.mock('@/lib/results/attempt-result', () => ({
+  readAttemptResult: mocks.readAttemptResult,
+  storedTranscriptWords: mocks.storedTranscriptWords,
+}))
 vi.mock('@/lib/curriculum/result-server', () => ({
   loadStructuredLessonResultForUser: mocks.loadStructuredLessonResultForUser,
 }))
@@ -79,14 +83,17 @@ vi.mock('@/components/results/v3-results-view', () => ({
     audioUrl,
     payload,
     curriculumResult,
+    words,
   }: {
     audioUrl: string | null
     payload: { fixture: string }
     curriculumResult?: { lesson: { title: string } } | null
+    words?: readonly { word: string }[]
   }) => (
     <div
       data-audio={audioUrl ?? 'none'}
       data-curriculum={curriculumResult?.lesson.title ?? 'none'}
+      data-words={words?.map((word) => word.word).join(',') ?? 'none'}
       data-testid="v3-result"
     >
       {payload.fixture}
@@ -242,6 +249,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.reconcileCurrentUserStaleAttempts.mockResolvedValue({ status: 'ready', reconciled: [] })
   mocks.loadStructuredLessonResultForUser.mockResolvedValue({ status: 'not_found' })
+  mocks.storedTranscriptWords.mockReturnValue([])
   mocks.notFound.mockImplementation(() => {
     throw NOT_FOUND
   })
@@ -430,6 +438,7 @@ describe('owned attempt result loading', () => {
   })
 
   it('passes owner-scoped structured context to the v3 renderer', async () => {
+    const storedWords = [{ word: 'private', start: 0, end: 0.4 }]
     const setup = client({
       primary: {
         data: attempt({ lesson_id: LESSON_ID, section_scores: 'v3', rubric_version: 'v3' }),
@@ -437,6 +446,7 @@ describe('owned attempt result loading', () => {
       },
     })
     mocks.createClient.mockResolvedValue(setup.supabase)
+    mocks.storedTranscriptWords.mockReturnValue(storedWords)
     mocks.loadStructuredLessonResultForUser.mockResolvedValue({
       status: 'ready',
       data: { lesson: { title: 'Handling a setback' } },
@@ -445,6 +455,8 @@ describe('owned attempt result loading', () => {
     await renderPage()
 
     expect(screen.getByTestId('v3-result')).toHaveAttribute('data-curriculum', 'Handling a setback')
+    expect(screen.getByTestId('v3-result')).toHaveAttribute('data-words', 'private')
+    expect(mocks.storedTranscriptWords).toHaveBeenCalledOnce()
     expect(mocks.loadStructuredLessonResultForUser).toHaveBeenCalledWith(setup.supabase, USER_ID, {
       lessonId: LESSON_ID,
       attemptId: ATTEMPT_ID,

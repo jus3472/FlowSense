@@ -74,6 +74,29 @@ function evaluation(
   return evaluateAudioMetrics({ capture, words, transcript, mode: 'practice' })
 }
 
+function timedDelivery(
+  transcript: string,
+  wordMs: number,
+  gapMs: number,
+  extraGapAfter: Readonly<Record<number, number>> = {},
+): TranscriptWord[] {
+  let cursorMs = 500
+  return wordsFrom(transcript).map((word, index) => {
+    const timed = {
+      ...word,
+      start: cursorMs / 1_000,
+      end: (cursorMs + wordMs) / 1_000,
+      confidence: 0.96,
+    }
+    cursorMs += wordMs + gapMs + (extraGapAfter[index] ?? 0)
+    return timed
+  })
+}
+
+function scoredPoints(component: number | null, maximum: number): number | null {
+  return component === null ? null : Math.round(component * maximum)
+}
+
 describe('v3 audio threshold policy', () => {
   it('publishes valid, mode-specific threshold sets and bounded component functions', () => {
     for (const mode of MODES) {
@@ -135,7 +158,7 @@ describe('evaluateAudioMetrics', () => {
   it('returns four explicit, independently scored metric records', () => {
     const result = evaluation(transcript)
 
-    expect(result.version).toBe('v3.audio.3')
+    expect(result.version).toBe('v3.audio.4')
     expect(Object.keys(result.metrics)).toEqual(AUDIO_METRIC_IDS)
     for (const metric of Object.values(result.metrics)) {
       expect(metric.status).toBe('scored')
@@ -155,18 +178,48 @@ describe('evaluateAudioMetrics', () => {
     )
   })
 
-  it('computes pace from recording time minus validated pause time', () => {
+  it('uses plain Energy coaching copy and exposes only genuinely flat local windows', () => {
+    const words = withConfidence(transcript)
+    const monotoneCapture = captureFor(words, {
+      pitch: pitchAcrossWords(words, () => 120),
+    })
+    const monotone = evaluation(transcript, words, monotoneCapture).metrics.energy
+    const variedCapture = captureFor(words, {
+      pitch: pitchAcrossWords(words, (index) => [100, 120, 140][index % 3]!),
+    })
+    const varied = evaluation(transcript, words, variedCapture).metrics.energy
+
+    expect(monotone.status).toBe('scored')
+    expect(monotone.deductions[0]?.detail).toBe(
+      'Try adding a little more natural variation in your voice and rhythm.',
+    )
+    expect(JSON.stringify(monotone)).not.toMatch(/active-speech timing|configured range/i)
+    expect(monotone.evidence.filter((item) => item.source === 'energy_flat_window')).toHaveLength(6)
+    expect(
+      monotone.evidence
+        .filter((item) => item.source === 'energy_flat_window')
+        .every((item) => item.end > item.start),
+    ).toBe(true)
+
+    expect(varied.status).toBe('scored')
+    expect(varied.measurements.non_monotony_component).toBe(1)
+    expect(varied.evidence.some((item) => item.source === 'energy_flat_window')).toBe(false)
+    expect(varied.deductions[0]?.detail).toBe(
+      'Your speaking rhythm stayed a little too even in parts.',
+    )
+  })
+
+  it('keeps natural spacing in Pace while excluding only excessive hesitation', () => {
     const words = withConfidence(transcript)
     const capture = captureFor(words)
     const metric = evaluation(transcript, words, capture).metrics.pace
-    const expectedExcludedMs = words[0]!.start * 1000 + 1_000
-    const expectedActiveMs = capture.duration_ms - expectedExcludedMs
+    const expectedDurationMs = words.at(-1)!.end * 1_000 - words[0]!.start * 1_000
 
     expect(metric.status).toBe('scored')
-    expect(metric.measurements.active_speaking_ms).toBe(expectedActiveMs)
-    expect(metric.measurements.excluded_silence_ms).toBe(expectedExcludedMs)
+    expect(metric.measurements.pace_duration_ms).toBeCloseTo(expectedDurationMs)
+    expect(metric.measurements.excluded_excessive_pause_ms).toBe(0)
     expect(metric.measurements.words_per_minute).toBeCloseTo(
-      (words.length / expectedActiveMs) * 60_000,
+      (words.length / expectedDurationMs) * 60_000,
     )
   })
 
@@ -187,7 +240,7 @@ describe('evaluateAudioMetrics', () => {
 
     expect(steady.status).toBe('scored')
     expect(quiet.status).toBe('scored')
-    expect(quiet.measurements.active_speaking_ms).toBe(steady.measurements.active_speaking_ms)
+    expect(quiet.measurements.pace_duration_ms).toBe(steady.measurements.pace_duration_ms)
     expect(quiet.measurements.words_per_minute).toBe(steady.measurements.words_per_minute)
   })
 
@@ -371,9 +424,9 @@ describe('evaluateAudioMetrics', () => {
     expect(paused.measurements.beginning_silence_ms).toBe(2_900)
     expect(paused.measurements.beginning_excessive_pause_ms).toBe(1_800)
     expect(pace.status).toBe('scored')
-    const expectedExcludedMs = 2_900 + (durationMs - words.at(-1)!.end * 1_000)
-    expect(pace.measurements.excluded_silence_ms).toBeCloseTo(expectedExcludedMs)
-    expect(pace.measurements.active_speaking_ms).toBeCloseTo(durationMs - expectedExcludedMs)
+    const expectedDurationMs = words.at(-1)!.end * 1_000 - 2_900
+    expect(pace.measurements.excluded_excessive_pause_ms).toBe(0)
+    expect(pace.measurements.pace_duration_ms).toBeCloseTo(expectedDurationMs)
   })
 
   it('counts only excess beyond contextual allowances and excludes trailing silence', () => {
@@ -456,6 +509,61 @@ describe('evaluateAudioMetrics', () => {
       ordinary.metrics.energy.measurements.cadence_log_spread!,
       10,
     )
+  })
+
+  it.each([
+    { label: 'clearly slow', wordMs: 550, gapMs: 200, expectedBand: [75, 90], maximum: 5 },
+    { label: 'moderate natural', wordMs: 300, gapMs: 100, expectedBand: [145, 160], minimum: 12 },
+    { label: 'moderately fast', wordMs: 230, gapMs: 80, expectedBand: [190, 200], maximum: 11 },
+    { label: 'genuinely rushed', wordMs: 160, gapMs: 40, expectedBand: [285, 315], maximum: 1 },
+  ])(
+    'keeps a $label delivery in a defensible Pace band',
+    ({ wordMs, gapMs, expectedBand, minimum, maximum }) => {
+      const fixtureTranscript =
+        'These twenty words make a stable timing fixture for comparing clearly different delivery speeds across the same spoken response each time today.'
+      const words = timedDelivery(fixtureTranscript, wordMs, gapMs)
+      const pace = evaluation(fixtureTranscript, words, captureFor(words)).metrics.pace
+      const wpm = pace.measurements.words_per_minute
+      const points = scoredPoints(pace.component, 12)
+
+      expect(pace.status).toBe('scored')
+      expect(wpm).not.toBeNull()
+      expect(wpm!).toBeGreaterThanOrEqual(expectedBand[0]!)
+      expect(wpm!).toBeLessThanOrEqual(expectedBand[1]!)
+      if (minimum !== undefined) expect(points).toBeGreaterThanOrEqual(minimum)
+      if (maximum !== undefined) expect(points).toBeLessThanOrEqual(maximum)
+    },
+  )
+
+  it('includes normal sentence spacing instead of treating it as compressed active speech', () => {
+    const fixtureTranscript =
+      'I introduced the first idea with enough detail. Then I connected it to a second example. Finally I explained what changed afterward.'
+    const words = timedDelivery(fixtureTranscript, 300, 100, { 7: 700, 15: 500 })
+    const pace = evaluation(fixtureTranscript, words, captureFor(words)).metrics.pace
+
+    expect(pace.status).toBe('scored')
+    expect(pace.measurements.excluded_excessive_pause_ms).toBe(0)
+    expect(pace.measurements.words_per_minute).toBeGreaterThan(120)
+    expect(pace.measurements.words_per_minute).toBeLessThan(150)
+    expect(scoredPoints(pace.component, 12)).toBe(12)
+  })
+
+  it('keeps one long hesitation primarily owned by Paused Time', () => {
+    const fixtureTranscript =
+      'This response uses the same words and active delivery so one added hesitation has a single clear owner in the final result.'
+    const ordinaryWords = timedDelivery(fixtureTranscript, 300, 100)
+    const delayedWords = timedDelivery(fixtureTranscript, 300, 100, { 9: 4_000 })
+    const ordinary = evaluation(fixtureTranscript, ordinaryWords, captureFor(ordinaryWords)).metrics
+    const delayed = evaluation(fixtureTranscript, delayedWords, captureFor(delayedWords)).metrics
+
+    expect(delayed.paused_time.component).toBeLessThan(ordinary.paused_time.component!)
+    expect(delayed.pace.measurements.excluded_excessive_pause_ms).toBeGreaterThan(3_000)
+    expect(scoredPoints(delayed.pace.component, 12)).toBe(scoredPoints(ordinary.pace.component, 12))
+    expect(
+      Math.abs(
+        delayed.pace.measurements.words_per_minute! - ordinary.pace.measurements.words_per_minute!,
+      ),
+    ).toBeLessThan(10)
   })
 
   it('excludes filler, false-start, and closer token spans from articulation', () => {

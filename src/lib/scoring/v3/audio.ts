@@ -9,7 +9,7 @@ import { clamp01, median, medianAbsoluteDeviation } from '@/lib/scoring/scale'
 import { buildTokens, normalizeWord, type Token } from '@/lib/scoring/tokens'
 import type { CaptureMetrics } from '@/lib/types/metrics'
 
-export const AUDIO_ANALYSIS_VERSION = 'v3.audio.3' as const
+export const AUDIO_ANALYSIS_VERSION = 'v3.audio.4' as const
 
 export const AUDIO_METRIC_IDS = ['pace', 'paused_time', 'articulation', 'energy'] as const
 
@@ -254,7 +254,11 @@ export function audioThresholdsFor(mode: PracticeMode): AudioModeThresholds {
 }
 
 export interface AudioMetricEvidence {
-  source: 'audio_timeline' | 'deepgram_word_confidence' | 'transcript_and_audio_timeline'
+  source:
+    | 'audio_timeline'
+    | 'deepgram_word_confidence'
+    | 'energy_flat_window'
+    | 'transcript_and_audio_timeline'
   start: number
   end: number
   coordinate: 'audio_millisecond' | 'transcript_utf16'
@@ -296,8 +300,8 @@ export type AudioMetricEvaluation<Id extends AudioMetricId, Measurements> =
 export interface PaceMeasurements {
   words_per_minute: number | null
   word_count: number
-  active_speaking_ms: number | null
-  excluded_silence_ms: number | null
+  pace_duration_ms: number | null
+  excluded_excessive_pause_ms: number | null
 }
 
 export interface PausedTimeMeasurements {
@@ -471,6 +475,7 @@ export interface EnergyPitchSignals {
 export interface EnergyMonotonySignal {
   window_count: number
   flat_window_count: number
+  flat_window_indices: readonly number[]
   flat_window_proportion: number
   component: number
 }
@@ -561,13 +566,15 @@ export function energyMonotonySignal(
     const end = Math.floor(((index + 1) * semitoneValues.length) / ENERGY_MONOTONY_WINDOWS)
     return semitoneValues.slice(start, end)
   })
-  const flatWindowCount = windows.filter(
-    (window) => medianAbsoluteDeviation(window) <= threshold.flat_window_through_semitones,
-  ).length
+  const flatWindowIndices = windows.flatMap((window, index) =>
+    medianAbsoluteDeviation(window) <= threshold.flat_window_through_semitones ? [index] : [],
+  )
+  const flatWindowCount = flatWindowIndices.length
   const flatWindowProportion = flatWindowCount / windows.length
   return {
     window_count: windows.length,
     flat_window_count: flatWindowCount,
+    flat_window_indices: flatWindowIndices,
     flat_window_proportion: flatWindowProportion,
     component: lowerBetter(
       flatWindowProportion,
@@ -651,6 +658,21 @@ function deductions(
   detail: string,
 ): readonly AudioMetricDeduction[] {
   return component < 1 ? [{ metric, component_reduction: 1 - component, detail }] : []
+}
+
+function energyDeductionDetail(components: EnergySubcomponents): string {
+  const pitchWeak = components.pitch_range < 1 || components.pitch_variation < 1
+  const flatSectionsWeak = components.non_monotony < 1
+  const rhythmWeak = components.rhythm_cadence < 1
+  if (pitchWeak && (flatSectionsWeak || rhythmWeak)) {
+    return 'Try adding a little more natural variation in your voice and rhythm.'
+  }
+  if (pitchWeak) return 'Your pitch could vary a little more throughout the response.'
+  if (flatSectionsWeak && rhythmWeak) {
+    return 'Some parts of your delivery stayed fairly flat, and your speaking rhythm stayed too even.'
+  }
+  if (flatSectionsWeak) return 'Some parts of your delivery stayed fairly flat.'
+  return 'Your speaking rhythm stayed a little too even in parts.'
 }
 
 function validDuration(capture: CaptureMetrics): boolean {
@@ -935,8 +957,8 @@ function evaluatePace(prepared: Prepared, mode: PracticeMode): AudioMetricEvalua
   const empty: PaceMeasurements = {
     words_per_minute: null,
     word_count: wordCount,
-    active_speaking_ms: null,
-    excluded_silence_ms: null,
+    pace_duration_ms: null,
+    excluded_excessive_pause_ms: null,
   }
   if (issue || !prepared.capture || !prepared.pauseAnalysis || wordCount < MIN_PACE_WORDS) {
     const reason = issue ?? `At least ${MIN_PACE_WORDS} timed words are required.`
@@ -948,20 +970,22 @@ function evaluatePace(prepared: Prepared, mode: PracticeMode): AudioMetricEvalua
     )
   }
 
-  const correctedLeadingSilenceMs =
+  const threshold = AUDIO_THRESHOLDS_BY_MODE[mode].paused_time
+  const excludedExcessivePauseMs = prepared.pauseAnalysis.pauses.reduce((total, pause) => {
+    const charged = excessivePause(pause, tokenBeforePause(prepared.tokens, pause), threshold)
+    return total + (charged?.excessive_ms ?? 0)
+  }, 0)
+  const responseStartMs =
     prepared.firstWordTiming?.selected_onset_ms ?? prepared.pauseAnalysis.leading_silence_ms
-  const excludedSilenceMs =
-    prepared.pauseAnalysis.total_silence_ms -
-    prepared.pauseAnalysis.leading_silence_ms +
-    correctedLeadingSilenceMs
-  const activeSpeakingMs = prepared.capture.duration_ms - excludedSilenceMs
-  const wpm = wordCount / (activeSpeakingMs / 60_000)
+  const responseEndMs = prepared.tokens.at(-1)!.end * 1_000
+  const paceDurationMs = responseEndMs - responseStartMs - excludedExcessivePauseMs
+  const wpm = wordCount / (paceDurationMs / 60_000)
   if (
-    !Number.isFinite(excludedSilenceMs) ||
-    excludedSilenceMs < 0 ||
-    !Number.isFinite(activeSpeakingMs) ||
-    activeSpeakingMs <= 0 ||
-    activeSpeakingMs > prepared.capture.duration_ms ||
+    !Number.isFinite(excludedExcessivePauseMs) ||
+    excludedExcessivePauseMs < 0 ||
+    !Number.isFinite(paceDurationMs) ||
+    paceDurationMs <= 0 ||
+    paceDurationMs > prepared.capture.duration_ms ||
     !Number.isFinite(wpm) ||
     wpm <= 0
   ) {
@@ -969,7 +993,7 @@ function evaluatePace(prepared: Prepared, mode: PracticeMode): AudioMetricEvalua
       'pace',
       'Your pace could not be measured from this recording.',
       empty,
-      'The active speaking duration was invalid.',
+      'The Pace duration was invalid.',
     )
   }
 
@@ -977,15 +1001,15 @@ function evaluatePace(prepared: Prepared, mode: PracticeMode): AudioMetricEvalua
   const measurement: PaceMeasurements = {
     words_per_minute: wpm,
     word_count: wordCount,
-    active_speaking_ms: activeSpeakingMs,
-    excluded_silence_ms: excludedSilenceMs,
+    pace_duration_ms: paceDurationMs,
+    excluded_excessive_pause_ms: excludedExcessivePauseMs,
   }
   const roundedWpm = Math.round(wpm)
   return {
     id: 'pace',
     status: 'scored',
     component,
-    explanation: `You spoke at ${roundedWpm} words per minute during active speech.`,
+    explanation: `You spoke at ${roundedWpm} words per minute across your response.`,
     measurements: measurement,
     evidence: [
       {
@@ -994,7 +1018,7 @@ function evaluatePace(prepared: Prepared, mode: PracticeMode): AudioMetricEvalua
         end: prepared.capture.duration_ms,
         coordinate: 'audio_millisecond',
         quote: null,
-        detail: `${wordCount} words over ${(activeSpeakingMs / 1000).toFixed(1)} seconds of active speech.`,
+        detail: `${wordCount} words over ${(paceDurationMs / 1000).toFixed(1)} seconds, with ${(excludedExcessivePauseMs / 1_000).toFixed(1)} seconds of excessive hesitation excluded.`,
       },
     ],
     deductions: deductions('pace', component, `${roundedWpm} words per minute.`),
@@ -1460,6 +1484,28 @@ function evaluateEnergy(
           : component >= 0.45
             ? 'Your voice had some natural variation, with a few flatter or more even stretches.'
             : 'Your voice stayed fairly flat and even through much of your response.'
+  const flatWindowEvidence: AudioMetricEvidence[] =
+    monotony.component < 1
+      ? monotony.flat_window_indices.flatMap((windowIndex) => {
+          const startIndex = Math.floor((windowIndex * activePitch.length) / monotony.window_count)
+          const endIndex =
+            Math.floor(((windowIndex + 1) * activePitch.length) / monotony.window_count) - 1
+          const start = activePitch[startIndex]?.t_ms
+          const end = activePitch[endIndex]?.t_ms
+          return start !== undefined && end !== undefined && end > start
+            ? [
+                {
+                  source: 'energy_flat_window' as const,
+                  start,
+                  end,
+                  coordinate: 'audio_millisecond' as const,
+                  quote: null,
+                  detail: 'Your voice stayed fairly flat through this section.',
+                },
+              ]
+            : []
+        })
+      : []
   return {
     id: 'energy',
     status: 'scored',
@@ -1473,14 +1519,11 @@ function evaluateEnergy(
         end: activePitch.at(-1)!.t_ms,
         coordinate: 'audio_millisecond',
         quote: null,
-        detail: `Recognized speech used a ${pitch.pitch_range_semitones.toFixed(1)}-semitone central pitch range, ${(monotony.flat_window_proportion * 100).toFixed(0)} percent flatter vocal windows, and ${cadence.component >= 0.65 ? 'varied' : 'fairly even'} active-speech timing.`,
+        detail: `Your response used a ${pitch.pitch_range_semitones.toFixed(1)}-semitone central pitch range, ${(monotony.flat_window_proportion * 100).toFixed(0)} percent flatter vocal sections, and ${cadence.component >= 0.65 ? 'varied' : 'fairly even'} speaking rhythm.`,
       },
+      ...flatWindowEvidence,
     ],
-    deductions: deductions(
-      'energy',
-      component,
-      'Pitch and active-speech timing were less varied than the configured range.',
-    ),
+    deductions: deductions('energy', component, energyDeductionDetail(components)),
     warnings: [],
   }
 }

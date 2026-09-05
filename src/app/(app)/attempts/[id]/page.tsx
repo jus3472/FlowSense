@@ -21,7 +21,7 @@ import { logAttemptDiagnostic } from '@/lib/attempts/server'
 import { loadStructuredLessonResultForUser } from '@/lib/curriculum/result-server'
 import { isUuid } from '@/lib/practice/session'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
-import { readAttemptResult } from '@/lib/results/attempt-result'
+import { readAttemptResult, storedTranscriptWords } from '@/lib/results/attempt-result'
 import {
   compareRetryResults,
   compareV3RetryResults,
@@ -323,6 +323,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         promptText={attempt.prompt_text}
         additionalContext={additionalContext}
         transcript={attempt.transcript ?? ''}
+        words={storedTranscriptWords(attempt.metrics)}
         durationMs={durationMs}
         audioUrl={audioUrl}
         audioUnavailable={audioUnavailable}

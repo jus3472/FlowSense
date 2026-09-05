@@ -18,7 +18,7 @@ const noEvidence = {
 
 function audioEvaluation(): AudioEvaluation {
   return {
-    version: 'v3.audio.3',
+    version: 'v3.audio.4',
     mode: 'practice',
     warnings: [],
     metrics: {
@@ -30,8 +30,8 @@ function audioEvaluation(): AudioEvaluation {
         measurements: {
           words_per_minute: 190,
           word_count: 40,
-          active_speaking_ms: 12_632,
-          excluded_silence_ms: 2_368,
+          pace_duration_ms: 12_632,
+          excluded_excessive_pause_ms: 2_368,
         },
         ...noEvidence,
       },
@@ -115,7 +115,8 @@ describe('v3 persistence projection', () => {
     expect(persisted.pace.measurements).toEqual({
       words_per_minute: 190,
       word_count: 40,
-      active_speaking_ms: 12_632,
+      pace_duration_ms: 12_632,
+      excluded_excessive_pause_ms: 2_368,
     })
     expect(persisted.paused_time.measurements).toEqual({
       total_unnatural_pause_ms: 1_800,
