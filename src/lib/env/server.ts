@@ -31,12 +31,12 @@ export function audioDebugRouteEnabled(): boolean {
   return process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test'
 }
 
-/** Wired up in a later prompt, when transcription lands. */
+/** Used by server-side transcription requests. */
 export function deepgramApiKey(): string {
   return required('DEEPGRAM_API_KEY', process.env.DEEPGRAM_API_KEY)
 }
 
-/** Wired up in a later prompt, when content evaluation lands. */
+/** Used by server-side content evaluation requests. */
 export function deepseekApiKey(): string {
   return required('DEEPSEEK_API_KEY', process.env.DEEPSEEK_API_KEY)
 }

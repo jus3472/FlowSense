@@ -18,9 +18,3 @@ export const SKILL_CATEGORIES = [
   'delivery',
 ] as const
 export type SkillCategory = (typeof SKILL_CATEGORIES)[number]
-
-export interface PracticePromptContract {
-  mode: PracticeMode
-  difficulty: PromptDifficulty
-  source: PromptSource
-}

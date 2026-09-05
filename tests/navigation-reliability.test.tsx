@@ -1,26 +1,7 @@
-// @vitest-environment jsdom
-
-import { render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
-import type { AnchorHTMLAttributes, ReactNode } from 'react'
-import { describe, expect, it, vi } from 'vitest'
-import { LastScore } from '@/components/home/last-score'
+import { describe, expect, it } from 'vitest'
 import { attemptHref, isProtectedPath } from '@/lib/routes'
 import { historyHref, parseHistoryQuery } from '@/lib/results/history'
-
-vi.mock('next/link', () => ({
-  default: function MockLink({
-    href,
-    children,
-    ...props
-  }: AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; children: ReactNode }) {
-    return (
-      <a href={href} {...props}>
-        {children}
-      </a>
-    )
-  },
-}))
 
 describe('attempt navigation', () => {
   it.each(['10000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000002'])(
@@ -29,58 +10,6 @@ describe('attempt navigation', () => {
       expect(attemptHref(id)).toBe(`/attempts/${id}`)
     },
   )
-
-  it('renders a returned complete attempt as Last Response', () => {
-    render(
-      <LastScore
-        attemptId="10000000-0000-4000-8000-000000000001"
-        score={84}
-        summary="Filler words cost the most."
-        focusPhrase="in everyday speaking"
-      />,
-    )
-    expect(screen.getByRole('link', { name: /Last response/ })).toHaveAttribute(
-      'href',
-      '/attempts/10000000-0000-4000-8000-000000000001',
-    )
-  })
-
-  it('links a returned scoreless snapshot with neutral copy and no fabricated score', () => {
-    render(
-      <LastScore
-        attemptId="20000000-0000-4000-8000-000000000002"
-        score={null}
-        summary={null}
-        focusPhrase="in everyday speaking"
-      />,
-    )
-    expect(screen.getByRole('link', { name: /Last response/ })).toHaveAttribute(
-      'href',
-      '/attempts/20000000-0000-4000-8000-000000000002',
-    )
-    expect(screen.getByText('Overall unavailable')).toBeInTheDocument()
-    expect(screen.queryByText('/ 100')).not.toBeInTheDocument()
-  })
-
-  it('renders no stale link when deletion or an empty query returns no row', () => {
-    render(<LastScore attemptId={null} score={null} summary={null} focusPhrase="in practice" />)
-    expect(screen.queryByRole('link')).not.toBeInTheDocument()
-    expect(screen.getByText('No score yet')).toBeInTheDocument()
-  })
-
-  it('does not link a malformed latest snapshot as a valid result', () => {
-    render(
-      <LastScore
-        attemptId={null}
-        score={null}
-        summary={null}
-        focusPhrase="in practice"
-        unavailable
-      />,
-    )
-    expect(screen.queryByRole('link')).not.toBeInTheDocument()
-    expect(screen.getByText('Last response unavailable')).toBeInTheDocument()
-  })
 
   it('keeps Home focused on curriculum and free of the removed latest-result query', () => {
     const home = readFileSync('src/app/(app)/home/page.tsx', 'utf8')

@@ -24,9 +24,10 @@ otherwise replace the current application before the candidate is tested.
 5. Confirm Vercel created a staged deployment with target `production`, the expected commit SHA,
    Production environment variables, a generated immutable URL, and no Production domain assigned.
    When creating the candidate with the CLI, use `vercel --prod --skip-domain`.
-6. Smoke-test the immutable URL. Cover authentication, Home, Practice, recording boundaries, results,
-   History, Progress, Settings, browser errors, and Vercel runtime errors. Perform a real recording
-   when the release changes recording, scoring, progression, or activity behavior.
+6. Smoke-test the immutable URL. Cover authentication, Home, Tracks, Custom Prompt, recording
+   boundaries, results, History, Progress, Settings, browser errors, and Vercel runtime errors.
+   Perform a real recording when the release changes recording, scoring, progression, or activity
+   behavior.
 7. Promote that exact tested deployment with `vercel promote <deployment-id-or-url>`. Do not rebuild
    a different artifact for promotion.
 8. Repeat the Production smoke against the public alias and check the post-promotion runtime window.

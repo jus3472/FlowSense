@@ -116,10 +116,3 @@ export function sentenceRanges(tokens: readonly Token[]): Array<{ from: number; 
   }
   return ranges.filter((range) => range.to >= range.from)
 }
-
-export function joinWords(tokens: readonly Token[], from: number, to: number): string {
-  return tokens
-    .slice(from, to + 1)
-    .map((token) => token.word)
-    .join(' ')
-}

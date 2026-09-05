@@ -253,8 +253,3 @@ export function readAttemptResult(input: StoredAttemptResultInput): ReadAttemptR
     input.sectionScores !== null || input.contentResult !== null || input.score !== null
   return { kind: hasStoredResult ? 'malformed' : 'incomplete' }
 }
-
-export function legacyAttemptForHome(input: StoredAttemptResultInput): AttemptView | null {
-  const result = readAttemptResult(input)
-  return result.kind === 'legacy' ? result.attempt : null
-}

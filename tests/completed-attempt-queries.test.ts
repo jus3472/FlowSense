@@ -14,15 +14,11 @@ describe('completed attempt query boundaries', () => {
     expect(progress).not.toContain('Task B')
   })
 
-  it('requires done status for prompt recency, Home history, and latest response', () => {
+  it('requires done status for prompt recency', () => {
     const prompts = source('src/lib/prompts/server.ts')
-    const home = source('src/lib/home/server.ts')
 
     expect(prompts).toContain("select('prompt_id, prompt_source, status')")
     expect(prompts.match(/\.eq\('status', 'done'\)/g)).toHaveLength(1)
-    expect(home.match(/\.eq\('status', 'done'\)/g)).toHaveLength(1)
-    expect(home).not.toContain('score.not.is.null')
-    expect(home).not.toContain('section_scores.not.is.null')
   })
 
   it('lists terminal History rows but keeps its score cohort done-only', () => {

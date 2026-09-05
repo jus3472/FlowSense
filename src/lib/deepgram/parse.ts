@@ -1,7 +1,7 @@
 /**
- * Word timings drive pause classification and time to first word in a later
- * prompt, so `start` and `end` are kept exactly as Deepgram reports them, in
- * seconds from the beginning of the audio.
+ * Word timings drive pause classification and speech-onset measurement, so
+ * `start` and `end` are kept exactly as Deepgram reports them, in seconds from
+ * the beginning of the audio.
  */
 export interface TranscriptWord {
   word: string
