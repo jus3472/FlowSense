@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react'
 import { AudioPlayer } from '@/components/record/audio-player'
 import { ContentSection } from '@/components/results/content-section'
 import { DeliverySection } from '@/components/results/delivery-section'
+import { PreviousAttempts } from '@/components/results/previous-attempts'
 import { ScoreHeader } from '@/components/results/score-header'
 import { StatisticsSection } from '@/components/results/statistics-section'
 import { TighterVersion } from '@/components/results/tighter-version'
@@ -13,6 +14,7 @@ import { ButtonLink } from '@/components/ui/button'
 import { buildSegments } from '@/lib/results/highlights'
 import { disputeFinding } from '@/lib/results/api'
 import type { AttemptView } from '@/lib/results/types'
+import type { LessonAttemptHistoryItem } from '@/lib/results/lesson-attempt-history'
 import { scoreAttempt } from '@/lib/recording/api'
 import { recomputeScore } from '@/lib/scoring/assemble'
 import { CHECK_NAMES, applyDisputes, type CheckName, type Dispute } from '@/lib/scoring/content'
@@ -22,9 +24,11 @@ const SPAN_NOTE = 'word_choice_span'
 export function ResultsView({
   attempt,
   initialDisputes,
+  previousAttempts = [],
 }: {
   attempt: AttemptView
   initialDisputes: Dispute[]
+  previousAttempts?: readonly LessonAttemptHistoryItem[]
 }) {
   const router = useRouter()
   const [disputes, setDisputes] = useState<Dispute[]>(initialDisputes)
@@ -153,6 +157,8 @@ export function ResultsView({
       {attempt.audioUrl ? (
         <AudioPlayer src={attempt.audioUrl} durationMs={attempt.durationMs} />
       ) : null}
+
+      <PreviousAttempts attempts={previousAttempts} />
 
       <ButtonLink href={`/record?retry=${attempt.id}`} size="lg" fullWidth>
         Try this prompt again

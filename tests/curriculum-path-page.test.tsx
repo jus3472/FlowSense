@@ -175,6 +175,15 @@ describe('curriculum path ladder', () => {
     expect(screen.getByText('3 / 90 stars')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: '1 of 3 stars' })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: '2 of 3 stars' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Lesson 1.*View Best Result/s })).toHaveAttribute(
+      'href',
+      '/attempts/attempt-1',
+    )
+    expect(screen.getByRole('link', { name: /Lesson 2.*View Best Result/s })).toHaveAttribute(
+      'href',
+      '/attempts/attempt-2',
+    )
+    expect(screen.queryByText('View lesson')).not.toBeInTheDocument()
 
     const retry = screen.getByRole('link', { current: 'step' })
     expect(retry).toHaveAttribute('aria-current', 'step')
@@ -246,7 +255,27 @@ describe('curriculum path ladder', () => {
     expect(screen.getByText('30 / 30 passed')).toBeInTheDocument()
     expect(screen.getByText('60 / 90 stars')).toBeInTheDocument()
     expect(screen.queryByRole('link', { current: 'step' })).not.toBeInTheDocument()
-    expect(screen.getAllByRole('link', { name: /View lesson/ })).toHaveLength(30)
+    expect(screen.getAllByRole('link', { name: /View Best Result/ })).toHaveLength(30)
+    expect(screen.getAllByRole('link', { name: /View Best Result/ })[29]).toHaveAttribute(
+      'href',
+      '/attempts/attempt-30',
+    )
+  })
+
+  it('offers another recording when durable progress no longer has a viewable best attempt', () => {
+    const progress = buildProgress([86])
+    const first = progress.lessons[0]
+    if (!first) throw new Error('Missing first lesson.')
+
+    renderLadder({
+      ...progress,
+      lessons: [{ ...first, bestAttemptId: null }, ...progress.lessons.slice(1)],
+    })
+
+    expect(screen.getByRole('link', { name: /Lesson 1.*Practice Again/s })).toHaveAttribute(
+      'href',
+      '/practice/paths/general-speaking/lessons/general-speaking-beginner-01-skill-1/record',
+    )
   })
 
   it('keeps the ladder narrow-screen stable with wrapping and no fixed content width', () => {

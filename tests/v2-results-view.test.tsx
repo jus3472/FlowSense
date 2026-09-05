@@ -98,6 +98,30 @@ const curriculumResult: StructuredLessonResultModel = {
 }
 
 describe('V2ResultsView', () => {
+  it('shows structured previous attempts as immutable result links', () => {
+    render(
+      <V2ResultsView
+        {...props}
+        payload={payload()}
+        curriculumResult={curriculumResult}
+        previousAttempts={[
+          {
+            attemptId: 'attempt-0',
+            score: null,
+            finishedAt: '2026-09-03T18:15:00.000Z',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Previous attempts' })).toBeInTheDocument()
+    expect(screen.getByText('Overall unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /View unavailable attempt/ })).toHaveAttribute(
+      'href',
+      '/attempts/attempt-0',
+    )
+  })
+
   it('renders a complete result with all categories, audio, and one primary retry action', () => {
     render(<V2ResultsView {...props} payload={payload()} />)
     for (const label of ['Fluency', 'Clarity', 'Vocabulary', 'Grammar', 'Structure', 'Delivery']) {

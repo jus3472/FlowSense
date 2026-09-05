@@ -1,6 +1,7 @@
 import type { Route } from 'next'
 import { CurriculumStars } from '@/components/curriculum/stars'
 import { AudioPlayer } from '@/components/record/audio-player'
+import { PreviousAttempts } from '@/components/results/previous-attempts'
 import { TranscriptPanel } from '@/components/results/transcript-panel'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -9,6 +10,7 @@ import { ScoreProgress } from '@/components/ui/score-progress'
 import type { TranscriptWord } from '@/lib/deepgram/parse'
 import type { StructuredLessonResultModel } from '@/lib/curriculum/result'
 import type { RetryComparison } from '@/lib/results/retry-comparison'
+import type { LessonAttemptHistoryItem } from '@/lib/results/lesson-attempt-history'
 import {
   type V3MetricDetailView,
   type V3MetricFindingView,
@@ -40,6 +42,7 @@ interface V3ResultsViewProps {
   payload: StoredV3ScorePayload
   comparison?: RetryComparison | null
   previousAttemptId?: string | null
+  previousAttempts?: readonly LessonAttemptHistoryItem[]
   curriculumResult?: StructuredLessonResultModel | null
 }
 
@@ -159,6 +162,7 @@ export function V3ResultsView({
   payload,
   comparison = null,
   previousAttemptId = null,
+  previousAttempts = [],
   curriculumResult = null,
 }: V3ResultsViewProps) {
   const complete = payload.total_earned_points !== null
@@ -380,28 +384,26 @@ export function V3ResultsView({
             View previous response
           </ButtonLink>
         ) : null}
-
-        {curriculumResult ? (
-          <div className="flex flex-col gap-2">
-            <ButtonLink href={curriculumResult.primaryAction.href} size="lg" fullWidth>
-              {curriculumResult.primaryAction.label}
-            </ButtonLink>
-            {curriculumResult.secondaryAction ? (
-              <ButtonLink
-                href={curriculumResult.secondaryAction.href}
-                variant="secondary"
-                fullWidth
-              >
-                {curriculumResult.secondaryAction.label}
-              </ButtonLink>
-            ) : null}
-          </div>
-        ) : (
-          <ButtonLink href={`/record?retry=${attemptId}`} size="lg" fullWidth>
-            Try Again
-          </ButtonLink>
-        )}
       </section>
+
+      <PreviousAttempts attempts={previousAttempts} />
+
+      {curriculumResult ? (
+        <div className="flex flex-col gap-2">
+          <ButtonLink href={curriculumResult.primaryAction.href} size="lg" fullWidth>
+            {curriculumResult.primaryAction.label}
+          </ButtonLink>
+          {curriculumResult.secondaryAction ? (
+            <ButtonLink href={curriculumResult.secondaryAction.href} variant="secondary" fullWidth>
+              {curriculumResult.secondaryAction.label}
+            </ButtonLink>
+          ) : null}
+        </div>
+      ) : (
+        <ButtonLink href={`/record?retry=${attemptId}`} size="lg" fullWidth>
+          Try Again
+        </ButtonLink>
+      )}
     </div>
   )
 }

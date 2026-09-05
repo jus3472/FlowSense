@@ -8,7 +8,7 @@ import type {
   CurriculumPathProgress,
   PathSlug,
 } from '@/lib/curriculum/contracts'
-import { curriculumLessonHref, curriculumLessonRecordHref } from '@/lib/curriculum/routes'
+import { attemptResultHref, curriculumLessonRecordHref } from '@/lib/curriculum/routes'
 import { PASSING_SCORE } from '@/lib/curriculum/thresholds'
 import { cn } from '@/lib/utils'
 
@@ -90,7 +90,9 @@ function LessonCard({
             ? 'Try Again'
             : lesson.state === 'available'
               ? 'Start'
-              : 'View lesson'}
+              : lesson.bestAttemptId
+                ? 'View Best Result'
+                : 'Practice Again'}
         </span>
       )}
     </div>
@@ -103,8 +105,8 @@ function LessonCard({
   return (
     <Link
       href={
-        lesson.state === 'passed'
-          ? curriculumLessonHref(pathSlug, lesson.lesson.slug)
+        lesson.state === 'passed' && lesson.bestAttemptId
+          ? attemptResultHref(lesson.bestAttemptId)
           : curriculumLessonRecordHref(
               pathSlug,
               lesson.lesson.slug,

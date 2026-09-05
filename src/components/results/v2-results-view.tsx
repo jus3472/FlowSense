@@ -1,6 +1,7 @@
 import { AudioPlayer } from '@/components/record/audio-player'
 import type { Route } from 'next'
 import { LessonResultSummary } from '@/components/curriculum/lesson-result-summary'
+import { PreviousAttempts } from '@/components/results/previous-attempts'
 import { TranscriptPanel } from '@/components/results/transcript-panel'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -18,6 +19,7 @@ import {
 import type { V2ScorePayload } from '@/lib/scoring/v2/assemble'
 import type { RetryComparison } from '@/lib/results/retry-comparison'
 import type { StructuredLessonResultModel } from '@/lib/curriculum/result'
+import type { LessonAttemptHistoryItem } from '@/lib/results/lesson-attempt-history'
 
 interface V2ResultsViewProps {
   attemptId: string
@@ -29,6 +31,7 @@ interface V2ResultsViewProps {
   payload: V2ScorePayload
   comparison?: RetryComparison | null
   previousAttemptId?: string | null
+  previousAttempts?: readonly LessonAttemptHistoryItem[]
   curriculumResult?: StructuredLessonResultModel | null
 }
 
@@ -42,6 +45,7 @@ export function V2ResultsView({
   payload,
   comparison = null,
   previousAttemptId = null,
+  previousAttempts = [],
   curriculumResult = null,
 }: V2ResultsViewProps) {
   const strongest = strongestV2Category(payload)
@@ -171,6 +175,7 @@ export function V2ResultsView({
 
       {transcript ? <TranscriptPanel segments={segments} /> : null}
       {audioUrl ? <AudioPlayer src={audioUrl} durationMs={durationMs} /> : null}
+      <PreviousAttempts attempts={previousAttempts} />
       {!curriculumResult ? (
         <ButtonLink href={`/record?retry=${attemptId}`} size="lg" fullWidth>
           Try Again

@@ -22,6 +22,7 @@ import { loadStructuredLessonResultForUser } from '@/lib/curriculum/result-serve
 import { isUuid } from '@/lib/practice/session'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { readAttemptResult, storedTranscriptWords } from '@/lib/results/attempt-result'
+import { loadLessonAttemptHistoryForUser } from '@/lib/results/lesson-attempt-history'
 import {
   compareRetryResults,
   compareV3RetryResults,
@@ -234,6 +235,26 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     )
   }
 
+  const loadPreviousAttempts = async () => {
+    if (!attempt.lesson_id) return []
+    const history = await loadLessonAttemptHistoryForUser(
+      supabase,
+      user.id,
+      attempt.lesson_id,
+      attempt.id,
+    )
+    if (history.status === 'failure') {
+      logAttemptDiagnostic(
+        'load_lesson_attempt_history',
+        'lesson_attempt_history_read_failed',
+        attempt.id,
+        history.error,
+      )
+      return []
+    }
+    return history.data
+  }
+
   if (result.kind === 'v3') {
     let comparison = null
     let previousAttemptId: string | null = null
@@ -303,6 +324,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         ? (attempt.metrics as { practice: { additional_context: string } }).practice
             .additional_context
         : null
+    const previousAttemptsPromise = loadPreviousAttempts()
     const curriculumResult = attempt.lesson_id
       ? await loadStructuredLessonResultForUser(supabase, user.id, {
           lessonId: attempt.lesson_id,
@@ -316,6 +338,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
           snapshotScore: result.payload.total_earned_points,
         })
       : null
+    const previousAttempts = await previousAttemptsPromise
 
     return (
       <V3ResultsView
@@ -330,6 +353,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         payload={result.payload}
         comparison={comparison}
         previousAttemptId={previousAttemptId}
+        previousAttempts={previousAttempts}
         curriculumResult={curriculumResult?.status === 'ready' ? curriculumResult.data : null}
       />
     )
@@ -408,6 +432,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         ? (attempt.metrics as { practice: { additional_context: string } }).practice
             .additional_context
         : null
+    const previousAttemptsPromise = loadPreviousAttempts()
     const curriculumResult = attempt.lesson_id
       ? await loadStructuredLessonResultForUser(supabase, user.id, {
           lessonId: attempt.lesson_id,
@@ -421,6 +446,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
           snapshotScore: result.payload.total_earned_points,
         })
       : null
+    const previousAttempts = await previousAttemptsPromise
     return resultWithAudioStatus(
       <V2ResultsView
         attemptId={attempt.id}
@@ -432,6 +458,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         payload={result.payload}
         comparison={comparison}
         previousAttemptId={previousAttemptId}
+        previousAttempts={previousAttempts}
         curriculumResult={curriculumResult?.status === 'ready' ? curriculumResult.data : null}
       />,
       audioUnavailable,
@@ -481,6 +508,8 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     return resultLoadError()
   }
 
+  const previousAttempts = await loadPreviousAttempts()
+
   return resultWithAudioStatus(
     <ResultsView
       attempt={result.attempt}
@@ -491,6 +520,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
           quote: row.quote,
         })),
       )}
+      previousAttempts={previousAttempts}
     />,
     audioUnavailable,
   )

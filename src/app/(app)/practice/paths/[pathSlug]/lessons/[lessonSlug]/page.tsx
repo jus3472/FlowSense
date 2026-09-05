@@ -2,9 +2,9 @@ import type { Metadata } from 'next'
 import { notFound, redirect } from 'next/navigation'
 import {
   CurriculumLessonDeniedState,
-  CurriculumLessonDetail,
   CurriculumLessonFailureState,
 } from '@/components/curriculum/lesson-detail'
+import { attemptResultHref, curriculumLessonRecordHref } from '@/lib/curriculum/routes'
 import { loadAuthenticatedCurriculumLessonAccess } from '@/lib/curriculum/server'
 
 export const metadata: Metadata = { title: 'Lesson' }
@@ -25,5 +25,7 @@ export default async function CurriculumLessonPage({
   }
   if (outcome.status === 'failure') return <CurriculumLessonFailureState />
 
-  return <CurriculumLessonDetail data={outcome.data} />
+  const { lesson, session } = outcome.data
+  if (lesson.bestAttemptId) redirect(attemptResultHref(lesson.bestAttemptId))
+  redirect(curriculumLessonRecordHref(session.pathSlug, session.lessonSlug))
 }

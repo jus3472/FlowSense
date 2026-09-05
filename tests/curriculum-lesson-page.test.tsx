@@ -2,7 +2,6 @@
 
 import { fireEvent, render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
-import type { AnchorHTMLAttributes, ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CurriculumLessonAccessOutcome } from '@/lib/curriculum/server'
 
@@ -13,19 +12,6 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
 }))
 
-vi.mock('next/link', () => ({
-  default: function MockLink({
-    href,
-    children,
-    ...props
-  }: AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; children: ReactNode }) {
-    return (
-      <a href={href} {...props}>
-        {children}
-      </a>
-    )
-  },
-}))
 vi.mock('next/navigation', () => ({
   notFound: mocks.notFound,
   redirect: mocks.redirect,
@@ -42,11 +28,14 @@ type AllowedLesson = AllowedOutcome['data']['lesson']
 
 const PATH_SLUG = 'interviews'
 const LESSON_SLUG = 'interviews-beginner-04-give-example'
+const BEST_ATTEMPT_ID = '40000000-0000-4000-8000-000000000004'
+const NOT_FOUND = new Error('NEXT_HTTP_ERROR_FALLBACK;404')
 
-function allowedOutcome(
-  lessonOverrides: Partial<AllowedLesson> = {},
-  definitionOverrides: Partial<AllowedLesson['lesson']> = {},
-): AllowedOutcome {
+function redirectError(href: string) {
+  return new Error(`NEXT_REDIRECT;${href}`)
+}
+
+function allowedOutcome(lessonOverrides: Partial<AllowedLesson> = {}): AllowedOutcome {
   return {
     status: 'allowed',
     data: {
@@ -74,7 +63,6 @@ function allowedOutcome(
           checkpoint: false,
           promptId: '20000000-0000-4000-8000-000000000004',
           active: true,
-          ...definitionOverrides,
         },
         state: 'available',
         bestScore: null,
@@ -84,134 +72,95 @@ function allowedOutcome(
         attempted: false,
         attemptStatus: 'none',
         checkpoint: false,
-        previousLesson: {
-          id: '10000000-0000-4000-8000-000000000003',
-          slug: 'interviews-beginner-03-answer-directly',
-          pathSlug: 'interviews',
-          level: 'beginner',
-          position: 3,
-        },
-        nextLesson: {
-          id: '10000000-0000-4000-8000-000000000005',
-          slug: 'interviews-beginner-05-explain-choice',
-          pathSlug: 'interviews',
-          level: 'beginner',
-          position: 5,
-        },
+        previousLesson: null,
+        nextLesson: null,
         ...lessonOverrides,
       },
     },
   }
 }
 
-async function renderPage(
-  outcome: CurriculumLessonAccessOutcome,
-  params = { pathSlug: PATH_SLUG, lessonSlug: LESSON_SLUG },
-) {
+async function pageFor(outcome: CurriculumLessonAccessOutcome) {
   mocks.lessonAccess.mockResolvedValueOnce(outcome)
-  const page = await CurriculumLessonPage({ params: Promise.resolve(params) })
-  if (page) render(page)
+  return CurriculumLessonPage({
+    params: Promise.resolve({ pathSlug: PATH_SLUG, lessonSlug: LESSON_SLUG }),
+  })
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.notFound.mockImplementation(() => {
+    throw NOT_FOUND
+  })
+  mocks.redirect.mockImplementation((href: string) => {
+    throw redirectError(href)
+  })
 })
 
-describe('available curriculum lesson page', () => {
-  it('renders the focused authoritative pre-recording details for a fresh lesson', async () => {
-    await renderPage(allowedOutcome())
+describe('lesson URL compatibility navigation', () => {
+  it('redirects an uncompleted lesson directly to its recording flow', async () => {
+    await expect(pageFor(allowedOutcome())).rejects.toThrow(
+      `NEXT_REDIRECT;/practice/paths/${PATH_SLUG}/lessons/${LESSON_SLUG}/record`,
+    )
 
     expect(mocks.lessonAccess).toHaveBeenCalledExactlyOnceWith(PATH_SLUG, LESSON_SLUG)
-    expect(screen.getByRole('link', { name: 'Interviews' })).toHaveAttribute(
-      'href',
-      '/practice/paths/interviews',
-    )
-    expect(
-      screen.getByRole('heading', { level: 1, name: 'Beginner · Lesson 4 of 10' }),
-    ).toBeInTheDocument()
-    expect(screen.queryByText('Give a simple example')).not.toBeInTheDocument()
-    expect(
-      screen.getByText('Practice supporting an answer with one specific example.'),
-    ).toBeInTheDocument()
-    expect(screen.getByText('Tell me about a time you solved a small problem.')).toBeInTheDocument()
-    expect(screen.getByText('Target: about 1 minute')).toBeInTheDocument()
-    expect(screen.getByText('Pass: 70')).toBeInTheDocument()
-    expect(screen.getByText('Ready to start')).toBeInTheDocument()
-
-    expect(screen.getByRole('link', { name: 'Start Lesson' })).toHaveAttribute(
-      'href',
+    expect(mocks.redirect).toHaveBeenCalledExactlyOnceWith(
       `/practice/paths/${PATH_SLUG}/lessons/${LESSON_SLUG}/record`,
     )
   })
 
-  it('shows provider-neutral activity without fabricating a score or stars', async () => {
-    await renderPage(
-      allowedOutcome({ attempted: true, attemptStatus: 'neutral', bestScore: null, stars: 0 }),
-    )
+  it('redirects provider-neutral activity to a fresh recording without inventing a best', async () => {
+    await expect(
+      pageFor(allowedOutcome({ attempted: true, attemptStatus: 'neutral' })),
+    ).rejects.toThrow(/\/record$/)
 
-    expect(screen.getByText('You have activity here, but no score.')).toBeInTheDocument()
-    expect(screen.queryByText(/Best:/)).not.toBeInTheDocument()
-    expect(screen.queryByRole('img', { name: /stars/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Start Lesson' })).toHaveAttribute(
-      'href',
+    expect(mocks.redirect).toHaveBeenCalledExactlyOnceWith(
       `/practice/paths/${PATH_SLUG}/lessons/${LESSON_SLUG}/record`,
     )
   })
-})
 
-describe('scored curriculum lesson page', () => {
-  it('shows retry state, exact best score, accessible stars, and the pass requirement', async () => {
-    await renderPage(
-      allowedOutcome({
-        state: 'retry_required',
-        bestScore: 64,
-        bestAttemptId: '40000000-0000-4000-8000-000000000004',
-        stars: 0,
-        attempted: true,
-        attemptStatus: 'scored',
-      }),
-    )
+  it.each([
+    { state: 'retry_required', score: 64, passed: false },
+    { state: 'passed', score: 88, passed: true },
+  ] as const)('redirects a $state lesson to its authoritative best result', async (testCase) => {
+    await expect(
+      pageFor(
+        allowedOutcome({
+          state: testCase.state,
+          bestScore: testCase.score,
+          bestAttemptId: BEST_ATTEMPT_ID,
+          attempted: true,
+          attemptStatus: 'scored',
+          passed: testCase.passed,
+        }),
+      ),
+    ).rejects.toThrow(`NEXT_REDIRECT;/attempts/${BEST_ATTEMPT_ID}`)
 
-    expect(screen.getByText('Retry required')).toBeInTheDocument()
-    expect(screen.getByText('64')).toBeInTheDocument()
-    expect(screen.getByRole('img', { name: '0 of 3 stars' })).toBeInTheDocument()
-    expect(screen.getByText('Need 70 to continue.')).toBeInTheDocument()
-    expect(screen.getByText('Pass: 70')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Try Again' })).toHaveAttribute(
-      'href',
-      `/practice/paths/${PATH_SLUG}/lessons/${LESSON_SLUG}/record?retry=40000000-0000-4000-8000-000000000004`,
-    )
+    expect(mocks.redirect).toHaveBeenCalledExactlyOnceWith(`/attempts/${BEST_ATTEMPT_ID}`)
   })
 
-  it('shows a passed lesson with its best score and stars', async () => {
-    await renderPage(
-      allowedOutcome({
-        state: 'passed',
-        bestScore: 86,
-        bestAttemptId: '40000000-0000-4000-8000-000000000004',
-        stars: 2,
-        passed: true,
-        attempted: true,
-        attemptStatus: 'scored',
-      }),
-    )
-
-    expect(screen.getByText('Passed')).toBeInTheDocument()
-    expect(screen.getByText('86')).toBeInTheDocument()
-    expect(screen.getByRole('img', { name: '2 of 3 stars' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Practice Again' })).toHaveAttribute(
-      'href',
-      `/practice/paths/${PATH_SLUG}/lessons/${LESSON_SLUG}/record?retry=40000000-0000-4000-8000-000000000004`,
-    )
+  it('uses the recording flow when a deleted best result leaves only durable score progress', async () => {
+    await expect(
+      pageFor(
+        allowedOutcome({
+          state: 'passed',
+          bestScore: 88,
+          bestAttemptId: null,
+          attempted: true,
+          attemptStatus: 'scored',
+          passed: true,
+        }),
+      ),
+    ).rejects.toThrow(/\/record$/)
   })
 })
 
 describe('curriculum lesson access outcomes', () => {
   it('renders a locked direct URL without a usable lesson action', async () => {
-    await renderPage({ status: 'denied', reason: 'locked' })
+    const page = await pageFor({ status: 'denied', reason: 'locked' })
+    render(page)
 
     expect(screen.getByRole('heading', { name: 'Lesson locked' })).toBeInTheDocument()
-    expect(screen.getByText('Pass the previous lesson to unlock this lesson.')).toBeInTheDocument()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
   })
@@ -220,7 +169,8 @@ describe('curriculum lesson access outcomes', () => {
     ['path_mismatch', 'This lesson does not belong to this path.'],
     ['inactive', 'This lesson is not available.'],
   ] as const)('keeps a %s lesson unavailable without an action', async (reason, message) => {
-    await renderPage({ status: 'denied', reason })
+    const page = await pageFor({ status: 'denied', reason })
+    render(page)
 
     expect(screen.getByRole('heading', { name: 'Lesson unavailable' })).toBeInTheDocument()
     expect(screen.getByText(message)).toBeInTheDocument()
@@ -232,68 +182,41 @@ describe('curriculum lesson access outcomes', () => {
     { status: 'not_found', resource: 'path' },
     { status: 'not_found', resource: 'lesson' },
   ] as const)('uses the not-found boundary for a missing $resource', async (outcome) => {
-    await renderPage(outcome)
-
+    await expect(pageFor(outcome)).rejects.toBe(NOT_FOUND)
     expect(mocks.notFound).toHaveBeenCalledTimes(1)
-    expect(document.body).toBeEmptyDOMElement()
   })
 
   it('renders a retryable server query failure that does not look locked', async () => {
-    await renderPage({ status: 'failure', reason: 'query', operation: 'prompt' })
+    const page = await pageFor({ status: 'failure', reason: 'query', operation: 'prompt' })
+    render(page)
 
     expect(screen.getByRole('heading', { name: 'Lesson did not load' })).toBeInTheDocument()
     expect(screen.queryByText(/locked/i)).not.toBeInTheDocument()
     const retry = screen.getByRole('button', { name: 'Try again' })
-    expect(retry).toBeEnabled()
     fireEvent.click(retry)
     expect(mocks.refresh).toHaveBeenCalledTimes(1)
   })
 
   it('redirects an unauthenticated request to login', async () => {
-    await renderPage({ status: 'unauthenticated' })
-
+    await expect(pageFor({ status: 'unauthenticated' })).rejects.toThrow('NEXT_REDIRECT;/login')
     expect(mocks.redirect).toHaveBeenCalledExactlyOnceWith('/login')
-    expect(document.body).toBeEmptyDOMElement()
   })
 })
 
-describe('lesson page boundary and mobile layout', () => {
-  it('uses only the authoritative lesson access boundary and no record query handoff', () => {
+describe('lesson page boundary', () => {
+  it('keeps authorization in the route and removes the standalone lesson-detail screen', () => {
     const pageSource = readFileSync(
       'src/app/(app)/practice/paths/[pathSlug]/lessons/[lessonSlug]/page.tsx',
       'utf8',
     )
-    const detailSource = readFileSync('src/components/curriculum/lesson-detail.tsx', 'utf8')
+    const statesSource = readFileSync('src/components/curriculum/lesson-detail.tsx', 'utf8')
 
-    expect(pageSource).toContain('const { pathSlug, lessonSlug } = await params')
     expect(pageSource).toContain('loadAuthenticatedCurriculumLessonAccess(pathSlug, lessonSlug)')
+    expect(pageSource).toContain('attemptResultHref(lesson.bestAttemptId)')
+    expect(pageSource).toContain('curriculumLessonRecordHref(session.pathSlug, session.lessonSlug)')
     expect(pageSource).not.toContain('createClient')
-    expect(detailSource).not.toContain('/record?prompt=')
-    expect(detailSource).not.toContain('recordHrefForPrompt')
-  })
-
-  it('keeps long lesson and prompt text wrapping inside the narrow column', async () => {
-    await renderPage(
-      allowedOutcome(
-        {},
-        {
-          title: 'A long lesson title that wraps instead of making the page wider than the screen',
-          skillFocus: 'A long skill description that remains readable on a narrow screen.',
-        },
-      ),
-    )
-
-    expect(screen.getByRole('article')).toHaveClass('min-w-0')
-    expect(
-      screen.queryByText(
-        'A long lesson title that wraps instead of making the page wider than the screen',
-      ),
-    ).not.toBeInTheDocument()
-    expect(
-      screen.getByText('A long skill description that remains readable on a narrow screen.'),
-    ).toHaveClass('break-words')
-    expect(screen.getByText('Tell me about a time you solved a small problem.')).toHaveClass(
-      'break-words',
-    )
+    expect(pageSource).not.toContain('CurriculumLessonDetail')
+    expect(statesSource).not.toContain('Your prompt')
+    expect(statesSource).not.toContain('Lesson state')
   })
 })

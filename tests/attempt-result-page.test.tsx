@@ -5,6 +5,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
+  loadLessonAttemptHistoryForUser: vi.fn(),
   loadStructuredLessonResultForUser: vi.fn(),
   logAttemptDiagnostic: vi.fn(),
   notFound: vi.fn(),
@@ -33,18 +34,28 @@ vi.mock('@/lib/results/attempt-result', () => ({
 vi.mock('@/lib/curriculum/result-server', () => ({
   loadStructuredLessonResultForUser: mocks.loadStructuredLessonResultForUser,
 }))
+vi.mock('@/lib/results/lesson-attempt-history', () => ({
+  loadLessonAttemptHistoryForUser: mocks.loadLessonAttemptHistoryForUser,
+}))
 
 vi.mock('@/components/results/results-view', () => ({
   ResultsView: ({
     attempt,
     initialDisputes,
+    previousAttempts,
   }: {
     attempt: { audioUrl: string | null }
     initialDisputes: Array<{ note_type: string; quote: string | null }>
+    previousAttempts?: readonly { attemptId: string }[]
   }) => (
     <div
       data-audio={attempt.audioUrl ?? 'none'}
       data-disputes={JSON.stringify(initialDisputes)}
+      data-history={
+        previousAttempts && previousAttempts.length > 0
+          ? previousAttempts.map((item) => item.attemptId).join(',')
+          : 'none'
+      }
       data-testid="legacy-result"
     >
       Legacy result
@@ -58,18 +69,25 @@ vi.mock('@/components/results/v2-results-view', () => ({
     payload,
     comparison,
     previousAttemptId,
+    previousAttempts,
     curriculumResult,
   }: {
     audioUrl: string | null
     payload: { fixture: string }
     comparison?: unknown
     previousAttemptId?: string | null
+    previousAttempts?: readonly { attemptId: string }[]
     curriculumResult?: { lesson: { title: string } } | null
   }) => (
     <div
       data-audio={audioUrl ?? 'none'}
       data-comparison={comparison ? 'shown' : 'none'}
       data-previous={previousAttemptId ?? 'none'}
+      data-history={
+        previousAttempts && previousAttempts.length > 0
+          ? previousAttempts.map((item) => item.attemptId).join(',')
+          : 'none'
+      }
       data-curriculum={curriculumResult?.lesson.title ?? 'none'}
       data-testid="v2-result"
     >
@@ -84,16 +102,23 @@ vi.mock('@/components/results/v3-results-view', () => ({
     payload,
     curriculumResult,
     words,
+    previousAttempts,
   }: {
     audioUrl: string | null
     payload: { fixture: string }
     curriculumResult?: { lesson: { title: string } } | null
     words?: readonly { word: string }[]
+    previousAttempts?: readonly { attemptId: string }[]
   }) => (
     <div
       data-audio={audioUrl ?? 'none'}
       data-curriculum={curriculumResult?.lesson.title ?? 'none'}
       data-words={words?.map((word) => word.word).join(',') ?? 'none'}
+      data-history={
+        previousAttempts && previousAttempts.length > 0
+          ? previousAttempts.map((item) => item.attemptId).join(',')
+          : 'none'
+      }
       data-testid="v3-result"
     >
       {payload.fixture}
@@ -248,6 +273,7 @@ async function renderPage(id = ATTEMPT_ID) {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.reconcileCurrentUserStaleAttempts.mockResolvedValue({ status: 'ready', reconciled: [] })
+  mocks.loadLessonAttemptHistoryForUser.mockResolvedValue({ status: 'ready', data: [] })
   mocks.loadStructuredLessonResultForUser.mockResolvedValue({ status: 'not_found' })
   mocks.storedTranscriptWords.mockReturnValue([])
   mocks.notFound.mockImplementation(() => {
@@ -451,11 +477,22 @@ describe('owned attempt result loading', () => {
       status: 'ready',
       data: { lesson: { title: 'Handling a setback' } },
     })
+    mocks.loadLessonAttemptHistoryForUser.mockResolvedValue({
+      status: 'ready',
+      data: [
+        {
+          attemptId: PARENT_ID,
+          score: 72,
+          finishedAt: '2026-08-26T12:00:00.000Z',
+        },
+      ],
+    })
 
     await renderPage()
 
     expect(screen.getByTestId('v3-result')).toHaveAttribute('data-curriculum', 'Handling a setback')
     expect(screen.getByTestId('v3-result')).toHaveAttribute('data-words', 'private')
+    expect(screen.getByTestId('v3-result')).toHaveAttribute('data-history', PARENT_ID)
     expect(mocks.storedTranscriptWords).toHaveBeenCalledOnce()
     expect(mocks.loadStructuredLessonResultForUser).toHaveBeenCalledWith(setup.supabase, USER_ID, {
       lessonId: LESSON_ID,
@@ -468,6 +505,12 @@ describe('owned attempt result loading', () => {
       snapshotRubricVersion: 'v3',
       snapshotScore: 80,
     })
+    expect(mocks.loadLessonAttemptHistoryForUser).toHaveBeenCalledExactlyOnceWith(
+      setup.supabase,
+      USER_ID,
+      LESSON_ID,
+      ATTEMPT_ID,
+    )
   })
 
   it('adds owner-scoped structured context from lesson_id to a v2 result', async () => {
@@ -539,6 +582,39 @@ describe('owned attempt result loading', () => {
 
     expect(screen.getByTestId('v2-result')).toHaveTextContent('Partial v2 result')
     expect(screen.getByTestId('v2-result')).toHaveAttribute('data-curriculum', 'none')
+  })
+
+  it('keeps custom prompt results out of structured lesson history', async () => {
+    const setup = client({
+      primary: { data: attempt({ lesson_id: null, section_scores: 'v3' }), error: null },
+    })
+    mocks.createClient.mockResolvedValue(setup.supabase)
+
+    await renderPage()
+
+    expect(screen.getByTestId('v3-result')).toHaveAttribute('data-history', 'none')
+    expect(mocks.loadLessonAttemptHistoryForUser).not.toHaveBeenCalled()
+  })
+
+  it('passes structured attempt history to legacy results without changing the snapshot', async () => {
+    const setup = client({
+      primary: { data: attempt({ lesson_id: LESSON_ID, section_scores: 'legacy' }), error: null },
+    })
+    mocks.createClient.mockResolvedValue(setup.supabase)
+    mocks.loadLessonAttemptHistoryForUser.mockResolvedValue({
+      status: 'ready',
+      data: [
+        {
+          attemptId: PARENT_ID,
+          score: 72,
+          finishedAt: '2026-08-26T12:00:00.000Z',
+        },
+      ],
+    })
+
+    await renderPage()
+
+    expect(screen.getByTestId('legacy-result')).toHaveAttribute('data-history', PARENT_ID)
   })
 
   it('passes only exact unique stored legacy findings to the result renderer', async () => {

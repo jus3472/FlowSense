@@ -17,3 +17,7 @@ export function curriculumLessonRecordHref(
   const base = `/practice/paths/${pathSlug}/lessons/${encodeURIComponent(lessonSlug)}/record`
   return `${base}${retryOfAttemptId ? `?retry=${encodeURIComponent(retryOfAttemptId)}` : ''}` as Route
 }
+
+export function attemptResultHref(attemptId: string): Route {
+  return `/attempts/${encodeURIComponent(attemptId)}` as Route
+}

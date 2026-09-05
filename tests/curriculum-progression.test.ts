@@ -10,6 +10,7 @@ import {
 import {
   buildCurriculumPathProgress,
   mergeBestAttempt,
+  selectBestAttempt,
   type LessonAttemptCandidate,
 } from '@/lib/curriculum/progression'
 import {
@@ -244,6 +245,32 @@ describe('curriculum score and retry boundaries', () => {
     expect(lower).toMatchObject({ attemptId: 'current', score: 86 })
     expect(upgraded).toMatchObject({ attemptId: 'higher', score: 92 })
     expect(neutral).toMatchObject({ attemptId: 'current', score: 86 })
+  })
+
+  it('breaks equal-score ties by completion time and then stable attempt id', () => {
+    expect(
+      selectBestAttempt([
+        { attemptId: 'attempt-z', score: 88, finishedAt: '2026-09-03T12:00:00.000Z' },
+        { attemptId: 'attempt-a', score: 88, finishedAt: '2026-09-04T12:00:00.000Z' },
+      ]),
+    ).toMatchObject({ attemptId: 'attempt-a', score: 88 })
+
+    expect(
+      selectBestAttempt([
+        { attemptId: 'attempt-a', score: 88, finishedAt: '2026-09-04T12:00:00.000Z' },
+        { attemptId: 'attempt-b', score: 88, finishedAt: '2026-09-04T12:00:00.000Z' },
+      ]),
+    ).toMatchObject({ attemptId: 'attempt-b', score: 88 })
+  })
+
+  it('never lets unavailable or malformed scores become the best attempt', () => {
+    expect(
+      selectBestAttempt([
+        { attemptId: 'valid', score: 72, finishedAt: '2026-09-03T12:00:00.000Z' },
+        { attemptId: 'neutral', score: null, finishedAt: '2026-09-05T12:00:00.000Z' },
+        { attemptId: 'malformed', score: 101, finishedAt: '2026-09-06T12:00:00.000Z' },
+      ]),
+    ).toMatchObject({ attemptId: 'valid', score: 72 })
   })
 })
 

@@ -591,7 +591,7 @@ test('structured lessons retry thresholds without reducing durable progress', as
 
   const firstLesson = '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1'
   await page.goto(firstLesson)
-  await page.getByRole('link', { name: 'Start Lesson' }).click()
+  await expect(page).toHaveURL(/interviews-beginner-01-skill-1\/record$/)
   await recordOne(page)
   await expect(page.getByRole('heading', { name: 'Lesson not passed' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Continue' })).toHaveCount(0)
@@ -637,6 +637,28 @@ test('structured lessons retry thresholds without reducing durable progress', as
   })
   expect(passedState.practiceActivityDays).toHaveLength(1)
 
+  await expect(page.getByRole('heading', { name: 'Previous attempts' })).toBeVisible()
+  await expect(
+    page.locator(`a[href="/attempts/${failedAttempt.id}"]`).filter({ hasText: '64 / 100' }),
+  ).toBeVisible()
+
+  await page.goto('/practice/paths/interviews')
+  const completedLesson = page.getByRole('link', { name: /Lesson 1.*View Best Result/s }).first()
+  await expect(completedLesson).toHaveAttribute('href', `/attempts/${passedAttempt.id}`)
+  await completedLesson.click()
+  await expect(page).toHaveURL(new RegExp(`/attempts/${passedAttempt.id}$`))
+  await expect(page.getByRole('heading', { name: 'Previous attempts' })).toBeVisible()
+
+  await page
+    .locator(`a[href="/attempts/${failedAttempt.id}"]`)
+    .filter({ hasText: '64 / 100' })
+    .click()
+  await expect(page).toHaveURL(new RegExp(`/attempts/${failedAttempt.id}$`))
+  await expect(page.getByRole('heading', { name: 'Previous attempts' })).toBeVisible()
+  await expect(
+    page.locator(`a[href="/attempts/${passedAttempt.id}"]`).filter({ hasText: '74 / 100' }),
+  ).toBeVisible()
+
   await page.goto('/home')
   await expect(page.getByText('1 / 30 lessons passed', { exact: true })).toBeVisible()
   await expect(page.getByText('Beginner · Lesson 2 of 10', { exact: true })).toBeVisible()
@@ -655,14 +677,39 @@ test('structured lessons retry thresholds without reducing durable progress', as
   await expect(page.getByText('Passed', { exact: true })).toHaveCount(1)
   await expect(page.getByText('Not passed', { exact: true })).toHaveCount(1)
 
+  await page.locator(`a[href="/attempts/${passedAttempt.id}"]`).click()
+  await expect(page.getByRole('heading', { name: 'Previous attempts' })).toBeVisible()
+  await expect(
+    page.locator(`a[href="/attempts/${failedAttempt.id}"]`).filter({ hasText: '64 / 100' }),
+  ).toBeVisible()
+
   await page.goto(firstLesson)
-  await page.getByRole('link', { name: 'Practice Again' }).click()
+  await expect(page).toHaveURL(new RegExp(`/attempts/${passedAttempt.id}$`))
+  await page.getByRole('link', { name: 'Retry for 3 stars' }).click()
   await recordOne(page)
   await expect(page.getByText('Best: 86')).toBeVisible()
   await expect(page.getByLabel('2 of 3 stars').first()).toBeVisible()
   await page.getByRole('link', { name: 'Retry for 3 stars' }).click()
   await recordOne(page)
   await expect(page.getByText('Best: 86')).toBeVisible()
+
+  const lowerRetryState = await currentState(request)
+  const attempt86 = attemptAt(lowerRetryState, 2)
+  const attempt72 = attemptAt(lowerRetryState, 3)
+  expect(attempt72).toMatchObject({
+    score: 72,
+    lesson_id: failedAttempt.lesson_id,
+    retry_of_attempt_id: attempt86.id,
+  })
+  expect(lessonBest(lowerRetryState, failedAttempt.lesson_id)).toMatchObject({
+    best_score: 86,
+    best_attempt_id: attempt86.id,
+  })
+  await page.goto('/practice/paths/interviews')
+  await expect(
+    page.getByRole('link', { name: /Lesson 1.*View Best Result/s }).first(),
+  ).toHaveAttribute('href', `/attempts/${attempt86.id}`)
+  await page.goto(`/attempts/${attempt72.id}`)
   await page.getByRole('link', { name: 'Retry for 3 stars' }).click()
   await recordOne(page)
   await expect(page.getByText('Best: 92')).toBeVisible()
@@ -671,14 +718,7 @@ test('structured lessons retry thresholds without reducing durable progress', as
   await expect(page.getByRole('link', { name: 'Retry for 3 stars' })).toHaveCount(0)
 
   const upgradedRetryState = await currentState(request)
-  const attempt86 = attemptAt(upgradedRetryState, 2)
-  const attempt72 = attemptAt(upgradedRetryState, 3)
   const attempt92 = attemptAt(upgradedRetryState, 4)
-  expect(attempt72).toMatchObject({
-    score: 72,
-    lesson_id: failedAttempt.lesson_id,
-    retry_of_attempt_id: attempt86.id,
-  })
   expect(attempt92).toMatchObject({
     score: 92,
     lesson_id: failedAttempt.lesson_id,
@@ -689,6 +729,11 @@ test('structured lessons retry thresholds without reducing durable progress', as
     best_attempt_id: attempt92.id,
   })
   expect(upgradedRetryState.practiceActivityDays).toHaveLength(1)
+
+  await page.goto('/practice/paths/interviews')
+  await expect(
+    page.getByRole('link', { name: /Lesson 1.*View Best Result/s }).first(),
+  ).toHaveAttribute('href', `/attempts/${attempt92.id}`)
 
   await page.goto('/history')
   await expect(page.getByText('Beginner · Lesson 1', { exact: true })).toHaveCount(5)
@@ -719,7 +764,7 @@ test('structured lessons retry thresholds without reducing durable progress', as
 
   await reset(request, true, { pathSlug: 'interviews', passedLessons: 9 })
   await page.goto('/practice/paths/interviews/lessons/interviews-beginner-10-skill-10')
-  await page.getByRole('link', { name: 'Start Lesson' }).click()
+  await expect(page).toHaveURL(/interviews-beginner-10-skill-10\/record$/)
   await recordOne(page)
   await expect(page.getByRole('heading', { name: 'Lesson not passed' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Continue' })).toHaveCount(0)
@@ -764,7 +809,7 @@ test('later checkpoints unlock the next chapter and finish the path', async ({
   const intermediateCheckpoint =
     '/practice/paths/interviews/lessons/interviews-intermediate-10-skill-10'
   await page.goto(intermediateCheckpoint)
-  await page.getByRole('link', { name: 'Start Lesson' }).click()
+  await expect(page).toHaveURL(/interviews-intermediate-10-skill-10\/record$/)
   await recordOne(page)
   await expect(page.getByRole('heading', { name: 'Lesson not passed' })).toBeVisible()
   await page.goto('/practice/paths/interviews/lessons/interviews-advanced-01-skill-1')
@@ -780,7 +825,7 @@ test('later checkpoints unlock the next chapter and finish the path', async ({
 
   await reset(request, true, { pathSlug: 'interviews', passedLessons: 29 })
   await page.goto('/practice/paths/interviews/lessons/interviews-advanced-10-skill-10')
-  await page.getByRole('link', { name: 'Start Lesson' }).click()
+  await expect(page).toHaveURL(/interviews-advanced-10-skill-10\/record$/)
   await recordOne(page)
   await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
   await expect(page.getByText('Path complete', { exact: true })).toBeVisible()
@@ -806,7 +851,7 @@ test('structured provider-neutral retry counts activity without changing progres
 
   const firstLesson = '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1'
   await page.goto(firstLesson)
-  await page.getByRole('link', { name: 'Start Lesson' }).click()
+  await expect(page).toHaveURL(/interviews-beginner-01-skill-1\/record$/)
   await recordOne(page)
   const scoredState = await currentState(request)
   const scoredAttempt = attemptAt(scoredState, 0)
@@ -927,15 +972,7 @@ test('@mobile Tracks stays readable through the lesson boundary', async ({ page 
     true,
   )
 
-  await page.goto('/practice/paths/interviews/lessons/interviews-beginner-01-skill-1')
-  await expect(page.getByRole('heading', { name: 'Beginner · Lesson 1 of 10' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Beginner lesson 1', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('link', { name: 'Start Lesson' })).toBeVisible()
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
-    true,
-  )
-
-  await page.getByRole('link', { name: 'Interviews' }).click()
+  await page.goto('/practice/paths/interviews')
   await expect(page.getByRole('heading', { name: 'Interviews', exact: true })).toBeVisible()
   await expect(page.getByText('Track', { exact: true })).toHaveCount(2)
   await expect(page.getByText('Practice path', { exact: true })).toHaveCount(0)

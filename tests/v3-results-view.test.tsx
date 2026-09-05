@@ -60,6 +60,30 @@ const curriculumResult: StructuredLessonResultModel = {
 }
 
 describe('V3ResultsView', () => {
+  it('shows structured previous attempts near the actions and omits lesson titles', () => {
+    render(
+      <V3ResultsView
+        {...props}
+        payload={v3Snapshot()}
+        curriculumResult={curriculumResult}
+        previousAttempts={[
+          {
+            attemptId: 'attempt-0',
+            score: 72,
+            finishedAt: '2026-09-03T18:15:00.000Z',
+          },
+        ]}
+      />,
+    )
+
+    const history = screen.getByRole('heading', { name: 'Previous attempts' })
+    const link = screen.getByRole('link', { name: /View attempt scored 72 out of 100/ })
+    const action = screen.getByRole('link', { name: 'Continue' })
+    expect(link).toHaveAttribute('href', '/attempts/attempt-0')
+    expect(screen.queryByText('Start clearly')).not.toBeInTheDocument()
+    expect(history.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('renders the required result sections and all ten current metrics in exact order', () => {
     const payload = v3Snapshot()
     const { container } = render(<V3ResultsView {...props} payload={payload} />)
