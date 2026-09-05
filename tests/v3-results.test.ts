@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  AUDIO_THRESHOLDS_BY_MODE,
+  articulationComponent,
+  paceComponent,
+  pausedTimeComponent,
+} from '@/lib/scoring/v3/audio'
+import { V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE } from '@/lib/scoring/v3/content/contracts'
+import {
   v3EvidenceViews,
   v3MeasurementDetails,
   v3MetricDetails,
@@ -119,12 +126,10 @@ describe('v3 result presentation helpers', () => {
         excluded_silence_ms: 3_000,
       },
     }
-    expect(v3MetricSummary('pace', pace, 'practice')).toBe(
-      'You spoke faster than the full-credit range.',
-    )
+    expect(v3MetricSummary('pace', pace, 'practice')).toBe('You spoke faster than the ideal range.')
     expect(v3MetricDetails('pace', pace, 'practice').measurements).toEqual([
       { label: 'Speaking pace', value: '194 WPM', help: null },
-      { label: 'Full-credit range', value: '120 to 175 WPM', help: null },
+      { label: 'Ideal range', value: '120 to 175 WPM', help: null },
       { label: 'Active speaking time', value: '15.8 sec', help: null },
       { label: 'Words spoken', value: '51', help: null },
     ])
@@ -148,6 +153,130 @@ describe('v3 result presentation helpers', () => {
       { label: 'Speaking rhythm', value: 'Varied' },
     ])
     expect(JSON.stringify(energyDetails)).not.toMatch(/frame|bin/i)
+  })
+
+  it.each([
+    [90, 'You spoke slower than the ideal range.'],
+    [120, 'Your pace was in the ideal range.'],
+    [145, 'Your pace was in the ideal range.'],
+    [175, 'Your pace was in the ideal range.'],
+    [190, 'You spoke faster than the ideal range.'],
+  ])('keeps the Pace summary consistent at %s WPM', (wordsPerMinute, expected) => {
+    const component = paceComponent(wordsPerMinute, 'practice')
+    const pace = {
+      ...v3Snapshot({ component }).sections.how_you_sounded.metrics.pace,
+      measurements: { words_per_minute: wordsPerMinute },
+    }
+    expect(v3MetricSummary('pace', pace, 'practice')).toBe(expected)
+  })
+
+  it.each([119.6, 175.4, 177.24350053778096])(
+    'does not describe a rounded full-credit Pace result at %s WPM as outside the range',
+    (wordsPerMinute) => {
+      const component = paceComponent(wordsPerMinute, 'practice')
+      const pace = {
+        ...v3Snapshot({ component }).sections.how_you_sounded.metrics.pace,
+        measurements: { words_per_minute: wordsPerMinute },
+      }
+      expect(pace.earned_points).toBe(pace.max_points)
+      expect(Math.round(wordsPerMinute)).toBeGreaterThanOrEqual(
+        AUDIO_THRESHOLDS_BY_MODE.practice.pace.full_from_wpm,
+      )
+      expect(v3MetricSummary('pace', pace, 'practice')).toBe(
+        'Your pace was close to the ideal range.',
+      )
+      expect(v3MetricSummary('pace', pace, 'practice')).not.toMatch(/faster|slower/)
+    },
+  )
+
+  it('keeps Paused Time, Articulation, and Energy summaries aligned with score bands', () => {
+    const fullPausedComponent = pausedTimeComponent(700, 'practice')
+    const lowPausedComponent = pausedTimeComponent(7_000, 'practice')
+    const fullPaused = v3Snapshot({ component: fullPausedComponent }).sections.how_you_sounded
+      .metrics.paused_time
+    const lowPaused = v3Snapshot({ component: lowPausedComponent }).sections.how_you_sounded.metrics
+      .paused_time
+    const fullArticulationComponent = articulationComponent(0.03, 'practice')
+    const lowArticulationComponent = articulationComponent(0.4, 'practice')
+    const fullArticulation = v3Snapshot({ component: fullArticulationComponent }).sections
+      .how_you_sounded.metrics.articulation
+    const lowArticulation = v3Snapshot({ component: lowArticulationComponent }).sections
+      .how_you_sounded.metrics.articulation
+    const highEnergy = v3Snapshot({ component: 0.9 }).sections.how_you_sounded.metrics.energy
+    const moderateEnergy = v3Snapshot({ component: 0.65 }).sections.how_you_sounded.metrics.energy
+    const lowEnergy = v3Snapshot({ component: 0.3 }).sections.how_you_sounded.metrics.energy
+
+    expect(
+      v3MetricSummary(
+        'paused_time',
+        {
+          ...fullPaused,
+          measurements: {
+            total_unnatural_pause_ms: 700,
+            mid_thought_excessive_pause_ms: 700,
+          },
+        },
+        'practice',
+      ),
+    ).toBe('Your pauses stayed natural overall.')
+    expect(
+      v3MetricSummary(
+        'paused_time',
+        {
+          ...lowPaused,
+          measurements: {
+            total_unnatural_pause_ms: 7_000,
+            mid_thought_excessive_pause_ms: 7_000,
+          },
+        },
+        'practice',
+      ),
+    ).toBe('Longer pauses interrupted some of your ideas.')
+    expect(
+      v3MetricSummary(
+        'articulation',
+        {
+          ...fullArticulation,
+          measurements: { low_confidence_word_count: 1, eligible_word_count: 40 },
+        },
+        'practice',
+      ),
+    ).toBe('Nearly all of your words were easy for speech recognition to understand.')
+    expect(
+      v3MetricSummary(
+        'articulation',
+        {
+          ...lowArticulation,
+          measurements: { low_confidence_word_count: 16, eligible_word_count: 40 },
+        },
+        'practice',
+      ),
+    ).toBe('Speech recognition was less certain about several words.')
+    expect(v3MetricSummary('energy', highEnergy, 'practice')).toBe(
+      'You used natural variation in your pitch and speaking rhythm.',
+    )
+    expect(v3MetricSummary('energy', moderateEnergy, 'practice')).toBe(
+      'You used some natural vocal variation, with a few flatter or more even stretches.',
+    )
+    expect(v3MetricSummary('energy', lowEnergy, 'practice')).toBe(
+      'Your pitch or speaking rhythm stayed fairly even through much of the response.',
+    )
+  })
+
+  it('uses distinct safe copy for provider unavailability and rejected content', () => {
+    const rejected = v3Snapshot({ notCheckedMetric: 'grammar' }).sections.what_you_said.metrics
+      .grammar
+    const unavailable = {
+      ...rejected,
+      warnings: [V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE],
+    }
+
+    expect(v3MetricSummary('grammar', rejected, 'practice')).toBe(
+      'This metric could not be checked for this response.',
+    )
+    expect(v3MetricSummary('grammar', unavailable, 'practice')).toBe(
+      'This metric was unavailable because the content check could not be completed.',
+    )
   })
 
   it('derives Conciseness counts only from validated findings and groups multi-span examples', () => {

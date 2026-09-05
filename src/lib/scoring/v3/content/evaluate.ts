@@ -4,6 +4,8 @@ import {
   reportContentProviderFailure,
 } from '@/lib/deepseek/provider'
 import {
+  V3_CONTENT_CHECK_INVALID_MESSAGE,
+  V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE,
   V3_CONTENT_EVALUATOR_VERSION,
   type MechanicalConcisenessKind,
   type V3ContentEvaluation,
@@ -13,6 +15,8 @@ import {
   type V3MechanicallyOwnedSpan,
   type V3TranscriptSpan,
 } from '@/lib/scoring/v3/content/contracts'
+
+export { V3_CONTENT_CHECK_INVALID_MESSAGE, V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE }
 import {
   WHAT_YOU_SAID_METRICS,
   inUnitInterval,
@@ -64,9 +68,6 @@ const MAX_FINDINGS_PER_METRIC = 8
 const MAX_SUPPORTING_SPANS = 4
 const MAX_EXPLANATION_LENGTH = 500
 const MAX_DETAIL_LENGTH = 500
-
-export const V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE = 'The content check could not be completed.'
-export const V3_CONTENT_CHECK_INVALID_MESSAGE = 'Some content checks could not be completed.'
 
 export const STRUCTURAL_CONCISENESS_REDUCTION: Readonly<Record<MechanicalConcisenessKind, number>> =
   Object.freeze({ false_start: 0.06 })
@@ -277,7 +278,19 @@ function reportFinalDiagnostic(
   })
 }
 
-function retryInstructionFor(error: V3ContentParseError): string {
+function quotedSpans(transcript: string, spans: readonly V3TranscriptSpan[]): string {
+  return spans
+    .filter((span) => validSpan(span, transcript))
+    .slice(0, 8)
+    .map((span) => JSON.stringify(transcript.slice(span.start, span.end).slice(0, 80)))
+    .join(', ')
+}
+
+function retryInstructionFor(
+  error: V3ContentParseError,
+  transcript: string,
+  unreliableTranscriptSpans: readonly V3TranscriptSpan[],
+): string {
   const metric = error.metric ? ` for ${error.metric}` : ''
   if (error.reason === 'ambiguous_evidence') {
     return `The previous response used ambiguous transcript evidence${metric}. Set occurrence to the intended one-based occurrence, or copy a longer exact quote that occurs once. For a repeated idea across separated text, use null primary evidence and two or more exact supporting_spans.`
@@ -287,6 +300,11 @@ function retryInstructionFor(error: V3ContentParseError): string {
   }
   if (error.reason === 'whole_response_evidence_invalid') {
     return `The previous response used an invalid evidence shape${metric}. Use null primary evidence only for allowed whole-response findings or a repeated_idea with two or more exact supporting_spans. Every filler needs one exact contiguous quote.`
+  }
+  if (error.reason === 'evidence_overlaps_unreliable') {
+    const excluded = quotedSpans(transcript, unreliableTranscriptSpans)
+    const exclusion = excluded ? ` The unreliable transcript text is: ${excluded}.` : ''
+    return `The previous response used evidence${metric} that overlapped unreliable transcript text.${exclusion} Use a shorter exact quote that supports the same finding without touching that text. If no reliable quote can support the finding, omit it and update the component and explanation. Do not penalize uncertain transcript text.`
   }
   return `The previous response failed validation${metric}. Return only a corrected object that exactly follows response_shape and allowed_finding_kinds.`
 }
@@ -732,7 +750,9 @@ export async function runV3ContentEvaluation(
           ? new ContentProviderFailure(error.code, input.provider.name)
           : reportContentProviderFailure(error, input.provider.name)
       if (attempt === 0 && isRetryableContentProviderFailure(failure)) {
-        if (error instanceof V3ContentParseError) retryInstruction = retryInstructionFor(error)
+        if (error instanceof V3ContentParseError) {
+          retryInstruction = retryInstructionFor(error, input.transcript, unreliableTranscriptSpans)
+        }
         continue
       }
       const diagnostic = diagnosticFor(error, failure)

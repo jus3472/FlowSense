@@ -364,7 +364,7 @@ test('records once, shows processing and v3 results, retries, compares, filters,
     'aria-expanded',
     'true',
   )
-  await expect(page.getByText('Full-credit range', { exact: true })).toBeVisible()
+  await expect(page.getByText('Ideal range', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Hide Pace details' }).click()
   await expect(page.getByRole('button', { name: 'Show Pace details' })).toHaveAttribute(
     'aria-expanded',

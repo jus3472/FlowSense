@@ -1,6 +1,7 @@
 import type { Segment } from '@/lib/results/highlights'
 import type { PracticeMode } from '@/lib/practice/contracts'
 import { AUDIO_THRESHOLDS_BY_MODE } from '@/lib/scoring/v3/audio'
+import { V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE } from '@/lib/scoring/v3/content/contracts'
 import {
   HOW_YOU_SOUNDED_METRICS,
   LEGACY_HOW_YOU_SOUNDED_METRICS,
@@ -162,7 +163,11 @@ export function v3MetricSummary(
   result: V3PersistedMetricScore,
   mode: PracticeMode,
 ): string {
-  if (result.status === 'not_checked') return 'This metric could not be checked for this response.'
+  if (result.status === 'not_checked') {
+    return result.warnings.includes(V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE)
+      ? 'This metric was unavailable because the content check could not be completed.'
+      : 'This metric could not be checked for this response.'
+  }
   if (result.status === 'unavailable') {
     if (metric === 'pace')
       return 'This recording did not contain enough timed speech to measure pace.'
@@ -186,19 +191,33 @@ export function v3MetricSummary(
       numericMeasurement(result.measurements, 'words_per_minute') ??
       numericMeasurement(result.measurements, 'articulation_rate_wpm')
     const range = AUDIO_THRESHOLDS_BY_MODE[mode].pace
+    const fullPoints = result.earned_points === result.max_points
+    if (wpm !== null && wpm >= range.full_from_wpm && wpm <= range.full_through_wpm) {
+      return fullPoints
+        ? 'Your pace was in the ideal range.'
+        : 'Your pace was close to the ideal range.'
+    }
+    if (fullPoints) return 'Your pace was close to the ideal range.'
     if (wpm !== null && wpm > range.full_through_wpm) {
-      return 'You spoke faster than the full-credit range.'
+      return 'You spoke faster than the ideal range.'
     }
     if (wpm !== null && wpm < range.full_from_wpm) {
-      return 'You spoke slower than the full-credit range.'
+      return 'You spoke slower than the ideal range.'
     }
-    return 'You spoke at a steady pace within the full-credit range.'
+    return 'Your pace was measured from the available timing.'
   }
 
   if (metric === 'paused_time') {
     const total = numericMeasurement(result.measurements, 'total_unnatural_pause_ms')
     const midThought = numericMeasurement(result.measurements, 'mid_thought_excessive_pause_ms')
-    if (total === 0) return 'Your pauses stayed natural throughout the response.'
+    if (total === 0 || result.earned_points === result.max_points) {
+      return 'Your pauses stayed natural overall.'
+    }
+    if ((result.component ?? 0) < 0.75) {
+      return midThought !== null && midThought > 0
+        ? 'Longer pauses interrupted some of your ideas.'
+        : 'Several pauses lasted beyond the natural allowance.'
+    }
     if (midThought !== null && midThought > 0) {
       return 'Most pauses were natural, with some longer hesitation mid-thought.'
     }
@@ -209,8 +228,15 @@ export function v3MetricSummary(
     const low = numericMeasurement(result.measurements, 'low_confidence_word_count')
     const eligible = numericMeasurement(result.measurements, 'eligible_word_count')
     if (low === 0) return 'Your words were consistently easy for speech recognition to understand.'
-    if (low !== null && eligible !== null && low / Math.max(eligible, 1) <= 0.05) {
+    if (
+      result.earned_points === result.max_points ||
+      (result.component ?? 0) >= 0.85 ||
+      (low !== null && eligible !== null && low / Math.max(eligible, 1) <= 0.05)
+    ) {
       return 'Nearly all of your words were easy for speech recognition to understand.'
+    }
+    if ((result.component ?? 0) < 0.5) {
+      return 'Speech recognition was less certain about several words.'
     }
     return 'Most of your words were easy for speech recognition to understand, with a few less certain words.'
   }
@@ -266,7 +292,7 @@ function measurementViews(
     const rows: Array<V3MetricMeasurementView | null> = [
       wpm === null ? null : { label: 'Speaking pace', value: `${Math.round(wpm)} WPM`, help: null },
       {
-        label: 'Full-credit range',
+        label: 'Ideal range',
         value: `${range.full_from_wpm} to ${range.full_through_wpm} WPM`,
         help: null,
       },

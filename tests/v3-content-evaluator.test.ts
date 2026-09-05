@@ -1,4 +1,5 @@
 import { ContentProviderFailure, type ContentModel } from '@/lib/deepseek/provider'
+import { assembleV3Score } from '@/lib/scoring/v3/assemble'
 import {
   V3_CONTENT_EVALUATOR_VERSION,
   type V3ContentEvaluatorProvider,
@@ -17,10 +18,21 @@ import { buildV3ContentUserPrompt, V3_CONTENT_SYSTEM_PROMPT } from '@/lib/scorin
 import { WHAT_YOU_SAID_METRICS } from '@/lib/scoring/v3/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import { wordsFrom } from './helpers/transcript'
+import { v3Snapshot } from './helpers/result-snapshots'
 
 const TRANSCRIPT = 'Um I led the launch. The result was clear and useful.'
 const REAL_ATTEMPT_TRANSCRIPT =
   "One place I really like to spend time in is my car. I really like my car because it has a great speaker, and so I can play music. It's a quiet place where I could think. I also just like driving a lot, find it very fun, and that's about it."
+const CURRENT_ATTEMPT_PROMPT =
+  'Describe a place where you like to spend time. Include two details someone could picture.'
+const CURRENT_ATTEMPT_TRANSCRIPT =
+  "Um, I'd say a place that I really like to spend time, it's a little bit cliche, but it's just my room. Spent a lot of time in my room relaxing, but also doing work. I have my desk, and I have my monitor and my laptop and my bed. Specifically, my laptop and monitor helped me get a lot of work done. And it's here that I'm able to focus, but I also can relax and have some personal time to myself."
+const CURRENT_UNRELIABLE_SPANS = [
+  { start: 48, end: 53, confidence: 0.74780273 },
+  { start: 103, end: 108, confidence: 0.6925049 },
+  { start: 217, end: 220, confidence: 0.59472656 },
+  { start: 265, end: 271, confidence: 0.70214844 },
+]
 
 function metric(overrides: Record<string, unknown> = {}) {
   return { component: 1, explanation: 'You complete this metric.', findings: [], ...overrides }
@@ -89,6 +101,97 @@ async function evaluateTranscript(transcript: string, conciseness: ReturnType<ty
 }
 
 describe('v3 content evaluator contract', () => {
+  it('recovers this attempt when a valid Conciseness finding initially crosses unreliable text', async () => {
+    const cliche = finding('filler', "it's a little bit cliche, but", CURRENT_ATTEMPT_TRANSCRIPT)
+    const unsafeSentence = finding(
+      'redundant_sentence',
+      'Spent a lot of time in my room relaxing, but also doing work.',
+      CURRENT_ATTEMPT_TRANSCRIPT,
+    )
+    const safeSentence = finding(
+      'redundant_sentence',
+      'a lot of time in my room relaxing, but also doing work.',
+      CURRENT_ATTEMPT_TRANSCRIPT,
+    )
+    const conciseness = (sentence: Record<string, unknown>) =>
+      metric({
+        component: 0.7,
+        explanation: 'You use two filler phrases and repeat one point about your room.',
+        findings: [finding('filler', 'Um', CURRENT_ATTEMPT_TRANSCRIPT), cliche, sentence],
+      })
+    const complete = vi
+      .fn()
+      .mockResolvedValueOnce(response({ conciseness: conciseness(unsafeSentence) }))
+      .mockResolvedValueOnce(response({ conciseness: conciseness(safeSentence) }))
+
+    const evaluated = await runV3ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: CURRENT_ATTEMPT_PROMPT,
+      transcript: CURRENT_ATTEMPT_TRANSCRIPT,
+      mechanicallyOwned: [],
+      unreliableTranscriptSpans: CURRENT_UNRELIABLE_SPANS,
+    })
+
+    expect(evaluated.status).toBe('checked')
+    expect(evaluated.calls).toBe(2)
+    expect(complete.mock.calls[1]?.[0].retryInstruction).toContain(
+      'overlapped unreliable transcript text',
+    )
+    expect(complete.mock.calls[1]?.[0].retryInstruction).toContain('"Spent"')
+    expect(Object.values(evaluated.metrics).every((result) => result.status === 'scored')).toBe(
+      true,
+    )
+    expect(evaluated.metrics.conciseness.evidence.map((item) => item.quote)).toEqual([
+      'Um',
+      "it's a little bit cliche, but",
+      'a lot of time in my room relaxing, but also doing work.',
+    ])
+
+    const assembled = assembleV3Score({
+      mode: 'practice',
+      content: evaluated,
+      sounded: v3Snapshot({ component: 0.8 }).sections.how_you_sounded.metrics,
+    })
+    expect(assembled.sections.what_you_said.earned_points).toBe(48)
+    expect(assembled.total_earned_points).toBe(88)
+  })
+
+  it('keeps this attempt fail-closed when both responses reuse unreliable evidence', async () => {
+    const unsafe = response({
+      conciseness: metric({
+        component: 0.8,
+        explanation: 'You repeat one point about your room.',
+        findings: [
+          finding(
+            'redundant_sentence',
+            'Spent a lot of time in my room relaxing, but also doing work.',
+            CURRENT_ATTEMPT_TRANSCRIPT,
+          ),
+        ],
+      }),
+    })
+    const complete = vi.fn().mockResolvedValue(unsafe)
+    const evaluated = await runV3ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: CURRENT_ATTEMPT_PROMPT,
+      transcript: CURRENT_ATTEMPT_TRANSCRIPT,
+      mechanicallyOwned: [],
+      unreliableTranscriptSpans: CURRENT_UNRELIABLE_SPANS,
+    })
+
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(evaluated.status).toBe('not_checked')
+    expect(evaluated.diagnostic).toEqual({
+      category: 'content_validation_failed',
+      code: 'schema_invalid',
+      reason: 'evidence_overlaps_unreliable',
+      metric: 'conciseness',
+    })
+    expect(Object.values(evaluated.metrics).every((result) => result.component === null)).toBe(true)
+  })
+
   it('scores all six metrics for the real-attempt transcript shape', async () => {
     const complete = vi.fn().mockResolvedValue(response())
     const evaluated = await runV3ContentEvaluation({

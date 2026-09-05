@@ -7,6 +7,8 @@ import type {
 
 export const V3_CONTENT_EVALUATOR_VERSION = 'v3.content-evaluator.1' as const
 export const V3_CONTENT_AUDIT_VERSION = 'v3.content-audit.1' as const
+export const V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE = 'The content check could not be completed.'
+export const V3_CONTENT_CHECK_INVALID_MESSAGE = 'Some content checks could not be completed.'
 
 /** Deterministic v3 Conciseness ownership is limited to structural restarts. */
 export type MechanicalConcisenessKind = 'false_start'

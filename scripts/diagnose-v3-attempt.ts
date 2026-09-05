@@ -139,7 +139,7 @@ const client = new pg.Client({
 })
 await client.connect()
 const result = await client.query(
-  `select prompt_text, transcript, practice_mode, metrics
+  `select prompt_text, transcript, practice_mode, metrics, score, content_result
      from public.attempts
     where id = $1
     limit 1`,
@@ -172,6 +172,12 @@ const assembled = assembleV3Score({ mode, content, sounded: v3AudioMetrics(audio
 
 console.log('V3 attempt diagnostic')
 console.log(`Attempt: ${attemptId}`)
+console.log(`Stored score: ${typeof row.score === 'number' ? row.score : 'unavailable'} / 100`)
+console.log(`Stored content audit: ${JSON.stringify(row.content_result ?? null)}`)
+console.log(`Mechanical ownership: ${JSON.stringify(evidence.mechanicallyOwned)}`)
+console.log(
+  `Unreliable transcript spans: ${JSON.stringify(evidence.unreliableTranscriptSpans.map((span) => ({ ...span, quote: transcript.slice(span.start, span.end) })))}`,
+)
 console.log(`Content status: ${content.status}`)
 console.log(`Provider calls: ${content.calls}`)
 for (const trace of responseTraces) {
