@@ -54,6 +54,26 @@ describe('migration tooling', () => {
     })
   })
 
+  it('models the audited Production ledger and all three pending files exactly', () => {
+    const migrations = loadMigrations()
+    const productionIndex = migrations.findIndex(
+      (migration) => migration.name === 'curriculum_grant_hardening',
+    )
+    expect(productionIndex).toBeGreaterThanOrEqual(0)
+    const productionLedger = migrations
+      .slice(0, productionIndex + 1)
+      .map((migration) => migration.legacyVersion)
+
+    expect(compareMigrationLedger(migrations, productionLedger)).toEqual({
+      missing: [
+        '20260903000100_v3_progression_compatibility.sql',
+        '20260904000100_v3_score_2_progression_compatibility.sql',
+        '20260905000100_current_v3_score_2_progression.sql',
+      ],
+      unexpected: [],
+    })
+  })
+
   it('reports unexpected ledger versions separately', () => {
     const migrations = loadMigrations()
     const comparison = compareMigrationLedger(migrations, [

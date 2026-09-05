@@ -17,6 +17,10 @@ const v3Score2Progression = readFileSync(
   'supabase/migrations/20260904000100_v3_score_2_progression_compatibility.sql',
   'utf8',
 )
+const currentProgression = readFileSync(
+  'supabase/migrations/20260905000100_current_v3_score_2_progression.sql',
+  'utf8',
+)
 
 const NAMESPACE = 'c8f6a2e4-2d9b-5a1c-8e73-1f4b6d9a2057'
 
@@ -270,6 +274,52 @@ describe('curriculum schema and stable seed', () => {
     expect(v3Score2Progression).toContain("when 'v3.score.1' then")
     expect(v3Score2Progression).toContain("when 'v3.score.2' then")
     expect(v3Score2Progression).not.toContain("'time_to_first_word', 'paused_time'")
+  })
+
+  it('collapses progression to the strict current v3.score.2 contract', () => {
+    expect(currentProgression).toContain(
+      'create or replace function public.is_valid_current_score_payload_for_attempt',
+    )
+    expect(currentProgression).toContain("payload ->> 'version' is distinct from 'v3.score.2'")
+    expect(currentProgression).toContain('section_count <> 2')
+    expect(currentProgression).toContain('metric_count <> 10')
+    expect(currentProgression).toContain("array['pace', 'paused_time', 'articulation', 'energy']")
+    expect(currentProgression).not.toContain("'time_to_first_word'")
+    expect(currentProgression).toContain("jsonb_typeof(evidence.value -> 'coordinate') = 'object'")
+    expect(currentProgression).toContain(
+      "jsonb_typeof(measurement.value) not in ('string', 'number', 'boolean', 'null')",
+    )
+    expect(currentProgression).toContain(
+      "payload -> 'recommendation' ->> 'strongest_metric' is distinct from strongest_metric",
+    )
+    expect(currentProgression).toContain(
+      "payload -> 'recommendation' ->> 'weakest_metric' is distinct from weakest_metric",
+    )
+    expect(currentProgression).toContain('previous_lesson_id')
+    expect(currentProgression).toContain('progress.best_score >= 70')
+    expect(currentProgression).toContain('attempt.score desc')
+    expect(currentProgression).toContain('attempt.finished_at desc nulls last')
+    expect(currentProgression).toContain('attempt.id desc')
+    expect(currentProgression).toContain('delete from public.lesson_progress')
+    expect(currentProgression).not.toMatch(/update\s+public\.attempts/i)
+    for (const retired of [
+      'is_valid_v2_score_payload_for_attempt',
+      'is_valid_v3_score_payload_for_attempt',
+      'is_valid_v3_score_1_payload_for_attempt',
+      'is_valid_v3_score_2_payload_for_attempt',
+    ]) {
+      expect(currentProgression).toContain(`drop function if exists public.${retired}`)
+    }
+    expect(currentProgression).toContain(
+      'drop trigger if exists note_feedback_enforce_target on public.note_feedback',
+    )
+    expect(currentProgression).toContain(
+      'drop function if exists public.enforce_note_feedback_target()',
+    )
+    expect(currentProgression).toContain('grant select on table public.note_feedback')
+    expect(currentProgression).toContain(
+      'grant execute on function public.is_valid_current_score_payload_for_attempt',
+    )
   })
 
   it('maps legacy focus areas in canonical order and gives future users General Speaking', () => {

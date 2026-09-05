@@ -13,6 +13,7 @@ const USERS = {
   other: '30000000-0000-4000-8000-000000000003',
   signedUpAfterCurriculum: '40000000-0000-4000-8000-000000000008',
   hardeningSignup: '90000000-0000-4000-8000-000000000009',
+  progression: 'a0000000-0000-4000-8000-00000000000a',
 }
 const UPLOAD_ATTEMPTS = {
   owner: '50000000-0000-4000-8000-000000000005',
@@ -277,13 +278,152 @@ async function assertGrantHardening(label) {
     `${label}: hardened table ownership is missing`,
   )
 
+  const obsoleteFunctions = await client.query(`
+    select proname
+    from pg_proc as procedure
+    join pg_namespace as namespace on namespace.oid = procedure.pronamespace
+    where namespace.nspname = 'public'
+      and procedure.proname = any(array[
+        'is_valid_v2_score_payload_for_attempt',
+        'is_valid_v3_score_payload_for_attempt',
+        'is_valid_v3_score_1_payload_for_attempt',
+        'is_valid_v3_score_2_payload_for_attempt',
+        'enforce_note_feedback_target'
+      ]::text[])
+  `)
+  assert(obsoleteFunctions.rowCount === 0, `${label}: obsolete functions remain callable`)
+
+  const currentFunctions = await client.query(`
+    select procedure.proname, procedure.prosecdef, procedure.provolatile,
+      procedure.proconfig, pg_get_userbyid(procedure.proowner) as owner,
+      current_user as migration_user,
+      pg_get_function_identity_arguments(procedure.oid) as arguments
+    from pg_proc as procedure
+    join pg_namespace as namespace on namespace.oid = procedure.pronamespace
+    where namespace.nspname = 'public'
+      and procedure.proname = any(array[
+        'is_valid_current_score_payload_for_attempt',
+        'raise_lesson_progress_from_attempt',
+        'enforce_lesson_progress_integrity'
+      ]::text[])
+    order by procedure.proname
+  `)
+  assert(
+    currentFunctions.rowCount === 3,
+    `${label}: current progression function inventory changed`,
+  )
+  const validator = currentFunctions.rows.find(
+    (row) => row.proname === 'is_valid_current_score_payload_for_attempt',
+  )
+  const raiser = currentFunctions.rows.find(
+    (row) => row.proname === 'raise_lesson_progress_from_attempt',
+  )
+  const integrity = currentFunctions.rows.find(
+    (row) => row.proname === 'enforce_lesson_progress_integrity',
+  )
+  assert(
+    validator?.arguments === 'payload jsonb, attempt_mode text, attempt_score integer' &&
+      validator.prosecdef === false &&
+      validator.provolatile === 'i' &&
+      validator.proconfig?.length === 1 &&
+      validator.proconfig[0] === 'search_path=""',
+    `${label}: current validator signature or attributes changed`,
+  )
+  assert(
+    raiser?.arguments === '' &&
+      raiser.prosecdef === true &&
+      raiser.proconfig?.length === 1 &&
+      raiser.proconfig[0] === 'search_path=""',
+    `${label}: progression trigger function security changed`,
+  )
+  assert(
+    integrity?.arguments === '' &&
+      integrity.prosecdef === true &&
+      integrity.proconfig?.length === 1 &&
+      integrity.proconfig[0] === 'search_path=""' &&
+      currentFunctions.rows.every(
+        (row) =>
+          row.owner === validator.owner &&
+          row.owner === row.migration_user &&
+          !['anon', 'authenticated', 'service_role'].includes(row.owner),
+      ),
+    `${label}: progression integrity function security or ownership changed`,
+  )
+
+  const triggers = await client.query(`
+    select trigger.tgname, relation.relname as table_name,
+      procedure.proname as function_name,
+      (trigger.tgtype & 2) = 2 as before,
+      (trigger.tgtype & 4) = 4 as on_insert,
+      (trigger.tgtype & 16) = 16 as on_update
+    from pg_trigger as trigger
+    join pg_class as relation on relation.oid = trigger.tgrelid
+    join pg_namespace as namespace on namespace.oid = relation.relnamespace
+    join pg_proc as procedure on procedure.oid = trigger.tgfoid
+    where namespace.nspname = 'public' and not trigger.tgisinternal
+    order by trigger.tgname
+  `)
+  assert(
+    JSON.stringify(triggers.rows) ===
+      JSON.stringify([
+        {
+          tgname: 'attempts_enforce_status_transition',
+          table_name: 'attempts',
+          function_name: 'enforce_attempt_status_transition',
+          before: true,
+          on_insert: false,
+          on_update: true,
+        },
+        {
+          tgname: 'attempts_raise_lesson_progress',
+          table_name: 'attempts',
+          function_name: 'raise_lesson_progress_from_attempt',
+          before: false,
+          on_insert: true,
+          on_update: true,
+        },
+        {
+          tgname: 'lesson_progress_enforce_integrity',
+          table_name: 'lesson_progress',
+          function_name: 'enforce_lesson_progress_integrity',
+          before: true,
+          on_insert: true,
+          on_update: true,
+        },
+        {
+          tgname: 'practice_chapters_enforce_identity',
+          table_name: 'practice_chapters',
+          function_name: 'enforce_practice_chapter_identity',
+          before: true,
+          on_insert: false,
+          on_update: true,
+        },
+        {
+          tgname: 'practice_lessons_enforce_identity',
+          table_name: 'practice_lessons',
+          function_name: 'enforce_practice_lesson_identity',
+          before: true,
+          on_insert: false,
+          on_update: true,
+        },
+        {
+          tgname: 'practice_paths_enforce_identity',
+          table_name: 'practice_paths',
+          function_name: 'enforce_practice_path_identity',
+          before: true,
+          on_insert: false,
+          on_update: true,
+        },
+      ]),
+    `${label}: final trigger inventory changed`,
+  )
+
   const browserFunctions = new Set(['replace_profile_path_preferences', 'is_valid_iana_timezone'])
   const functionNames = [
     'handle_new_user',
     'replace_profile_path_preferences',
     'raise_lesson_progress_from_attempt',
-    'is_valid_v2_score_payload_for_attempt',
-    'is_valid_v3_score_payload_for_attempt',
+    'is_valid_current_score_payload_for_attempt',
     'enforce_lesson_progress_integrity',
     'enforce_practice_path_identity',
     'enforce_practice_chapter_identity',
@@ -665,6 +805,105 @@ async function assertAttemptSecurity(label) {
 }
 
 async function assertNoteFeedbackSecurity(label) {
+  const retiredValidator = await client.query(
+    `select to_regprocedure('public.enforce_note_feedback_target()')::text as function_name,
+       exists (
+         select 1 from pg_trigger
+         where tgrelid = 'public.note_feedback'::regclass
+           and tgname = 'note_feedback_enforce_target'
+           and not tgisinternal
+       ) as has_trigger`,
+  )
+  if (
+    retiredValidator.rows[0]?.function_name === null &&
+    retiredValidator.rows[0]?.has_trigger === false
+  ) {
+    const archivePrivileges = await client.query(`
+      select grantee, privilege_type
+      from information_schema.role_table_grants
+      where table_schema = 'public'
+        and table_name = 'note_feedback'
+        and grantee in ('PUBLIC', 'anon', 'authenticated', 'service_role')
+      order by grantee, privilege_type
+    `)
+    assert(
+      JSON.stringify(archivePrivileges.rows) ===
+        JSON.stringify([
+          { grantee: 'authenticated', privilege_type: 'SELECT' },
+          { grantee: 'service_role', privilege_type: 'SELECT' },
+        ]),
+      `${label}: retired note feedback must be a read-only archive`,
+    )
+    const effectiveArchivePrivileges = await client.query(
+      `select role_name, privilege,
+         has_table_privilege(role_name, 'public.note_feedback', privilege) as granted
+       from unnest(array['anon', 'authenticated', 'service_role']) as roles(role_name)
+       cross join unnest($1::text[]) as privileges(privilege)
+       order by role_name, privilege`,
+      [TABLE_PRIVILEGES],
+    )
+    for (const role of ['anon', 'authenticated', 'service_role']) {
+      const actual = effectiveArchivePrivileges.rows
+        .filter((row) => row.role_name === role && row.granted)
+        .map((row) => row.privilege)
+      const expected = role === 'anon' ? [] : ['SELECT']
+      assert(
+        JSON.stringify(actual) === JSON.stringify(expected),
+        `${label}: ${role} inherited unexpected note-feedback privileges`,
+      )
+    }
+    const archive = await client.query(`
+      select c.relrowsecurity,
+        array_agg(policy.cmd order by policy.cmd) filter (where policy.cmd is not null) as commands
+      from pg_class as c
+      left join pg_policies as policy
+        on policy.schemaname = 'public' and policy.tablename = c.relname
+      where c.oid = 'public.note_feedback'::regclass
+      group by c.relrowsecurity
+    `)
+    assert(
+      archive.rows[0]?.relrowsecurity === true &&
+        JSON.stringify(archive.rows[0]?.commands) === '["SELECT"]',
+      `${label}: retired note feedback lost RLS or its owner-read policy`,
+    )
+    await setAuthenticatedUser(USERS.owner)
+    try {
+      const visible = await client.query('select user_id from public.note_feedback')
+      assert(
+        visible.rows.every((row) => row.user_id === USERS.owner),
+        `${label}: retired note feedback owner read leaked`,
+      )
+      await expectPgError(
+        () =>
+          client.query(
+            `insert into public.note_feedback (user_id, attempt_id, note_type)
+             values ($1, gen_random_uuid(), 'retired')`,
+            [USERS.owner],
+          ),
+        '42501',
+        `${label}: authenticated retired note insert`,
+      )
+    } finally {
+      await resetRole()
+    }
+    await client.query('set role service_role')
+    try {
+      await expectPgError(
+        () =>
+          client.query(
+            `insert into public.note_feedback (user_id, attempt_id, note_type)
+             values ($1, gen_random_uuid(), 'retired')`,
+            [USERS.owner],
+          ),
+        '42501',
+        `${label}: service-role retired note insert`,
+      )
+    } finally {
+      await resetRole()
+    }
+    return
+  }
+
   const privileges = await client.query(`
     select privilege_type
     from information_schema.role_table_grants
@@ -1198,6 +1437,31 @@ function structuredV3ScorePayloadFor(mode, score, weightsByMode, version) {
       ]
     }),
   )
+  const transcriptEvidence = {
+    source: 'transcript',
+    start: 0,
+    end: 2,
+    coordinate: { space: 'transcript', unit: 'utf16_code_unit' },
+    quote: '😀',
+    detail: 'A valid UTF-16 transcript span.',
+  }
+  allMetrics.structure.measurements = {
+    count: 1,
+    checked: true,
+    label: 'structured',
+    optional: null,
+  }
+  allMetrics.structure.evidence = [transcriptEvidence]
+  allMetrics.structure.details = [
+    {
+      kind: 'structure',
+      source: 'ai',
+      quote: '😀',
+      observation: 'The response follows a visible sequence.',
+      suggestion: null,
+      evidence: [transcriptEvidence],
+    },
+  ]
   const buildSection = (sectionName, sectionWeights) => {
     const metrics = Object.fromEntries(
       Object.keys(sectionWeights).map((metric) => [metric, allMetrics[metric]]),
@@ -1252,6 +1516,31 @@ function structuredLegacyV3ScorePayload(mode, score) {
   return structuredV3ScorePayloadFor(mode, score, V3_SCORE_1_MODE_WEIGHTS, 'v3.score.1')
 }
 
+function neutralV3ScorePayload(mode, score, metric = 'grammar') {
+  const payload = cloneJson(structuredV3ScorePayload(mode, score))
+  const section = Object.values(payload.sections).find(
+    (candidate) => candidate.metrics[metric] !== undefined,
+  )
+  assert(section, `neutral metric ${metric} is missing`)
+  section.metrics[metric] = {
+    ...section.metrics[metric],
+    status: 'not_checked',
+    component: null,
+    earned_points: null,
+    explanation: null,
+    measurements: null,
+    evidence: [],
+    details: [],
+    warnings: ['Provider result was unavailable.'],
+  }
+  section.status = 'not_checked'
+  section.earned_points = null
+  payload.total_earned_points = null
+  payload.recommendation = null
+  payload.warnings = ['Provider result was unavailable.']
+  return payload
+}
+
 function malformedV3Payloads(mode, score) {
   const wrongWeight = cloneJson(structuredV3ScorePayload(mode, score))
   wrongWeight.sections.how_you_sounded.metrics.energy.max_points += 1
@@ -1277,6 +1566,55 @@ function malformedV3Payloads(mode, score) {
   const extraTopLevelField = cloneJson(structuredV3ScorePayload(mode, score))
   extraTopLevelField.hidden_score = 100
 
+  const malformedEvidence = cloneJson(structuredV3ScorePayload(mode, score))
+  malformedEvidence.sections.what_you_said.metrics.structure.evidence = [{}]
+
+  const malformedDetail = cloneJson(structuredV3ScorePayload(mode, score))
+  malformedDetail.sections.what_you_said.metrics.structure.details = [{}]
+
+  const nestedMeasurement = cloneJson(structuredV3ScorePayload(mode, score))
+  nestedMeasurement.sections.how_you_sounded.metrics.energy.measurements = { nested: [] }
+
+  const arbitraryRecommendation = cloneJson(structuredV3ScorePayload(mode, score))
+  arbitraryRecommendation.recommendation.text = 'This is not deterministic coaching copy.'
+
+  const wrongRecommendationMetric = cloneJson(structuredV3ScorePayload(mode, score))
+  wrongRecommendationMetric.recommendation.strongest_metric =
+    wrongRecommendationMetric.recommendation.weakest_metric
+
+  const overlongExplanation = cloneJson(structuredV3ScorePayload(mode, score))
+  overlongExplanation.sections.what_you_said.metrics.structure.explanation = 'x'.repeat(1001)
+
+  const invalidCoordinate = cloneJson(structuredV3ScorePayload(mode, score))
+  invalidCoordinate.sections.what_you_said.metrics.structure.evidence = [
+    {
+      source: 'transcript',
+      start: 0,
+      end: 2,
+      coordinate: { space: 'transcript', unit: 'utf16_code_unit' },
+      quote: 'x',
+      detail: 'The quote length does not match the coordinate.',
+    },
+  ]
+
+  const emptyCoordinate = cloneJson(structuredV3ScorePayload(mode, score))
+  emptyCoordinate.sections.what_you_said.metrics.structure.evidence[0].coordinate = {}
+
+  const overlongUnicodeWarning = cloneJson(structuredV3ScorePayload(mode, score))
+  overlongUnicodeWarning.sections.what_you_said.metrics.structure.warnings = ['😀'.repeat(501)]
+
+  const unmatchedDetailQuote = cloneJson(structuredV3ScorePayload(mode, score))
+  unmatchedDetailQuote.sections.what_you_said.metrics.structure.details = [
+    {
+      kind: 'structure',
+      source: 'ai',
+      quote: 'missing',
+      observation: 'This quote has no matching evidence.',
+      suggestion: null,
+      evidence: [],
+    },
+  ]
+
   return [
     wrongWeight,
     hiddenMetric,
@@ -1284,6 +1622,16 @@ function malformedV3Payloads(mode, score) {
     incoherentSection,
     incoherentStatus,
     extraTopLevelField,
+    malformedEvidence,
+    malformedDetail,
+    nestedMeasurement,
+    arbitraryRecommendation,
+    wrongRecommendationMetric,
+    overlongExplanation,
+    invalidCoordinate,
+    emptyCoordinate,
+    overlongUnicodeWarning,
+    unmatchedDetailQuote,
   ]
 }
 
@@ -1592,7 +1940,7 @@ async function assertCurriculumSecurity(label) {
   }
 
   const lesson = await client.query(`
-    select lesson.id, lesson.prompt_id, path.mode
+    select lesson.id, lesson.prompt_id, path.mode, chapter.level as difficulty
     from public.practice_lessons as lesson
     join public.practice_chapters as chapter on chapter.id = lesson.chapter_id
     join public.practice_paths as path on path.id = chapter.path_id
@@ -1608,17 +1956,14 @@ async function assertCurriculumSecurity(label) {
        user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
        prompt_difficulty, rubric_version, status, finished_at, score, section_scores
      ) values ($1, $2, $3, 'Provider incomplete snapshot', $4, 'library', 'beginner',
-       'v2', 'done', '2026-08-28T10:00:00Z', null, $5::jsonb)
+       'v3', 'done', '2026-08-28T10:00:00Z', null, $5::jsonb)
      returning id`,
     [
       USERS.owner,
       target.prompt_id,
       target.id,
       target.mode,
-      JSON.stringify({
-        ...structuredScorePayload(target.mode, 0),
-        total_earned_points: null,
-      }),
+      JSON.stringify(neutralV3ScorePayload(target.mode, 80)),
     ],
   )
   const afterIncomplete = await client.query(
@@ -1638,7 +1983,7 @@ async function assertCurriculumSecurity(label) {
          user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
          prompt_difficulty, rubric_version, status, finished_at, score, section_scores
        ) values ($1, $2, $3, 'Structured snapshot', $4, 'library', 'beginner',
-         'v2', 'done', $5::timestamptz, $6, $7::jsonb)
+         'v3', 'done', $5::timestamptz, $6, $7::jsonb)
        returning id`,
       [
         USERS.owner,
@@ -1647,7 +1992,7 @@ async function assertCurriculumSecurity(label) {
         target.mode,
         finishedAt,
         score,
-        JSON.stringify(structuredScorePayload(target.mode, score)),
+        JSON.stringify(structuredV3ScorePayload(target.mode, score)),
       ],
     )
     attempts.push({ id: attempt.rows[0].id, score })
@@ -1667,14 +2012,14 @@ async function assertCurriculumSecurity(label) {
        user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
        prompt_difficulty, rubric_version, status, finished_at, score, section_scores
      ) values ($1, $2, $3, 'Higher structured snapshot', $4, 'library', 'beginner',
-       'v2', 'done', '2026-08-28T10:04:00Z', 80, $5::jsonb)
+       'v3', 'done', '2026-08-28T10:04:00Z', 80, $5::jsonb)
      returning id`,
     [
       USERS.owner,
       target.prompt_id,
       target.id,
       target.mode,
-      JSON.stringify(structuredScorePayload(target.mode, 80)),
+      JSON.stringify(structuredV3ScorePayload(target.mode, 80)),
     ],
   )
   attempts.push({ id: higherAttempt.rows[0].id, score: 80 })
@@ -1697,13 +2042,13 @@ async function assertCurriculumSecurity(label) {
     `${label}: direct best-score regression guard`,
   )
 
-  for (const [index, payload] of malformedV2Payloads(target.mode, 90).entries()) {
+  for (const [index, payload] of malformedV3Payloads(target.mode, 90).entries()) {
     const malformedAttempt = await client.query(
       `insert into public.attempts (
          user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
          prompt_difficulty, rubric_version, status, finished_at, score, section_scores
        ) values ($1, $2, $3, 'Malformed structured snapshot', $4, 'library', 'beginner',
-         'v2', 'done', $5::timestamptz, 90, $6::jsonb)
+         'v3', 'done', $5::timestamptz, 90, $6::jsonb)
        returning id`,
       [
         USERS.other,
@@ -1729,14 +2074,14 @@ async function assertCurriculumSecurity(label) {
        user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
        prompt_difficulty, rubric_version, status, finished_at, score, section_scores
      ) values ($1, $2, $3, 'Structured snapshot without attempt score', $4, 'library',
-       'beginner', 'v2', 'done', '2026-08-28T10:20:00Z', null, $5::jsonb)
+       'beginner', 'v3', 'done', '2026-08-28T10:20:00Z', null, $5::jsonb)
      returning id`,
     [
       USERS.other,
       target.prompt_id,
       target.id,
       target.mode,
-      JSON.stringify(structuredScorePayload(target.mode, 90)),
+      JSON.stringify(structuredV3ScorePayload(target.mode, 90)),
     ],
   )
   const nullScoreProgress = await client.query(
@@ -1786,47 +2131,88 @@ async function assertV3Progression(label) {
   for (const mode of Object.keys(V3_MODE_WEIGHTS)) {
     const payload = structuredV3ScorePayload(mode, 83)
     const valid = await client.query(
-      `select public.is_valid_v3_score_payload_for_attempt(
-         $1::jsonb, $2, 83, true
+      `select public.is_valid_current_score_payload_for_attempt(
+         $1::jsonb, $2, 83
        ) as valid`,
       [JSON.stringify(payload), mode],
     )
     assert(valid.rows[0]?.valid === true, `${label}: ${mode} v3 weights were rejected`)
     const legacy = await client.query(
-      `select public.is_valid_v3_score_payload_for_attempt(
-         $1::jsonb, $2, 83, true
+      `select public.is_valid_current_score_payload_for_attempt(
+         $1::jsonb, $2, 83
        ) as valid`,
       [JSON.stringify(structuredLegacyV3ScorePayload(mode, 83)), mode],
     )
-    assert(legacy.rows[0]?.valid === true, `${label}: ${mode} v3.score.1 was reinterpreted`)
+    assert(legacy.rows[0]?.valid === false, `${label}: ${mode} v3.score.1 did not fail closed`)
+
+    const future = cloneJson(payload)
+    future.version = 'v3.score.99'
+    const futureResult = await client.query(
+      `select public.is_valid_current_score_payload_for_attempt(
+         $1::jsonb, $2, 83
+       ) as valid`,
+      [JSON.stringify(future), mode],
+    )
+    assert(futureResult.rows[0]?.valid === false, `${label}: ${mode} future v3 did not fail closed`)
   }
 
+  const practice83 = JSON.stringify(structuredV3ScorePayload('practice', 83))
+  const scalarMismatch = await client.query(
+    `select public.is_valid_current_score_payload_for_attempt(
+       $1::jsonb, 'practice', 82
+     ) as valid`,
+    [practice83],
+  )
+  assert(scalarMismatch.rows[0]?.valid === false, `${label}: scalar score mismatch passed`)
+  const nonFiniteMeasurement = await client.query(
+    `select public.is_valid_current_score_payload_for_attempt(
+       jsonb_set(
+         $1::jsonb,
+         '{sections,how_you_sounded,metrics,energy,measurements,overflow}',
+         '1e10000'::jsonb,
+         true
+       ),
+       'practice',
+       83
+     ) as valid`,
+    [practice83],
+  )
+  assert(
+    nonFiniteMeasurement.rows[0]?.valid === false,
+    `${label}: a measurement outside the JavaScript finite range passed`,
+  )
+
   const lessons = await client.query(`
-    select lesson.id, lesson.prompt_id, path.mode
+    select lesson.id, lesson.prompt_id, path.mode, chapter.level as difficulty
     from public.practice_lessons as lesson
     join public.practice_chapters as chapter on chapter.id = lesson.chapter_id
     join public.practice_paths as path on path.id = chapter.path_id
     where path.slug = 'general-speaking'
     order by chapter.position, lesson.position
-    limit 2 offset 1
+    limit 3
   `)
   const target = lessons.rows[0]
   const malformedTarget = lessons.rows[1]
-  assert(target && malformedTarget, `${label}: v3 progress test lessons are missing`)
+  const lockedTarget = lessons.rows[2]
+  assert(
+    target && malformedTarget && lockedTarget,
+    `${label}: v3 progress test lessons are missing`,
+  )
 
   const insertAttempt = async ({ userId, lesson, rubricVersion, score, payload, finishedAt }) =>
     client.query(
       `insert into public.attempts (
          user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
          prompt_difficulty, rubric_version, status, finished_at, score, section_scores
-       ) values ($1, $2, $3, 'Versioned progression snapshot', $4, 'library', 'beginner',
-         $5, 'done', $6::timestamptz, $7, $8::jsonb)
+       ) values ($1, $2, $3, 'Versioned progression snapshot', $4, 'library', $5,
+         $6, 'done', $7::timestamptz, $8, $9::jsonb)
        returning id`,
       [
         userId,
         lesson.prompt_id,
         lesson.id,
         lesson.mode,
+        lesson.difficulty,
         rubricVersion,
         finishedAt,
         score,
@@ -1834,7 +2220,7 @@ async function assertV3Progression(label) {
       ],
     )
 
-  await insertAttempt({
+  const obsoleteAttempt = await insertAttempt({
     userId: USERS.owner,
     lesson: target,
     rubricVersion: 'v2',
@@ -1842,6 +2228,12 @@ async function assertV3Progression(label) {
     payload: structuredScorePayload(target.mode, 72),
     finishedAt: '2026-09-03T10:00:00Z',
   })
+  const progressAfterObsolete = await client.query(
+    `select count(*)::integer as count from public.lesson_progress
+     where best_attempt_id = $1`,
+    [obsoleteAttempt.rows[0].id],
+  )
+  assert(progressAfterObsolete.rows[0]?.count === 0, `${label}: a v2 result raised progress`)
   const v3Attempt = await insertAttempt({
     userId: USERS.owner,
     lesson: target,
@@ -1899,10 +2291,166 @@ async function assertV3Progression(label) {
     `${label}: a higher v3 retry did not replace the durable best`,
   )
 
+  const nextLessonAttempt = await insertAttempt({
+    userId: USERS.owner,
+    lesson: malformedTarget,
+    rubricVersion: 'v3',
+    score: 69,
+    payload: structuredV3ScorePayload(malformedTarget.mode, 69),
+    finishedAt: '2026-09-03T10:04:00Z',
+  })
+  const nextProgress = await client.query(
+    `select best_score, best_attempt_id from public.lesson_progress
+     where user_id = $1 and lesson_id = $2`,
+    [USERS.owner, malformedTarget.id],
+  )
+  assert(
+    nextProgress.rows[0]?.best_score === 69 &&
+      nextProgress.rows[0]?.best_attempt_id === nextLessonAttempt.rows[0]?.id,
+    `${label}: a reachable below-threshold result was not retained`,
+  )
+  const blockedAfter69 = await insertAttempt({
+    userId: USERS.owner,
+    lesson: lockedTarget,
+    rubricVersion: 'v3',
+    score: 95,
+    payload: structuredV3ScorePayload(lockedTarget.mode, 95),
+    finishedAt: '2026-09-03T10:04:30Z',
+  })
+  const blockedAfter69Progress = await client.query(
+    'select count(*)::integer as count from public.lesson_progress where best_attempt_id = $1',
+    [blockedAfter69.rows[0].id],
+  )
+  assert(
+    blockedAfter69Progress.rows[0]?.count === 0,
+    `${label}: a 69-point lesson unlocked its successor`,
+  )
+
+  const unreachableAttempt = await insertAttempt({
+    userId: USERS.other,
+    lesson: malformedTarget,
+    rubricVersion: 'v3',
+    score: 90,
+    payload: structuredV3ScorePayload(malformedTarget.mode, 90),
+    finishedAt: '2026-09-03T10:05:00Z',
+  })
+  const unreachableProgress = await client.query(
+    `select count(*)::integer as count from public.lesson_progress
+     where best_attempt_id = $1`,
+    [unreachableAttempt.rows[0].id],
+  )
+  assert(unreachableProgress.rows[0]?.count === 0, `${label}: an unreachable lesson progressed`)
+
+  const neutralAttempt = await insertAttempt({
+    userId: USERS.other,
+    lesson: target,
+    rubricVersion: 'v3',
+    score: null,
+    payload: neutralV3ScorePayload(target.mode, 80),
+    finishedAt: '2026-09-03T10:06:00Z',
+  })
+  const neutralProgress = await client.query(
+    `select count(*)::integer as count from public.lesson_progress
+     where best_attempt_id = $1`,
+    [neutralAttempt.rows[0].id],
+  )
+  assert(neutralProgress.rows[0]?.count === 0, `${label}: a neutral result raised progress`)
+
+  const tieAttemptIds = [
+    'b1000000-0000-4000-8000-000000000001',
+    'b2000000-0000-4000-8000-000000000002',
+  ]
+  for (const attemptId of tieAttemptIds) {
+    await client.query(
+      `insert into public.attempts (
+         id, user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
+         prompt_difficulty, rubric_version, status, finished_at, score, section_scores
+       ) values ($1, $2, $3, $4, 'Deterministic tie snapshot', $5, 'library', $6,
+         'v3', 'done', '2026-09-03T10:07:00Z', 80, $7::jsonb)`,
+      [
+        attemptId,
+        USERS.other,
+        target.prompt_id,
+        target.id,
+        target.mode,
+        target.difficulty,
+        JSON.stringify(structuredV3ScorePayload(target.mode, 80)),
+      ],
+    )
+  }
+  const deterministicTie = await client.query(
+    `select best_score, best_attempt_id from public.lesson_progress
+     where user_id = $1 and lesson_id = $2`,
+    [USERS.other, target.id],
+  )
+  assert(
+    deterministicTie.rows[0]?.best_score === 80 &&
+      deterministicTie.rows[0]?.best_attempt_id === tieAttemptIds[1],
+    `${label}: equal score and completion time did not prefer the greater UUID`,
+  )
+
+  const topologyAttempts = []
+  for (const fixture of [
+    {
+      promptId: malformedTarget.prompt_id,
+      mode: target.mode,
+      source: 'library',
+      difficulty: target.difficulty,
+    },
+    {
+      promptId: target.prompt_id,
+      mode: target.mode,
+      source: 'custom',
+      difficulty: target.difficulty,
+    },
+    {
+      promptId: target.prompt_id,
+      mode: target.mode,
+      source: 'library',
+      difficulty: 'advanced',
+    },
+    {
+      promptId: target.prompt_id,
+      mode: 'interview',
+      source: 'library',
+      difficulty: target.difficulty,
+    },
+  ]) {
+    const topologyAttempt = await client.query(
+      `insert into public.attempts (
+         user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
+         prompt_difficulty, rubric_version, status, finished_at, score, section_scores
+       ) values ($1, $2, $3, 'Invalid topology snapshot', $4, $5, $6,
+         'v3', 'done', '2026-09-03T10:08:00Z', 90, $7::jsonb)
+       returning id`,
+      [
+        USERS.other,
+        fixture.promptId,
+        target.id,
+        fixture.mode,
+        fixture.source,
+        fixture.difficulty,
+        JSON.stringify(structuredV3ScorePayload(fixture.mode, 90)),
+      ],
+    )
+    topologyAttempts.push(topologyAttempt.rows[0].id)
+  }
+  const topologyProgress = await client.query(
+    `select count(*)::integer as count from public.lesson_progress
+     where best_attempt_id = any($1::uuid[])`,
+    [topologyAttempts],
+  )
+  assert(topologyProgress.rows[0]?.count === 0, `${label}: invalid attempt topology progressed`)
+
   const rejectedAttemptIds = []
+  const futurePayload = cloneJson(structuredV3ScorePayload(malformedTarget.mode, 90))
+  futurePayload.version = 'v3.score.99'
   const mixedPayloads = [
+    ['v2', structuredScorePayload(malformedTarget.mode, 90)],
+    ['v3', structuredLegacyV3ScorePayload(malformedTarget.mode, 90)],
+    [null, legacyActivityPayload(90)],
+    ['v3', futurePayload],
     ['v2', structuredV3ScorePayload(malformedTarget.mode, 90)],
-    ['v3', structuredScorePayload(malformedTarget.mode, 90)],
   ]
   for (const [index, [rubricVersion, payload]] of mixedPayloads.entries()) {
     const attempt = await insertAttempt({
@@ -1916,6 +2464,16 @@ async function assertV3Progression(label) {
     rejectedAttemptIds.push(attempt.rows[0].id)
   }
   for (const [index, payload] of malformedV3Payloads(malformedTarget.mode, 90).entries()) {
+    const validation = await client.query(
+      `select public.is_valid_current_score_payload_for_attempt(
+         $1::jsonb, $2, 90
+       ) as valid`,
+      [JSON.stringify(payload), malformedTarget.mode],
+    )
+    assert(
+      validation.rows[0]?.valid === false,
+      `${label}: malformed v3 payload ${index + 1} passed`,
+    )
     const attempt = await insertAttempt({
       userId: USERS.other,
       lesson: malformedTarget,
@@ -1932,6 +2490,118 @@ async function assertV3Progression(label) {
     [rejectedAttemptIds],
   )
   assert(rejectedProgress.rows[0]?.count === 0, `${label}: mixed or malformed v3 raised progress`)
+
+  await client.query('set role service_role')
+  try {
+    await expectPgError(
+      () =>
+        client.query(
+          `update public.lesson_progress
+           set best_score = 99, best_attempt_id = $1
+           where user_id = $2 and lesson_id = $3`,
+          [obsoleteAttempt.rows[0].id, USERS.owner, target.id],
+        ),
+      '23514',
+      `${label}: obsolete forged durable best`,
+    )
+    await expectPgError(
+      () =>
+        client.query(
+          `insert into public.lesson_progress (user_id, lesson_id, best_score, best_attempt_id)
+           values ($1, $2, 90, $3)`,
+          [USERS.other, malformedTarget.id, rejectedAttemptIds[0]],
+        ),
+      '23514',
+      `${label}: malformed forged durable best`,
+    )
+    await expectPgError(
+      () =>
+        client.query(
+          `insert into public.lesson_progress (user_id, lesson_id, best_score, best_attempt_id)
+           values ($1, $2, 92, $3)`,
+          [USERS.other, malformedTarget.id, v3Attempt.rows[0].id],
+        ),
+      '23514',
+      `${label}: mismatched-user forged durable best`,
+    )
+  } finally {
+    await resetRole()
+  }
+
+  await seedAuthUser(USERS.progression, `${label} progression`)
+  const checkpointLessons = await client.query(`
+    select lesson.id, lesson.prompt_id, path.mode, chapter.level as difficulty,
+      chapter.position as chapter_position, lesson.position as lesson_position
+    from public.practice_lessons as lesson
+    join public.practice_chapters as chapter on chapter.id = lesson.chapter_id
+    join public.practice_paths as path on path.id = chapter.path_id
+    where path.slug = 'general-speaking'
+    order by chapter.position, lesson.position
+    limit 11
+  `)
+  assert(checkpointLessons.rowCount === 11, `${label}: checkpoint fixtures are missing`)
+  const chapterTwoFirst = checkpointLessons.rows[10]
+  for (const [index, lesson] of checkpointLessons.rows.slice(0, 9).entries()) {
+    await insertAttempt({
+      userId: USERS.progression,
+      lesson,
+      rubricVersion: 'v3',
+      score: 75,
+      payload: structuredV3ScorePayload(lesson.mode, 75),
+      finishedAt: `2026-09-04T10:${String(index).padStart(2, '0')}:00Z`,
+    })
+  }
+  const checkpoint = checkpointLessons.rows[9]
+  await insertAttempt({
+    userId: USERS.progression,
+    lesson: checkpoint,
+    rubricVersion: 'v3',
+    score: 69,
+    payload: structuredV3ScorePayload(checkpoint.mode, 69),
+    finishedAt: '2026-09-04T10:09:00Z',
+  })
+  const blockedAcrossCheckpoint = await insertAttempt({
+    userId: USERS.progression,
+    lesson: chapterTwoFirst,
+    rubricVersion: 'v3',
+    score: 95,
+    payload: structuredV3ScorePayload(chapterTwoFirst.mode, 95),
+    finishedAt: '2026-09-04T10:10:00Z',
+  })
+  let checkpointProgress = await client.query(
+    'select count(*)::integer as count from public.lesson_progress where best_attempt_id = $1',
+    [blockedAcrossCheckpoint.rows[0].id],
+  )
+  assert(
+    checkpointProgress.rows[0]?.count === 0,
+    `${label}: a 69-point checkpoint unlocked the next chapter`,
+  )
+  await insertAttempt({
+    userId: USERS.progression,
+    lesson: checkpoint,
+    rubricVersion: 'v3',
+    score: 85,
+    payload: structuredV3ScorePayload(checkpoint.mode, 85),
+    finishedAt: '2026-09-04T10:11:00Z',
+  })
+  const acceptedAcrossCheckpoint = await insertAttempt({
+    userId: USERS.progression,
+    lesson: chapterTwoFirst,
+    rubricVersion: 'v3',
+    score: 95,
+    payload: structuredV3ScorePayload(chapterTwoFirst.mode, 95),
+    finishedAt: '2026-09-04T10:12:00Z',
+  })
+  checkpointProgress = await client.query(
+    `select best_score, best_attempt_id from public.lesson_progress
+     where user_id = $1 and lesson_id = $2`,
+    [USERS.progression, chapterTwoFirst.id],
+  )
+  assert(
+    checkpointProgress.rows[0]?.best_score === 95 &&
+      checkpointProgress.rows[0]?.best_attempt_id === acceptedAcrossCheckpoint.rows[0].id,
+    `${label}: a passed checkpoint did not unlock the next chapter`,
+  )
 }
 
 async function reapplyCurriculumData(migrations, label) {
@@ -2192,8 +2862,12 @@ async function runPreCurriculumUpgrade(migrations) {
   )
   assert(
     JSON.stringify(v3Progression.map(({ name }) => name)) ===
-      JSON.stringify(['v3_progression_compatibility', 'v3_score_2_progression_compatibility']),
-    'expected both additive v3 progression migrations',
+      JSON.stringify([
+        'v3_progression_compatibility',
+        'v3_score_2_progression_compatibility',
+        'current_v3_score_2_progression',
+      ]),
+    'expected both compatibility migrations and the current-only cleanup',
   )
 
   await applyAll(preCurriculum)
@@ -2366,12 +3040,12 @@ async function runPreCurriculumUpgrade(migrations) {
   await assertCurriculumCoverage('pre-curriculum')
   await assertLifecycleAndIdempotency('pre-curriculum')
   await assertAttemptSecurity('pre-curriculum')
-  await assertCurriculumSecurity('pre-curriculum')
   await reapplyCurriculumData(migrations, 'pre-curriculum')
   await applyAll(phase5)
   await assertActivitySecurity('pre-curriculum')
   await applyAll(hardening)
   await applyAll(v3Progression)
+  await assertCurriculumSecurity('pre-curriculum')
   await assertV3Progression('pre-curriculum')
   await assertGrantHardening('pre-curriculum')
   console.log('pass nine-migration pre-curriculum upgrade chain')
@@ -2398,8 +3072,12 @@ async function runPrePhase5Upgrade(migrations) {
   )
   assert(
     JSON.stringify(v3Progression.map(({ name }) => name)) ===
-      JSON.stringify(['v3_progression_compatibility', 'v3_score_2_progression_compatibility']),
-    'pre-Phase-5 upgrade must end with both additive v3 progression validators',
+      JSON.stringify([
+        'v3_progression_compatibility',
+        'v3_score_2_progression_compatibility',
+        'current_v3_score_2_progression',
+      ]),
+    'pre-Phase-5 upgrade must end with compatibility and current-only progression',
   )
 
   await applyAll(prePhase5)
@@ -2490,8 +3168,12 @@ async function runGrantHardeningUpgrade(migrations) {
   )
   assert(
     JSON.stringify(v3Progression.map(({ name }) => name)) ===
-      JSON.stringify(['v3_progression_compatibility', 'v3_score_2_progression_compatibility']),
-    'grant-hardening upgrade must be followed by both v3 progression validators',
+      JSON.stringify([
+        'v3_progression_compatibility',
+        'v3_score_2_progression_compatibility',
+        'current_v3_score_2_progression',
+      ]),
+    'grant-hardening upgrade must be followed by compatibility and current-only progression',
   )
 
   await seedAuthUser(USERS.missingProfile, 'Hardening Upgrade General')
@@ -2539,6 +3221,21 @@ async function runGrantHardeningUpgrade(migrations) {
   )
 
   await applyAll(v3Progression)
+  const progressBeforeReplay = await client.query(
+    `select row_to_json(progress)::text as snapshot
+     from public.lesson_progress as progress
+     order by progress.user_id, progress.lesson_id`,
+  )
+  await applyMigration(client, v3Progression.at(-1))
+  const progressAfterReplay = await client.query(
+    `select row_to_json(progress)::text as snapshot
+     from public.lesson_progress as progress
+     order by progress.user_id, progress.lesson_id`,
+  )
+  assert(
+    JSON.stringify(progressAfterReplay.rows) === JSON.stringify(progressBeforeReplay.rows),
+    'grant-hardening upgrade: current cleanup replay was not idempotent',
+  )
   const replayedV3 = await client.query(
     `select best_score, best_attempt_id from public.lesson_progress
      where user_id = $1 and lesson_id = $2`,
@@ -2555,27 +3252,197 @@ async function runGrantHardeningUpgrade(migrations) {
   await assertActivitySecurity('grant-hardening upgrade')
   await assertGrantHardening('grant-hardening upgrade')
 
-  await applyAll(hardening)
-  await applyAll(v3Progression)
-  await assertGrantHardening('grant-hardening reapplied')
   console.log('pass exact 13-migration Production grant-hardening upgrade')
+}
+
+async function runCurrentBoundaryUpgrade(migrations, boundaryName, label) {
+  await bootstrapSupabaseSurface()
+  const boundaryIndex = migrations.findIndex(({ name }) => name === boundaryName)
+  assert(boundaryIndex >= 0, `${label}: boundary migration is missing`)
+  await applyAll(migrations.slice(0, boundaryIndex + 1))
+  await seedAuthUser(USERS.owner, `${label} owner`)
+  await seedAuthUser(USERS.other, `${label} threshold owner`)
+
+  const lessons = await client.query(`
+    select lesson.id, lesson.prompt_id, path.mode, chapter.level as difficulty
+    from public.practice_lessons as lesson
+    join public.practice_chapters as chapter on chapter.id = lesson.chapter_id
+    join public.practice_paths as path on path.id = chapter.path_id
+    where path.slug = 'general-speaking'
+    order by chapter.position, lesson.position
+    limit 2
+  `)
+  assert(lessons.rowCount === 2, `${label}: lesson fixtures are missing`)
+  const [first, second] = lessons.rows
+
+  const insertVersioned = async (
+    lesson,
+    rubricVersion,
+    score,
+    payload,
+    finishedAt,
+    userId = USERS.owner,
+  ) =>
+    client.query(
+      `insert into public.attempts (
+         user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
+         prompt_difficulty, rubric_version, status, finished_at, score, section_scores
+       ) values ($1, $2, $3, $4, $5, 'library', $6, $7, 'done', $8, $9, $10::jsonb)
+       returning id`,
+      [
+        userId,
+        lesson.prompt_id,
+        lesson.id,
+        `${label} immutable snapshot`,
+        lesson.mode,
+        lesson.difficulty,
+        rubricVersion,
+        finishedAt,
+        score,
+        JSON.stringify(payload),
+      ],
+    )
+
+  await insertVersioned(
+    first,
+    'v2',
+    99,
+    structuredScorePayload(first.mode, 99),
+    '2026-09-01T09:00:00Z',
+  )
+  await insertVersioned(
+    first,
+    'v3',
+    98,
+    structuredLegacyV3ScorePayload(first.mode, 98),
+    '2026-09-03T09:00:00Z',
+  )
+  const currentFirst = await insertVersioned(
+    first,
+    'v3',
+    92,
+    structuredV3ScorePayload(first.mode, 92),
+    '2026-09-04T09:00:00Z',
+  )
+  const currentSecond = await insertVersioned(
+    second,
+    'v3',
+    91,
+    structuredV3ScorePayload(second.mode, 91),
+    '2026-09-04T09:01:00Z',
+  )
+  await insertVersioned(
+    first,
+    'v2',
+    99,
+    structuredScorePayload(first.mode, 99),
+    '2026-09-01T10:00:00Z',
+    USERS.other,
+  )
+  const belowThresholdFirst = await insertVersioned(
+    first,
+    'v3',
+    69,
+    structuredV3ScorePayload(first.mode, 69),
+    '2026-09-04T10:00:00Z',
+    USERS.other,
+  )
+  await insertVersioned(
+    second,
+    'v3',
+    91,
+    structuredV3ScorePayload(second.mode, 91),
+    '2026-09-04T10:01:00Z',
+    USERS.other,
+  )
+
+  const beforeAttempts = await client.query(
+    `select row_to_json(attempt)::text as snapshot
+     from public.attempts as attempt
+     where attempt.user_id = any($1::uuid[])
+     order by attempt.id`,
+    [[USERS.owner, USERS.other]],
+  )
+  await applyAll(migrations.slice(boundaryIndex + 1))
+  const afterAttempts = await client.query(
+    `select row_to_json(attempt)::text as snapshot
+     from public.attempts as attempt
+     where attempt.user_id = any($1::uuid[])
+     order by attempt.id`,
+    [[USERS.owner, USERS.other]],
+  )
+  assert(
+    JSON.stringify(afterAttempts.rows) === JSON.stringify(beforeAttempts.rows),
+    `${label}: cleanup rewrote immutable attempt rows`,
+  )
+
+  const rebuilt = await client.query(
+    `select user_id, lesson_id, best_score, best_attempt_id
+     from public.lesson_progress
+     where user_id = any($1::uuid[])
+     order by user_id, lesson_id`,
+    [[USERS.owner, USERS.other]],
+  )
+  assert(
+    rebuilt.rowCount === 3 &&
+      rebuilt.rows.some(
+        (row) =>
+          row.user_id === USERS.owner &&
+          row.lesson_id === first.id &&
+          row.best_score === 92 &&
+          row.best_attempt_id === currentFirst.rows[0].id,
+      ) &&
+      rebuilt.rows.some(
+        (row) =>
+          row.user_id === USERS.owner &&
+          row.lesson_id === second.id &&
+          row.best_score === 91 &&
+          row.best_attempt_id === currentSecond.rows[0].id,
+      ) &&
+      rebuilt.rows.some(
+        (row) =>
+          row.user_id === USERS.other &&
+          row.lesson_id === first.id &&
+          row.best_score === 69 &&
+          row.best_attempt_id === belowThresholdFirst.rows[0].id,
+      ) &&
+      !rebuilt.rows.some(
+        (row) =>
+          row.user_id === USERS.other && row.lesson_id === second.id && row.best_score === 91,
+      ),
+    `${label}: cleanup did not rebuild current-only sequential bests`,
+  )
+  await assertNoteFeedbackSecurity(label)
+  await assertGrantHardening(label)
+  console.log(`pass ${label}`)
 }
 
 try {
   await client.connect()
   const migrations = loadMigrations()
   assert(
-    migrations.length === 16,
-    'Expected nine production, three curriculum, one Phase 5, one hardening, and two v3 migrations.',
+    migrations.length === 17,
+    'Expected nine production, three curriculum, one Phase 5, one hardening, two compatibility migrations, and one current-only cleanup.',
   )
   await runFresh(migrations)
   await runUpgrade(migrations)
   await runPreCurriculumUpgrade(migrations)
   await runPrePhase5Upgrade(migrations)
   await runGrantHardeningUpgrade(migrations)
+  await runCurrentBoundaryUpgrade(migrations, 'curriculum_grant_hardening', 'pre-v3 upgrade')
+  await runCurrentBoundaryUpgrade(
+    migrations,
+    'v3_progression_compatibility',
+    'v3.score.1 intermediate upgrade',
+  )
+  await runCurrentBoundaryUpgrade(
+    migrations,
+    'v3_score_2_progression_compatibility',
+    'v3.score.2 compatibility upgrade',
+  )
   console.log('Migration integration harness passed.')
 } catch (error) {
-  console.error(`Migration integration harness failed: ${error.message}`)
+  console.error(`Migration integration harness failed: ${error.stack ?? error.message}`)
   process.exitCode = 1
 } finally {
   await client.end().catch(() => undefined)
