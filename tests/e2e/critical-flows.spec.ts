@@ -267,6 +267,76 @@ test('keeps direct standalone practice routes valid without rediscovering them',
   }
 })
 
+test('opens path overviews from track cards while Progress stays informational', async ({
+  page,
+}) => {
+  await logIn(page)
+  await page.goto('/progress')
+  await expect(page.getByRole('region', { name: 'Track progress' })).toBeVisible()
+  await expect(page.getByText(/view path/i)).toHaveCount(0)
+  for (const slug of ['general-speaking', 'interviews', 'presentations', 'conversations']) {
+    await expect(page.locator(`a[href="/practice/paths/${slug}"]`)).toHaveCount(0)
+  }
+
+  const tracks = [
+    ['General Speaking', 'general-speaking'],
+    ['Interviews', 'interviews'],
+    ['Presentations', 'presentations'],
+    ['Conversations', 'conversations'],
+  ] as const
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport)
+    await page.goto('/practice')
+    for (const [title] of tracks) {
+      await expect(page.getByRole('link', { name: `View ${title} track` })).toBeVisible()
+    }
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true)
+  }
+
+  await page.goto('/practice')
+  for (const [title, slug] of tracks) {
+    const cardLink = page.getByRole('link', { name: `View ${title} track` })
+    const action = cardLink.locator('..').getByRole('link', { name: 'Start' })
+    await expect(action).toHaveAttribute(
+      'href',
+      `/practice/paths/${slug}/lessons/${slug}-beginner-01-skill-1/record`,
+    )
+  }
+  expect(await page.locator('a a').count()).toBe(0)
+
+  await page
+    .getByRole('link', { name: 'View General Speaking track' })
+    .locator('..')
+    .getByRole('link', { name: 'Start' })
+    .click()
+  await expect(page).toHaveURL(
+    /\/practice\/paths\/general-speaking\/lessons\/general-speaking-beginner-01-skill-1\/record$/,
+  )
+  await page.goto('/practice')
+
+  const interviews = page.getByRole('link', { name: 'View Interviews track' })
+  await interviews.focus()
+  await expect(interviews).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/\/practice\/paths\/interviews$/)
+
+  for (const [title, slug] of tracks) {
+    await page.goto('/practice')
+    await page.getByRole('link', { name: `View ${title} track` }).click()
+    await expect(page).toHaveURL(new RegExp(`/practice/paths/${slug}$`))
+    await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible()
+  }
+})
+
 test('keeps the full brand and final navigation within desktop and narrow viewports', async ({
   page,
 }) => {

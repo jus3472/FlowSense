@@ -382,6 +382,37 @@ describe('Practice overview', () => {
     expect(screen.getByText('90 / 90 stars')).toBeInTheDocument()
   })
 
+  it('links every track card to its path without nesting the lesson actions', () => {
+    const { container } = render(<PracticeOverview overview={overview()} />)
+
+    for (const [title, slug] of [
+      ['General Speaking', 'general-speaking'],
+      ['Interviews', 'interviews'],
+      ['Presentations', 'presentations'],
+      ['Conversations', 'conversations'],
+    ] as const) {
+      const cardLink = screen.getByRole('link', { name: `View ${title} track` })
+      expect(cardLink).toHaveAttribute('href', `/practice/paths/${slug}`)
+      expect(cardLink).toHaveClass('cursor-pointer', 'focus-visible:ring-2')
+      cardLink.focus()
+      expect(cardLink).toHaveFocus()
+    }
+
+    expect(container.querySelectorAll('a a')).toHaveLength(0)
+    expect(screen.getByRole('link', { name: 'Try Again' })).toHaveAttribute(
+      'href',
+      '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record?retry=attempt-interviews-1',
+    )
+    expect(screen.getByRole('link', { name: 'Continue' })).toHaveAttribute(
+      'href',
+      '/practice/paths/conversations/lessons/conversations-beginner-03-skill-3/record',
+    )
+    expect(screen.getByRole('link', { name: 'Start' })).toHaveAttribute(
+      'href',
+      '/practice/paths/general-speaking/lessons/general-speaking-beginner-01-skill-1/record',
+    )
+  })
+
   it('describes neutral activity without implying which response was most recent', () => {
     const paths = allPaths().map((item) =>
       item.path.slug === 'general-speaking'

@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { CurriculumStars } from '@/components/curriculum/stars'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -43,7 +44,13 @@ function PathCard({ item }: { item: CurriculumOverviewData['paths'][number] }) {
   const action = pathAction(progress)
 
   return (
-    <Card className="flex min-w-0 flex-col gap-6 sm:p-8">
+    <Card className="hover:bg-surface-sunken relative flex min-w-0 flex-col gap-6 transition duration-150 ease-out sm:p-8">
+      <Link
+        href={curriculumPathHref(progress.path.slug)}
+        aria-label={`View ${progress.path.title} track`}
+        className="rounded-card focus-visible:ring-accent focus-visible:ring-offset-background absolute inset-0 cursor-pointer focus-visible:ring-2 focus-visible:ring-offset-2"
+      />
+
       <h2 className="text-foreground min-w-0 text-lg font-semibold break-words">
         {progress.path.title}
       </h2>
@@ -102,6 +109,7 @@ function PathCard({ item }: { item: CurriculumOverviewData['paths'][number] }) {
         href={action.href}
         fullWidth
         variant={selection === 'primary' ? 'primary' : 'secondary'}
+        className="relative z-10"
       >
         {action.label}
       </ButtonLink>

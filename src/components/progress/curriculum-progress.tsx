@@ -7,7 +7,7 @@ import type {
   CurriculumPathProgress,
 } from '@/lib/curriculum/contracts'
 import type { CurriculumOverviewData, CurriculumOverviewPath } from '@/lib/curriculum/overview'
-import { curriculumLessonHref, curriculumPathHref } from '@/lib/curriculum/routes'
+import { curriculumLessonHref } from '@/lib/curriculum/routes'
 import { PASSING_SCORE } from '@/lib/curriculum/thresholds'
 
 function currentLesson(progress: CurriculumPathProgress): CurriculumLessonProgress | null {
@@ -133,13 +133,6 @@ function SelectedPathProgress({ item }: { item: CurriculumOverviewPath }) {
           />
         ))}
       </ol>
-
-      <Link
-        href={curriculumPathHref(progress.path.slug)}
-        className="text-accent min-h-11 self-start py-3 text-sm font-medium"
-      >
-        View path
-      </Link>
     </Card>
   )
 }
@@ -147,10 +140,7 @@ function SelectedPathProgress({ item }: { item: CurriculumOverviewPath }) {
 function AvailablePathProgress({ item }: { item: CurriculumOverviewPath }) {
   const { progress } = item
   return (
-    <Link
-      href={curriculumPathHref(progress.path.slug)}
-      className="border-border bg-surface shadow-card rounded-card hover:bg-surface-sunken flex min-h-11 min-w-0 flex-col gap-3 border p-4"
-    >
+    <Card className="flex min-h-11 min-w-0 flex-col gap-3 p-4">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <h3 className="text-foreground font-medium break-words">{progress.path.title}</h3>
         <span className="text-muted text-xs">Not selected</span>
@@ -164,7 +154,7 @@ function AvailablePathProgress({ item }: { item: CurriculumOverviewPath }) {
         </span>
         <span className="numeric">{progress.summary.masteredLessons} mastered</span>
       </div>
-    </Link>
+    </Card>
   )
 }
 

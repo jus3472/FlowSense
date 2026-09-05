@@ -212,6 +212,21 @@ describe('curriculum progress display', () => {
     expect(screen.getAllByText('Not selected')).toHaveLength(2)
   })
 
+  it('keeps track progress details without linking to path overviews', () => {
+    render(
+      <CurriculumProgress
+        overview={overview({ 'general-speaking': [90, 80], interviews: [70] })}
+      />,
+    )
+
+    expect(screen.queryByRole('link', { name: /view path/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /view .* track/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'General Speaking' })).toBeInTheDocument()
+    expect(screen.getByText('2 / 30')).toBeInTheDocument()
+    expect(screen.getByText('5 / 90')).toBeInTheDocument()
+    expect(screen.getAllByText('Not selected')).toHaveLength(3)
+  })
+
   it('keeps valid curriculum visible when speaking trends fail, and vice versa', () => {
     const { rerender } = render(<ProgressDashboard dashboard={null} curriculum={overview()} />)
 
