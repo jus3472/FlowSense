@@ -200,6 +200,30 @@ describe('attempt deletion cache invalidation', () => {
     expect(mocks.revalidatePath).not.toHaveBeenCalled()
   })
 
+  it('does not delete a capture-only recording through the current runtime path', async () => {
+    const storagePath = `${USER_ID}/${ATTEMPT_ID}.webm`
+    const setup = adminClient(
+      { data: { id: ATTEMPT_ID }, error: null },
+      {
+        id: ATTEMPT_ID,
+        audio_path: storagePath,
+        status: 'timed_out',
+        failure_code: 'recording_unavailable',
+        metrics: { capture: { mime_type: 'audio/webm;codecs=opus' } },
+      },
+    )
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+
+    const response = await DELETE(new Request('http://localhost'), {
+      params: Promise.resolve({ id: ATTEMPT_ID }),
+    })
+
+    expect(response.status).toBe(409)
+    expect(setup.claimQuery.update).not.toHaveBeenCalled()
+    expect(setup.remove).not.toHaveBeenCalled()
+    expect(setup.deleteQuery.delete).not.toHaveBeenCalled()
+  })
+
   it.each(['uploading', 'transcribing', 'scoring'])(
     'does not delete Storage or the row while an attempt is %s',
     async (status) => {

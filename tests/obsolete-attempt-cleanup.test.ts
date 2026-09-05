@@ -5,6 +5,7 @@ import {
   parseCleanupArguments,
   parseObsoleteGenerations,
   selectObsoleteAttempts,
+  selectTerminalCleanupAttempts,
   type MaintenanceAttemptRow,
 } from '@/lib/maintenance/obsolete-attempts'
 import { assertSafePlan, type CleanupPlan } from '../scripts/lib/obsolete-attempt-cleanup'
@@ -109,7 +110,10 @@ describe('obsolete-attempt cleanup selection', () => {
       ...valid,
       sections: {
         ...valid.sections,
-        how_you_sounded: { ...valid.sections.how_you_sounded, metrics: { energy: valid.sections.how_you_sounded.metrics.energy } },
+        how_you_sounded: {
+          ...valid.sections.how_you_sounded,
+          metrics: { energy: valid.sections.how_you_sounded.metrics.energy },
+        },
       },
     })
     const nonnumericPoints = row('10000000-0000-4000-8000-000000000024', {
@@ -127,23 +131,51 @@ describe('obsolete-attempt cleanup selection', () => {
       ...legacySectionSnapshot,
       content: { ...legacySectionSnapshot.content, earned: 49 },
     })
-    const legacyRowMismatch = row('10000000-0000-4000-8000-000000000027', legacySectionSnapshot, { score: 99 })
-    for (const candidate of [emptySections, wrongMetricKeys, nonnumericPoints, emptyCategories, legacySectionMismatch, legacyRowMismatch]) {
+    const legacyRowMismatch = row('10000000-0000-4000-8000-000000000027', legacySectionSnapshot, {
+      score: 99,
+    })
+    for (const candidate of [
+      emptySections,
+      wrongMetricKeys,
+      nonnumericPoints,
+      emptyCategories,
+      legacySectionMismatch,
+      legacyRowMismatch,
+    ]) {
       expect(classifyAttemptGeneration(candidate)).toMatchObject({ kind: 'malformed' })
     }
-    expect(selectObsoleteAttempts(
-      [emptySections, wrongMetricKeys, nonnumericPoints, emptyCategories, legacySectionMismatch, legacyRowMismatch],
-      USER_ID,
-      new Set(['v2.score.1', 'v3.score.1']),
-    )).toEqual([])
+    expect(
+      selectObsoleteAttempts(
+        [
+          emptySections,
+          wrongMetricKeys,
+          nonnumericPoints,
+          emptyCategories,
+          legacySectionMismatch,
+          legacyRowMismatch,
+        ],
+        USER_ID,
+        new Set(['v2.score.1', 'v3.score.1']),
+      ),
+    ).toEqual([])
   })
 
   it('targets only exact owned immutable audio paths', () => {
     const attemptId = '10000000-0000-4000-8000-000000000019'
     const path = `${USER_ID}/${attemptId}.webm`
+    const uploadOnlyAttemptId = '10000000-0000-4000-8000-000000000033'
+    const uploadOnlyPath = `${USER_ID}/${uploadOnlyAttemptId}.webm`
     const valid = row(attemptId, obsoleteV3Snapshot(), {
       audio_path: path,
       metrics: { upload: { storage_path: path, mime_type: 'audio/webm' } },
+    })
+    const uploadOnly = row(uploadOnlyAttemptId, null, {
+      status: 'failed',
+      score: null,
+      audio_path: null,
+      metrics: {
+        upload: { storage_path: uploadOnlyPath, mime_type: 'audio/webm' },
+      },
     })
     const unsafe = row('10000000-0000-4000-8000-000000000020', obsoleteV3Snapshot(), {
       audio_path: `${OTHER_USER_ID}/shared.webm`,
@@ -151,8 +183,8 @@ describe('obsolete-attempt cleanup selection', () => {
         upload: { storage_path: `${OTHER_USER_ID}/shared.webm`, mime_type: 'audio/webm' },
       },
     })
-    expect(ownedObsoleteAudioPaths([valid, unsafe], USER_ID)).toEqual({
-      paths: [path],
+    expect(ownedObsoleteAudioPaths([valid, uploadOnly, unsafe], USER_ID)).toEqual({
+      paths: [path, uploadOnlyPath],
       unsafeAttemptIds: [unsafe.id],
     })
   })
@@ -163,11 +195,73 @@ describe('obsolete-attempt cleanup selection', () => {
       deleteAudio: false,
       onlyUser: true,
       generations: ['v3.score.1'],
+      terminalAttemptIds: [],
     })
-    expect(() => parseCleanupArguments(['--only-user'])).toThrow(/--generation/)
+    expect(() => parseCleanupArguments(['--only-user'])).toThrow(/exactly one cleanup selector/)
     expect(() =>
       parseCleanupArguments(['--only-user', '--generation', 'v3.score.1', '--delete-audio']),
     ).toThrow(/requires --apply/)
+  })
+
+  it('selects only exact owned resultless terminal IDs', () => {
+    const failed = row('10000000-0000-4000-8000-000000000028', null, {
+      status: 'failed',
+      score: null,
+      rubric_version: 'v3',
+    })
+    const timedOut = row('10000000-0000-4000-8000-000000000029', null, {
+      status: 'timed_out',
+      score: null,
+    })
+    expect(
+      selectTerminalCleanupAttempts([failed, timedOut], USER_ID, [failed.id, timedOut.id]),
+    ).toEqual([failed, timedOut])
+    expect(
+      parseCleanupArguments([
+        '--only-user',
+        '--terminal-attempt-id',
+        failed.id,
+        '--terminal-attempt-id',
+        timedOut.id,
+      ]),
+    ).toMatchObject({
+      apply: false,
+      generations: [],
+      terminalAttemptIds: [failed.id, timedOut.id],
+    })
+  })
+
+  it('fails closed when an explicit terminal ID is missing, differently owned, or scored', () => {
+    const failed = row('10000000-0000-4000-8000-000000000030', null, {
+      status: 'failed',
+      score: null,
+    })
+    const otherUser = row('10000000-0000-4000-8000-000000000031', null, {
+      user_id: OTHER_USER_ID,
+      status: 'timed_out',
+      score: null,
+    })
+    const staleScored = row('10000000-0000-4000-8000-000000000032', v3Snapshot(), {
+      status: 'failed',
+    })
+    expect(() =>
+      selectTerminalCleanupAttempts([failed], USER_ID, [failed.id, otherUser.id]),
+    ).toThrow(/resolve/)
+    expect(() => selectTerminalCleanupAttempts([otherUser], USER_ID, [otherUser.id])).toThrow(
+      /owned failed or timed-out/,
+    )
+    expect(() => selectTerminalCleanupAttempts([staleScored], USER_ID, [staleScored.id])).toThrow(
+      /without a score result/,
+    )
+    expect(() =>
+      parseCleanupArguments([
+        '--only-user',
+        '--generation',
+        'v3.score.1',
+        '--terminal-attempt-id',
+        failed.id,
+      ]),
+    ).toThrow(/exactly one cleanup selector/)
   })
 
   it('fails closed before mutation when dependencies are unexpected', () => {
@@ -175,6 +269,7 @@ describe('obsolete-attempt cleanup selection', () => {
     const plan: CleanupPlan = {
       targetUserId: USER_ID,
       generations: ['v3.score.1'],
+      terminalAttemptIds: [],
       inventory: [],
       attempts: [attempt],
       dependencies: {
@@ -201,10 +296,22 @@ describe('obsolete-attempt cleanup selection', () => {
         removedActivityDays: 0,
         ownedAudioPaths: [],
         existingAudioObjects: 0,
+        missingAudioObjects: 0,
+        mismatchedAudioObjectOwners: 0,
         sharedAudioPaths: 0,
         unsafeAudioAttemptIds: [],
       },
     }
     expect(() => assertSafePlan(plan)).toThrow(/unexpected foreign keys/)
+    expect(() =>
+      assertSafePlan({
+        ...plan,
+        dependencies: {
+          ...plan.dependencies,
+          unexpectedReferences: [],
+          mismatchedAudioObjectOwners: 1,
+        },
+      }),
+    ).toThrow(/mismatched audio object ownership/)
   })
 })

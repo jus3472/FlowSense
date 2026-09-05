@@ -251,6 +251,33 @@ describe('transcription retry lifecycle', () => {
     expect(completedUpdate?.metrics.transcript).not.toHaveProperty('quality')
   })
 
+  it('does not resume provider work from capture-only path metadata', async () => {
+    const setup = adminFor({
+      data: attempt('failed', {
+        transcript: null,
+        metrics: { capture: { mime_type: 'audio/webm;codecs=opus' } },
+      }),
+      error: null,
+    })
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+    const provider = vi.fn()
+    vi.stubGlobal('fetch', provider)
+
+    const response = await POST(request())
+
+    expect(response.status).toBe(409)
+    expect(mocks.markOwnedAttemptFailure).toHaveBeenCalledWith(
+      setup.admin,
+      USER_ID,
+      ATTEMPT_ID,
+      ['transcribing'],
+      'failed',
+      'recording_path_invalid',
+    )
+    expect(setup.download).not.toHaveBeenCalled()
+    expect(provider).not.toHaveBeenCalled()
+  })
+
   it('returns a conflict when a race moves the attempt somewhere other than scoring or done', async () => {
     const setup = adminFor(
       { data: attempt('timed_out'), error: null },

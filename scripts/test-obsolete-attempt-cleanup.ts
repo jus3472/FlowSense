@@ -18,6 +18,8 @@ const OBSOLETE_BEST = 'a4000000-0000-4000-8000-000000000004'
 const CURRENT_ATTEMPT = 'a5000000-0000-4000-8000-000000000005'
 const OTHER_ATTEMPT = 'a6000000-0000-4000-8000-000000000006'
 const OBSOLETE_ONLY_BEST = 'a7000000-0000-4000-8000-000000000007'
+const TERMINAL_TIMED_OUT = 'a8000000-0000-4000-8000-000000000008'
+const TERMINAL_FAILED = 'a9000000-0000-4000-8000-000000000009'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -41,23 +43,25 @@ async function insertAttempt(input: {
   promptText: string
   createdAt: string
   rubricVersion: string | null
-  score: number
+  score: number | null
   sectionScores: unknown
   retryOf?: string | null
   audioPath?: string | null
   metrics?: unknown
   contentResult?: unknown
+  status?: 'done' | 'failed' | 'timed_out'
+  failureCode?: string | null
 }): Promise<void> {
   await client.query(
     `insert into public.attempts (
        id, user_id, prompt_id, lesson_id, prompt_text, audio_path, transcript, duration_ms,
        score, section_scores, metrics, content_result, created_at, practice_mode,
        prompt_source, prompt_difficulty, rubric_version, retry_of_attempt_id,
-       status, status_changed_at, finished_at
+       status, failure_code, status_changed_at, finished_at
      ) values (
        $1, $2, $3, $4, $5, $6, 'A complete disposable response.', 12000,
        $7, $8::jsonb, $9::jsonb, $10::jsonb, $11, 'practice',
-       'library', 'beginner', $12, $13, 'done', $11, $11
+       'library', 'beginner', $12, $13, $14, $15, $11, $11
      )`,
     [
       input.id,
@@ -73,6 +77,8 @@ async function insertAttempt(input: {
       input.createdAt,
       input.rubricVersion,
       input.retryOf ?? null,
+      input.status ?? 'done',
+      input.failureCode ?? null,
     ],
   )
 }
@@ -86,6 +92,8 @@ async function main(): Promise<void> {
     CURRENT_ATTEMPT,
     OTHER_ATTEMPT,
     OBSOLETE_ONLY_BEST,
+    TERMINAL_TIMED_OUT,
+    TERMINAL_FAILED,
   ]
   try {
     await client.query('delete from storage.objects where name like $1', [`${OWNER}/%`])
@@ -134,9 +142,11 @@ async function main(): Promise<void> {
        values ($1, $2, 'answered', 'A complete disposable response.')`,
       [OWNER, LEGACY_ATTEMPT],
     )
-    await client.query(`insert into storage.objects (bucket_id, name) values ('recordings', $1)`, [
-      legacyPath,
-    ])
+    await client.query(
+      `insert into storage.objects (bucket_id, name, owner, owner_id)
+       values ('recordings', $1, $2::uuid, $2::text)`,
+      [legacyPath, OWNER],
+    )
     await client.query(
       `insert into public.practice_activity_days (user_id, local_date, timezone)
        values ($1, '2035-01-01', 'UTC'), ($1, '2035-01-02', 'UTC')`,
@@ -191,6 +201,64 @@ async function main(): Promise<void> {
       sectionScores: obsolete,
     })
 
+    const terminalTimedOutPath = `${OWNER}/${TERMINAL_TIMED_OUT}.webm`
+    await insertAttempt({
+      id: TERMINAL_TIMED_OUT,
+      userId: OWNER,
+      lessonId: null,
+      promptId: null,
+      promptText: 'Timed-out terminal prompt',
+      createdAt: '2035-01-03T12:01:00Z',
+      rubricVersion: null,
+      score: null,
+      sectionScores: null,
+      audioPath: terminalTimedOutPath,
+      metrics: { capture: { mime_type: 'audio/webm' } },
+      status: 'timed_out',
+      failureCode: 'legacy_incomplete',
+    })
+    const terminalFailedPath = `${OWNER}/${TERMINAL_FAILED}.webm`
+    await insertAttempt({
+      id: TERMINAL_FAILED,
+      userId: OWNER,
+      lessonId: lesson.lesson_id,
+      promptId: lesson.prompt_id,
+      promptText: lesson.text,
+      createdAt: '2035-01-03T12:02:00Z',
+      rubricVersion: 'v3',
+      score: null,
+      sectionScores: null,
+      audioPath: terminalFailedPath,
+      metrics: {
+        upload: { storage_path: terminalFailedPath, mime_type: 'audio/webm' },
+        capture: { mime_type: 'audio/webm' },
+      },
+      status: 'failed',
+      failureCode: 'scoring_input_invalid',
+    })
+    await client.query(
+      `insert into storage.objects (bucket_id, name, owner, owner_id)
+       values
+         ('recordings', $1, $3::uuid, $3::text),
+         ('recordings', $2, $3::uuid, $3::text)`,
+      [terminalTimedOutPath, terminalFailedPath, OWNER],
+    )
+    await client.query(
+      `insert into public.lesson_progress (user_id, lesson_id, best_score, best_attempt_id)
+       values ($1, $2, $4, $3), ($1, $5, $4, $6)
+       on conflict (user_id, lesson_id) do update set
+         best_score = excluded.best_score,
+         best_attempt_id = excluded.best_attempt_id`,
+      [
+        OWNER,
+        lesson.lesson_id,
+        OBSOLETE_BEST,
+        obsolete.total_earned_points,
+        obsoleteOnlyLesson.lesson_id,
+        OBSOLETE_ONLY_BEST,
+      ],
+    )
+
     const plan = await buildCleanupPlan(client, OWNER, ['legacy', 'v3.score.1'])
     assert(plan.attempts.length === 3, 'Dry run did not select the owned obsolete attempts.')
     assert(plan.dependencies.durableBestReferences === 2, 'Dry run missed durable progress.')
@@ -204,7 +272,7 @@ async function main(): Promise<void> {
       'select count(*)::integer as count from public.attempts where id = any($1::uuid[])',
       [fixtureAttempts],
     )
-    assert(beforeApply.rows[0]?.count === 5, 'Dry run mutated attempts.')
+    assert(beforeApply.rows[0]?.count === 7, 'Dry run mutated attempts.')
 
     const result = await applyCleanupPlan(client, plan)
     assert(result.deletedAttempts === 3, 'Apply did not delete every obsolete attempt.')
@@ -264,6 +332,26 @@ async function main(): Promise<void> {
       [legacyPath],
     )
     assert(storageAfter.rows[0]?.count === 1, 'Database apply unexpectedly deleted Storage.')
+
+    const terminalPlan = await buildCleanupPlan(
+      client,
+      OWNER,
+      [],
+      [TERMINAL_TIMED_OUT, TERMINAL_FAILED],
+    )
+    assert(terminalPlan.attempts.length === 2, 'Terminal dry run did not select exact IDs.')
+    assert(terminalPlan.dependencies.durableBestReferences === 0, 'Terminal plan touched progress.')
+    assert(terminalPlan.dependencies.currentRetryChildren === 0, 'Terminal plan touched retries.')
+    assert(terminalPlan.dependencies.ownedAudioPaths.length === 2, 'Terminal audio scope changed.')
+    assert(terminalPlan.dependencies.existingAudioObjects === 2, 'Terminal Storage scope changed.')
+    const terminalResult = await applyCleanupPlan(client, terminalPlan)
+    assert(terminalResult.deletedAttempts === 2, 'Terminal apply did not delete exact attempts.')
+    assert(terminalResult.audioPathsToDelete.length === 2, 'Terminal apply selected wrong audio.')
+    const terminalAfter = await client.query(
+      'select count(*)::integer as count from public.attempts where id = any($1::uuid[])',
+      [[TERMINAL_TIMED_OUT, TERMINAL_FAILED]],
+    )
+    assert(terminalAfter.rows[0]?.count === 0, 'Terminal attempts remain after apply.')
     console.log('Obsolete-attempt cleanup integration test passed.')
   } finally {
     await client

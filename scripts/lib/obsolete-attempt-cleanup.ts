@@ -5,6 +5,7 @@ import {
   ownedObsoleteAudioPaths,
   promptKind,
   selectObsoleteAttempts,
+  selectTerminalCleanupAttempts,
   type MaintenanceAttemptRow,
   type ObsoleteAttemptGeneration,
 } from '@/lib/maintenance/obsolete-attempts'
@@ -63,6 +64,8 @@ export interface CleanupDependencySummary {
   removedActivityDays: number
   ownedAudioPaths: string[]
   existingAudioObjects: number
+  missingAudioObjects: number
+  mismatchedAudioObjectOwners: number
   sharedAudioPaths: number
   unsafeAudioAttemptIds: string[]
 }
@@ -70,6 +73,7 @@ export interface CleanupDependencySummary {
 export interface CleanupPlan {
   targetUserId: string
   generations: ObsoleteAttemptGeneration[]
+  terminalAttemptIds: string[]
   inventory: CleanupInventoryRow[]
   attempts: MaintenanceAttemptRow[]
   dependencies: CleanupDependencySummary
@@ -266,6 +270,8 @@ async function dependencySummary(
       removedActivityDays: 0,
       ownedAudioPaths: paths,
       existingAudioObjects: 0,
+      missingAudioObjects: 0,
+      mismatchedAudioObjectOwners: 0,
       sharedAudioPaths: 0,
       unsafeAudioAttemptIds: unsafeAttemptIds,
     }
@@ -296,6 +302,15 @@ async function dependencySummary(
           `select count(*)::integer as count from storage.objects
            where bucket_id = 'recordings' and name = any($1::text[])`,
           [paths],
+        )
+  const mismatchedStorageOwners =
+    paths.length === 0
+      ? { rows: [{ count: 0 }] }
+      : await client.query(
+          `select count(*)::integer as count from storage.objects
+           where bucket_id = 'recordings' and name = any($1::text[])
+             and (owner::text is distinct from $2 or owner_id is distinct from $2)`,
+          [paths, targetUserId],
         )
   const sharedAudio =
     paths.length === 0
@@ -355,6 +370,7 @@ async function dependencySummary(
     return row.user_id === targetUserId && classifyAttemptGeneration(fake).kind === 'current'
   }).length
 
+  const existingAudioObjects = numericCount(storageObjects.rows[0]?.count)
   return {
     foreignKeys,
     triggers,
@@ -370,7 +386,9 @@ async function dependencySummary(
     impactedActivityDays: impactedDays.length,
     removedActivityDays,
     ownedAudioPaths: paths,
-    existingAudioObjects: numericCount(storageObjects.rows[0]?.count),
+    existingAudioObjects,
+    missingAudioObjects: paths.length - existingAudioObjects,
+    mismatchedAudioObjectOwners: numericCount(mismatchedStorageOwners.rows[0]?.count),
     sharedAudioPaths: numericCount(sharedAudio.rows[0]?.count),
     unsafeAudioAttemptIds: unsafeAttemptIds,
   }
@@ -380,12 +398,20 @@ export async function buildCleanupPlan(
   client: Client,
   targetUserId: string,
   generations: readonly ObsoleteAttemptGeneration[],
+  terminalAttemptIds: readonly string[] = [],
 ): Promise<CleanupPlan> {
   const rows = await loadMaintenanceAttempts(client)
-  const attempts = selectObsoleteAttempts(rows, targetUserId, new Set(generations))
+  if ((generations.length > 0) === (terminalAttemptIds.length > 0)) {
+    throw new Error('A cleanup plan requires exactly one selector.')
+  }
+  const attempts =
+    terminalAttemptIds.length > 0
+      ? selectTerminalCleanupAttempts(rows, targetUserId, terminalAttemptIds)
+      : selectObsoleteAttempts(rows, targetUserId, new Set(generations))
   return {
     targetUserId,
     generations: [...generations],
+    terminalAttemptIds: [...terminalAttemptIds],
     inventory: inventoryRows(rows, targetUserId),
     attempts,
     dependencies: await dependencySummary(client, targetUserId, attempts, rows),
@@ -400,16 +426,29 @@ export function assertSafePlan(plan: CleanupPlan): void {
   if (plan.dependencies.deleteTriggers.length > 0) blockers.push('DELETE triggers')
   if (plan.dependencies.otherUserRetryChildren > 0) blockers.push('cross-user retry references')
   if (plan.dependencies.sharedAudioPaths > 0) blockers.push('shared audio paths')
+  if (plan.dependencies.missingAudioObjects > 0) blockers.push('missing audio objects')
+  if (plan.dependencies.mismatchedAudioObjectOwners > 0)
+    blockers.push('mismatched audio object ownership')
   if (plan.dependencies.unsafeAudioAttemptIds.length > 0)
     blockers.push('unverified audio ownership')
   if (blockers.length > 0) throw new Error(`Cleanup is blocked by ${blockers.join(', ')}.`)
-  if (
-    plan.attempts.some(
-      (row) =>
-        classifyAttemptGeneration(row).kind !== 'obsolete' || row.user_id !== plan.targetUserId,
+  try {
+    if (plan.terminalAttemptIds.length > 0) {
+      selectTerminalCleanupAttempts(plan.attempts, plan.targetUserId, plan.terminalAttemptIds)
+    } else if (
+      plan.attempts.some(
+        (row) =>
+          classifyAttemptGeneration(row).kind !== 'obsolete' || row.user_id !== plan.targetUserId,
+      )
+    ) {
+      throw new Error('Cleanup plan contains a current, invalid, or differently owned attempt.')
+    }
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? `Cleanup plan selection is unsafe: ${error.message}`
+        : 'Cleanup plan selection is unsafe.',
     )
-  ) {
-    throw new Error('Cleanup plan contains a current, invalid, or differently owned attempt.')
   }
 }
 
@@ -434,11 +473,14 @@ export async function applyCleanupPlan(
       [originalPlan.targetUserId],
     )
     const rows = locked.rows.map(normalizeAttempt)
-    const attempts = selectObsoleteAttempts(
-      rows,
-      originalPlan.targetUserId,
-      new Set(originalPlan.generations),
-    )
+    const attempts =
+      originalPlan.terminalAttemptIds.length > 0
+        ? selectTerminalCleanupAttempts(
+            rows,
+            originalPlan.targetUserId,
+            originalPlan.terminalAttemptIds,
+          )
+        : selectObsoleteAttempts(rows, originalPlan.targetUserId, new Set(originalPlan.generations))
     const expectedIds = originalPlan.attempts.map((row) => row.id).sort()
     const actualIds = attempts.map((row) => row.id).sort()
     if (JSON.stringify(expectedIds) !== JSON.stringify(actualIds)) {

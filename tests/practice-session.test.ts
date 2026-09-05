@@ -19,7 +19,7 @@ const LIBRARY_SESSION = {
   source: 'library',
   targetDurationSeconds: 30,
   retryOfAttemptId: null,
-}
+} satisfies PracticeSessionDescriptor
 
 describe('practice session descriptor', () => {
   it('accepts a complete library session', () => {
@@ -162,21 +162,11 @@ describe('practice session descriptor', () => {
     expect(matchesRetrySession(requested, null)).toBe(false)
   })
 
-  it('uses legacy defaults when checking an older retry parent', () => {
+  it('requires current retry metadata instead of inventing legacy defaults', () => {
     const source = { id: ATTEMPT_ID, prompt_id: PROMPT_ID, prompt_text: LIBRARY_SESSION.promptText }
-    expect(
-      matchesRetrySession(
-        {
-          promptText: LIBRARY_SESSION.promptText,
-          promptId: PROMPT_ID,
-          mode: 'practice',
-          difficulty: 'beginner',
-          source: 'library',
-          targetDurationSeconds: 60,
-          retryOfAttemptId: ATTEMPT_ID,
-        },
-        source,
-      ),
-    ).toBe(true)
+    expect(retrySessionFromAttempt(source)).toBeNull()
+    expect(matchesRetrySession({ ...LIBRARY_SESSION, retryOfAttemptId: ATTEMPT_ID }, source)).toBe(
+      false,
+    )
   })
 })

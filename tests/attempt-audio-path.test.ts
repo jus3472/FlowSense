@@ -27,7 +27,7 @@ describe('owned attempt audio paths', () => {
         audioPath: STORAGE_PATH,
         metrics: uploadMetrics(),
       }),
-    ).toEqual({ storagePath: STORAGE_PATH, mimeType: MIME_TYPE, snapshot: 'upload' })
+    ).toEqual({ storagePath: STORAGE_PATH, mimeType: MIME_TYPE })
   })
 
   it('rejects another user path even when stored upload metadata repeats it', () => {
@@ -82,7 +82,7 @@ describe('owned attempt audio paths', () => {
     }
   })
 
-  it('uses a valid legacy capture snapshot only when upload metadata is absent', () => {
+  it('does not reconstruct a path from mutable capture metadata', () => {
     expect(
       validateOwnedAttemptAudioPath({
         userId: USER_ID,
@@ -90,7 +90,7 @@ describe('owned attempt audio paths', () => {
         audioPath: STORAGE_PATH,
         metrics: { capture: { mime_type: MIME_TYPE } },
       }),
-    ).toEqual({ storagePath: STORAGE_PATH, mimeType: MIME_TYPE, snapshot: 'capture' })
+    ).toBeNull()
 
     expect(
       validateOwnedAttemptAudioPath({
@@ -109,7 +109,7 @@ describe('owned attempt audio paths', () => {
         attemptId: ATTEMPT_ID,
         metrics: uploadMetrics(),
       }),
-    ).toEqual({ storagePath: STORAGE_PATH, mimeType: MIME_TYPE, snapshot: 'upload' })
+    ).toEqual({ storagePath: STORAGE_PATH, mimeType: MIME_TYPE })
     expect(
       validateOwnedAttemptUploadPath({
         userId: USER_ID,

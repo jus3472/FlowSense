@@ -1,4 +1,9 @@
-import { validateOwnedAttemptAudioPath } from '@/lib/attempts/audio-path'
+import {
+  validateOwnedAttemptAudioPath,
+  validateOwnedAttemptUploadPath,
+} from '@/lib/attempts/audio-path'
+import { attemptStoragePath } from '@/lib/attempts/creation'
+import { isRecordingMimeType } from '@/lib/recording/mime'
 import { isV3ScorePayload } from '@/lib/scoring/v3/assemble'
 import { V3_SCORE_PAYLOAD_VERSION } from '@/lib/scoring/v3/contracts'
 
@@ -71,6 +76,7 @@ export interface CleanupArguments {
   apply: boolean
   deleteAudio: boolean
   generations: ObsoleteAttemptGeneration[]
+  terminalAttemptIds: string[]
   userId?: string
   userEmail?: string
   onlyUser: boolean
@@ -383,6 +389,41 @@ export function selectObsoleteAttempts(
   return rows.filter((row) => isSelectableObsoleteAttempt(row, targetUserId, generations))
 }
 
+export function isSelectableTerminalCleanupAttempt(
+  row: MaintenanceAttemptRow,
+  targetUserId: string,
+): boolean {
+  return (
+    row.user_id === targetUserId &&
+    (row.status === 'failed' || row.status === 'timed_out') &&
+    row.score === null &&
+    row.section_scores === null
+  )
+}
+
+/**
+ * Selects only explicitly named resultless terminal rows. Missing, cross-user,
+ * active, completed, or result-bearing IDs fail closed rather than narrowing
+ * the request silently.
+ */
+export function selectTerminalCleanupAttempts(
+  rows: readonly MaintenanceAttemptRow[],
+  targetUserId: string,
+  attemptIds: readonly string[],
+): MaintenanceAttemptRow[] {
+  const requested = new Set(attemptIds)
+  const matched = rows.filter((row) => requested.has(row.id))
+  if (matched.length !== requested.size) {
+    throw new Error('Every terminal attempt ID must resolve to exactly one stored attempt.')
+  }
+  if (!matched.every((row) => isSelectableTerminalCleanupAttempt(row, targetUserId))) {
+    throw new Error(
+      'Every terminal attempt ID must be an owned failed or timed-out row without a score result.',
+    )
+  }
+  return matched
+}
+
 export function promptKind(
   row: MaintenanceAttemptRow,
 ): 'structured' | 'custom_prompt' | 'general_practice' {
@@ -397,14 +438,43 @@ export function ownedObsoleteAudioPaths(
   const paths: string[] = []
   const unsafeAttemptIds: string[] = []
   for (const row of rows) {
-    if (row.audio_path === null) continue
-    const owned = validateOwnedAttemptAudioPath({
-      userId: targetUserId,
-      attemptId: row.id,
-      audioPath: row.audio_path,
-      metrics: row.metrics,
-    })
-    if (owned) paths.push(owned.storagePath)
+    const owned =
+      row.audio_path === null
+        ? validateOwnedAttemptUploadPath({
+            userId: targetUserId,
+            attemptId: row.id,
+            metrics: row.metrics,
+          })
+        : validateOwnedAttemptAudioPath({
+            userId: targetUserId,
+            attemptId: row.id,
+            audioPath: row.audio_path,
+            metrics: row.metrics,
+          })
+    if (owned) {
+      paths.push(owned.storagePath)
+      continue
+    }
+
+    if (row.audio_path === null) {
+      if (isRecord(row.metrics) && row.metrics.upload !== undefined) {
+        unsafeAttemptIds.push(row.id)
+      }
+      continue
+    }
+
+    // Maintenance can still remove an explicitly selected historical row that
+    // predates immutable upload snapshots. Runtime storage access never uses
+    // this capture-only compatibility path.
+    const capture = isRecord(row.metrics) ? row.metrics.capture : null
+    const mimeType = isRecord(capture) ? capture.mime_type : null
+    const legacyOwned =
+      isRecord(row.metrics) &&
+      row.metrics.upload === undefined &&
+      typeof mimeType === 'string' &&
+      isRecordingMimeType(mimeType) &&
+      row.audio_path === attemptStoragePath(targetUserId, row.id, mimeType)
+    if (legacyOwned) paths.push(row.audio_path)
     else unsafeAttemptIds.push(row.id)
   }
   return { paths: [...new Set(paths)], unsafeAttemptIds }
@@ -439,6 +509,7 @@ export function parseCleanupArguments(argv: readonly string[]): CleanupArguments
   let userEmail: string | undefined
   let onlyUser = false
   const generationValues: string[] = []
+  const terminalAttemptIds: string[] = []
 
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index]
@@ -453,6 +524,9 @@ export function parseCleanupArguments(argv: readonly string[]): CleanupArguments
       index += 1
     } else if (flag === '--generation') {
       generationValues.push(argumentValue(argv, index, flag))
+      index += 1
+    } else if (flag === '--terminal-attempt-id') {
+      terminalAttemptIds.push(argumentValue(argv, index, flag))
       index += 1
     } else {
       throw new Error(`Unknown argument: ${flag}`)
@@ -473,11 +547,23 @@ export function parseCleanupArguments(argv: readonly string[]): CleanupArguments
   if (deleteAudio && !apply) {
     throw new Error('--delete-audio is destructive and requires --apply.')
   }
+  const uniqueTerminalAttemptIds = [...new Set(terminalAttemptIds)]
+  for (const attemptId of uniqueTerminalAttemptIds) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attemptId)) {
+      throw new Error('--terminal-attempt-id must be a UUID.')
+    }
+  }
+  if ((generationValues.length > 0) === (uniqueTerminalAttemptIds.length > 0)) {
+    throw new Error(
+      'Choose exactly one cleanup selector: --generation or --terminal-attempt-id.',
+    )
+  }
 
   return {
     apply,
     deleteAudio,
-    generations: parseObsoleteGenerations(generationValues),
+    generations: generationValues.length > 0 ? parseObsoleteGenerations(generationValues) : [],
+    terminalAttemptIds: uniqueTerminalAttemptIds,
     ...(userId ? { userId } : {}),
     ...(userEmail ? { userEmail } : {}),
     onlyUser,

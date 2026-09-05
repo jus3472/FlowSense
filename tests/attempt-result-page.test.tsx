@@ -28,6 +28,30 @@ import AttemptPage from '@/app/(app)/attempts/[id]/page'
 
 const ATTEMPT_ID = '10000000-0000-4000-8000-000000000001'
 const USER_ID = '50000000-0000-4000-8000-000000000005'
+const LESSON_ID = '70000000-0000-4000-8000-000000000007'
+
+function currentMetrics(options: { structured?: boolean } = {}) {
+  return {
+    creation: {
+      prompt_id: null,
+      retry_of_attempt_id: null,
+      ...(options.structured
+        ? {
+            curriculum: {
+              lesson_id: LESSON_ID,
+              path_slug: 'interviews',
+              lesson_slug: 'interviews-beginner-01-skill-1',
+            },
+          }
+        : {}),
+    },
+    practice: { target_duration_seconds: 60 },
+    upload: {
+      storage_path: `${USER_ID}/${ATTEMPT_ID}.webm`,
+      mime_type: 'audio/webm;codecs=opus',
+    },
+  }
+}
 
 function attempt(overrides: Record<string, unknown> = {}) {
   return {
@@ -58,7 +82,6 @@ beforeEach(() => {
   mocks.loadStructuredLessonResultForUser.mockResolvedValue({ status: 'not_found' })
   mocks.storedTranscriptWords.mockReturnValue([])
 })
-
 describe('attempt result page', () => {
   it('rejects a malformed route id before loading storage', async () => {
     await expect(AttemptPage({ params: Promise.resolve({ id: 'bad' }) })).rejects.toThrow('not found')
@@ -76,13 +99,60 @@ describe('attempt result page', () => {
   })
 
   it.each(['failed', 'timed_out'] as const)('keeps a resultless %s recording playable and retryable', async (status) => {
-    const row = attempt({ status, score: null, section_scores: null, audio_path: `${USER_ID}/${ATTEMPT_ID}.webm` })
+    const row = attempt({
+      status,
+      score: null,
+      section_scores: null,
+      audio_path: `${USER_ID}/${ATTEMPT_ID}.webm`,
+      metrics: currentMetrics(),
+    })
     mocks.createClient.mockResolvedValue(clientFor(row))
     mocks.readAttemptResult.mockReturnValue({ kind: 'incomplete' })
     render(await AttemptPage({ params: Promise.resolve({ id: ATTEMPT_ID }) }))
     expect(screen.getByText('Not scored yet')).toBeInTheDocument()
     expect(screen.getByTestId('audio')).toHaveTextContent('https://audio.test')
     expect(screen.getByRole('link', { name: 'Try this prompt again' })).toHaveAttribute('href', `/record?retry=${ATTEMPT_ID}`)
+  })
+
+  it('does not sign a capture-only result audio path', async () => {
+    const row = attempt({
+      status: 'failed',
+      score: null,
+      section_scores: null,
+      audio_path: `${USER_ID}/${ATTEMPT_ID}.webm`,
+      metrics: { capture: { mime_type: 'audio/webm;codecs=opus' } },
+    })
+    const client = clientFor(row)
+    mocks.createClient.mockResolvedValue(client)
+    mocks.readAttemptResult.mockReturnValue({ kind: 'incomplete' })
+
+    render(await AttemptPage({ params: Promise.resolve({ id: ATTEMPT_ID }) }))
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Audio playback is unavailable for this response.',
+    )
+    expect(screen.queryByTestId('audio')).not.toBeInTheDocument()
+    expect(client.storage.from).not.toHaveBeenCalled()
+  })
+
+  it('routes a current structured terminal retry through its lesson', async () => {
+    const row = attempt({
+      status: 'failed',
+      score: null,
+      section_scores: null,
+      lesson_id: LESSON_ID,
+      audio_path: `${USER_ID}/${ATTEMPT_ID}.webm`,
+      metrics: currentMetrics({ structured: true }),
+    })
+    mocks.createClient.mockResolvedValue(clientFor(row))
+    mocks.readAttemptResult.mockReturnValue({ kind: 'incomplete' })
+
+    render(await AttemptPage({ params: Promise.resolve({ id: ATTEMPT_ID }) }))
+
+    expect(screen.getByRole('link', { name: 'Try this prompt again' })).toHaveAttribute(
+      'href',
+      `/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record?retry=${ATTEMPT_ID}`,
+    )
   })
 
   it.each(['unsupported_version', 'malformed'] as const)('shows a safe unavailable state for %s results', async (kind) => {

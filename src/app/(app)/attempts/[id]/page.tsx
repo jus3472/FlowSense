@@ -8,6 +8,7 @@ import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ErrorState } from '@/components/ui/error-state'
+import { validateOwnedAttemptAudioPath } from '@/lib/attempts/audio-path'
 import {
   ATTEMPT_FAILURE_CODES,
   isActiveAttemptStatus,
@@ -15,6 +16,7 @@ import {
   type AttemptStatus,
 } from '@/lib/attempts/lifecycle'
 import { reconcileCurrentUserStaleAttempts } from '@/lib/attempts/reconciliation'
+import { attemptRetryHref } from '@/lib/attempts/retry-href'
 import { logAttemptDiagnostic } from '@/lib/attempts/server'
 import { loadStructuredLessonResultForUser } from '@/lib/curriculum/result-server'
 import { isUuid } from '@/lib/practice/session'
@@ -93,7 +95,7 @@ function processingResult(promptText: string, status: keyof typeof PROCESSING_DE
   )
 }
 
-function abandonedUploadResult(promptText: string, attemptId: string) {
+function abandonedUploadResult(promptText: string, retryHref: ReturnType<typeof attemptRetryHref>) {
   return (
     <div className="flex flex-col gap-8">
       <h1 className="text-foreground text-xl font-semibold">{promptText}</h1>
@@ -104,9 +106,11 @@ function abandonedUploadResult(promptText: string, attemptId: string) {
         />
       </Card>
       <div className="flex flex-col gap-3">
-        <ButtonLink href={`/record?retry=${attemptId}`} size="lg" fullWidth>
-          Try this prompt again
-        </ButtonLink>
+        {retryHref ? (
+          <ButtonLink href={retryHref} size="lg" fullWidth>
+            Try this prompt again
+          </ButtonLink>
+        ) : null}
         <ButtonLink href="/history" variant="ghost" fullWidth>
           Go to History
         </ButtonLink>
@@ -157,40 +161,56 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     logAttemptDiagnostic('load_attempt_result', 'attempt_status_invalid', attempt.id)
     return resultLoadError()
   }
+  const retryHref = attemptRetryHref({
+    attemptId: attempt.id,
+    lessonId: attempt.lesson_id,
+    metrics: attempt.metrics,
+  })
   if (attempt.failure_code === ATTEMPT_FAILURE_CODES.clientUploadAbandoned) {
-    return abandonedUploadResult(attempt.prompt_text, attempt.id)
+    return abandonedUploadResult(attempt.prompt_text, retryHref)
   }
 
   let audioUrl: string | null = null
   let audioUnavailable = false
   if (attempt.audio_path) {
-    try {
-      const { data, error } = await supabase.storage
-        .from(RECORDINGS_BUCKET)
-        .createSignedUrl(attempt.audio_path, SIGNED_URL_SECONDS)
-      if (error || !data?.signedUrl) {
-        audioUnavailable = true
-        if (error) {
-          logAttemptDiagnostic(
-            'sign_attempt_result_audio',
-            'signed_audio_url_failed',
-            attempt.id,
-            error,
-          )
-        } else {
-          logAttemptDiagnostic('sign_attempt_result_audio', 'signed_audio_url_failed', attempt.id)
-        }
-      } else {
-        audioUrl = data.signedUrl
-      }
-    } catch (error) {
+    const ownedAudio = validateOwnedAttemptAudioPath({
+      userId: user.id,
+      attemptId: attempt.id,
+      audioPath: attempt.audio_path,
+      metrics: attempt.metrics,
+    })
+    if (!ownedAudio) {
       audioUnavailable = true
-      logAttemptDiagnostic(
-        'sign_attempt_result_audio',
-        'signed_audio_url_failed',
-        attempt.id,
-        error,
-      )
+      logAttemptDiagnostic('sign_attempt_result_audio', 'audio_path_invalid', attempt.id)
+    } else {
+      try {
+        const { data, error } = await supabase.storage
+          .from(RECORDINGS_BUCKET)
+          .createSignedUrl(ownedAudio.storagePath, SIGNED_URL_SECONDS)
+        if (error || !data?.signedUrl) {
+          audioUnavailable = true
+          if (error) {
+            logAttemptDiagnostic(
+              'sign_attempt_result_audio',
+              'signed_audio_url_failed',
+              attempt.id,
+              error,
+            )
+          } else {
+            logAttemptDiagnostic('sign_attempt_result_audio', 'signed_audio_url_failed', attempt.id)
+          }
+        } else {
+          audioUrl = data.signedUrl
+        }
+      } catch (error) {
+        audioUnavailable = true
+        logAttemptDiagnostic(
+          'sign_attempt_result_audio',
+          'signed_audio_url_failed',
+          attempt.id,
+          error,
+        )
+      }
     }
   }
 
@@ -220,9 +240,11 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
             description="This response was saved but never scored. Record another and it will be scored automatically."
           />
         </Card>
-        <ButtonLink href={`/record?retry=${attempt.id}`} size="lg" fullWidth>
-          Try this prompt again
-        </ButtonLink>
+        {retryHref ? (
+          <ButtonLink href={retryHref} size="lg" fullWidth>
+            Try this prompt again
+          </ButtonLink>
+        ) : null}
       </div>,
       audioUnavailable,
     )
@@ -359,9 +381,11 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
           description="This response uses a result format that is not available here yet."
         />
       </Card>
-      <ButtonLink href={`/record?retry=${attempt.id}`} size="lg" fullWidth>
-        Try this prompt again
-      </ButtonLink>
+      {retryHref ? (
+        <ButtonLink href={retryHref} size="lg" fullWidth>
+          Try this prompt again
+        </ButtonLink>
+      ) : null}
     </div>,
     audioUnavailable,
   )

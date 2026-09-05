@@ -159,21 +159,13 @@ export function retrySessionFromAttempt(value: unknown): PracticeSessionDescript
     value.prompt_id === null ? null : isUuid(value.prompt_id) ? value.prompt_id : undefined
   const source: PromptSource | null = includes(PROMPT_SOURCES, value.prompt_source)
     ? value.prompt_source
-    : value.prompt_source === null || value.prompt_source === undefined
-      ? promptId
-        ? 'library'
-        : 'custom'
-      : null
+    : null
   const mode: PracticeMode | null = includes(PRACTICE_MODES, value.practice_mode)
     ? value.practice_mode
-    : value.practice_mode === null || value.practice_mode === undefined
-      ? 'practice'
-      : null
+    : null
   const difficulty: PromptDifficulty | null = includes(PROMPT_DIFFICULTIES, value.prompt_difficulty)
     ? value.prompt_difficulty
-    : value.prompt_difficulty === null || value.prompt_difficulty === undefined
-      ? 'beginner'
-      : null
+    : null
 
   if (!source || !mode || !difficulty || promptId === undefined) return null
   if (source === 'custom' && promptId !== null) return null
@@ -200,6 +192,12 @@ export function retrySessionFromAttempt(value: unknown): PracticeSessionDescript
   ) {
     return null
   }
+  const targetDurationSeconds = isTargetDuration(directDuration)
+    ? directDuration
+    : isTargetDuration(storedDuration)
+      ? storedDuration
+      : null
+  if (targetDurationSeconds === null) return null
 
   const storedContext = isRecord(practice) ? practice.additional_context : undefined
   if (
@@ -218,12 +216,7 @@ export function retrySessionFromAttempt(value: unknown): PracticeSessionDescript
     mode,
     difficulty,
     source,
-    // Attempts before session descriptors did not snapshot this value.
-    targetDurationSeconds: isTargetDuration(directDuration)
-      ? directDuration
-      : isTargetDuration(storedDuration)
-        ? storedDuration
-        : 60,
+    targetDurationSeconds,
     retryOfAttemptId: value.id,
     additionalContext: typeof storedContext === 'string' ? storedContext : undefined,
   })

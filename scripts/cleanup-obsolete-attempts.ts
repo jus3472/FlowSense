@@ -64,7 +64,12 @@ function summarizedPlan(plan: CleanupPlan): object {
       audioAnalysisVersion: AUDIO_ANALYSIS_VERSION,
     },
     userScope: 'one resolved auth user',
+    selector:
+      plan.terminalAttemptIds.length > 0
+        ? 'explicit_resultless_terminal_ids'
+        : 'obsolete_generations',
     targetedGenerations: plan.generations,
+    targetedTerminalAttemptIds: plan.terminalAttemptIds,
     targetedAttempts: plan.attempts.length,
     targetedByGeneration,
     currentAttemptsExcluded: currentTargetUserCount,
@@ -85,12 +90,17 @@ function summarizedPlan(plan: CleanupPlan): object {
       removedActivityDays: plan.dependencies.removedActivityDays,
       ownedAudioPaths: plan.dependencies.ownedAudioPaths.length,
       existingAudioObjects: plan.dependencies.existingAudioObjects,
+      missingAudioObjects: plan.dependencies.missingAudioObjects,
+      mismatchedAudioObjectOwners: plan.dependencies.mismatchedAudioObjectOwners,
       sharedAudioPaths: plan.dependencies.sharedAudioPaths,
       unsafeAudioPaths: plan.dependencies.unsafeAudioAttemptIds.length,
     },
     malformedPolicy: 'reported and excluded',
     unsupportedPolicy: 'reported and excluded',
-    unfinishedPolicy: 'reported and excluded',
+    terminalResultlessPolicy:
+      plan.terminalAttemptIds.length > 0
+        ? 'only explicitly named failed or timed-out IDs are selected'
+        : 'reported and excluded',
   }
 }
 
@@ -128,7 +138,7 @@ async function main(): Promise<void> {
   try {
     const userId = await resolveUserId(client, args)
     if (!args.apply) await client.query('begin read only')
-    const plan = await buildCleanupPlan(client, userId, args.generations)
+    const plan = await buildCleanupPlan(client, userId, args.generations, args.terminalAttemptIds)
     console.log(JSON.stringify(summarizedPlan(plan), null, 2))
     if (!args.apply) {
       await client.query('rollback')

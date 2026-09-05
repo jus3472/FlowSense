@@ -4,7 +4,6 @@ import { isRecordingMimeType } from '@/lib/recording/mime'
 export interface OwnedAttemptAudioPath {
   storagePath: string
   mimeType: string
-  snapshot: 'upload' | 'capture'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -12,9 +11,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Narrows a stored path before any service-role storage access. New attempts
- * use the immutable upload snapshot. Resultless terminal rows may retain only
- * capture MIME data, from which the exact owned path can be reconstructed.
+ * Narrows a stored path before any service-role storage access. Every current
+ * attempt receives this immutable upload snapshot during server-side creation.
  */
 export function validateOwnedAttemptAudioPath(input: {
   userId: string
@@ -25,38 +23,23 @@ export function validateOwnedAttemptAudioPath(input: {
   const { userId, attemptId, audioPath, metrics } = input
   if (typeof audioPath !== 'string' || !isRecord(metrics)) return null
 
-  let mimeType: string
-  let snapshot: OwnedAttemptAudioPath['snapshot']
-  if (metrics.upload !== undefined) {
-    if (!isRecord(metrics.upload)) return null
-    if (
-      typeof metrics.upload.storage_path !== 'string' ||
-      typeof metrics.upload.mime_type !== 'string' ||
-      !isRecordingMimeType(metrics.upload.mime_type) ||
-      metrics.upload.storage_path !== audioPath
-    ) {
-      return null
-    }
-    mimeType = metrics.upload.mime_type
-    snapshot = 'upload'
-  } else {
-    if (
-      !isRecord(metrics.capture) ||
-      typeof metrics.capture.mime_type !== 'string' ||
-      !isRecordingMimeType(metrics.capture.mime_type)
-    ) {
-      return null
-    }
-    mimeType = metrics.capture.mime_type
-    snapshot = 'capture'
+  if (!isRecord(metrics.upload)) return null
+  if (
+    typeof metrics.upload.storage_path !== 'string' ||
+    typeof metrics.upload.mime_type !== 'string' ||
+    !isRecordingMimeType(metrics.upload.mime_type) ||
+    metrics.upload.storage_path !== audioPath
+  ) {
+    return null
   }
+  const mimeType = metrics.upload.mime_type
 
   return audioPath === attemptStoragePath(userId, attemptId, mimeType)
-    ? { storagePath: audioPath, mimeType, snapshot }
+    ? { storagePath: audioPath, mimeType }
     : null
 }
 
-/** New upload cleanup never falls back to mutable legacy capture metadata. */
+/** Resolves the immutable upload path even when audio_path was never finalized. */
 export function validateOwnedAttemptUploadPath(input: {
   userId: string
   attemptId: string
@@ -68,5 +51,5 @@ export function validateOwnedAttemptUploadPath(input: {
     ...input,
     audioPath: metrics.upload.storage_path,
   })
-  return owned?.snapshot === 'upload' ? owned : null
+  return owned
 }
