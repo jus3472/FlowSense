@@ -2,8 +2,6 @@
 
 import { revalidatePath } from 'next/cache'
 import type { ProfileFormState } from '@/lib/forms'
-import { parseSubmittedPathPreferences } from '@/lib/path-preferences'
-import { replacePathPreferencesForUser } from '@/lib/path-preferences-server'
 import { createClient } from '@/lib/supabase/server'
 import { isValidIanaTimezone, safeTimezone } from '@/lib/timezone'
 import { validateDisplayName } from '@/lib/validation'
@@ -17,18 +15,6 @@ export async function updateProfile(
   if (displayNameError) {
     return { status: 'error', message: null, displayNameError }
   }
-  const orderedPaths = parseSubmittedPathPreferences(
-    formData.get('primary_path'),
-    formData.getAll('secondary_path'),
-  )
-  if (!orderedPaths) {
-    return {
-      status: 'error',
-      message: 'Choose one primary path.',
-      displayNameError: null,
-    }
-  }
-
   const supabase = await createClient()
   const {
     data: { user },
@@ -83,17 +69,6 @@ export async function updateProfile(
     }
   }
 
-  const preferenceSave = await replacePathPreferencesForUser(supabase, user.id, orderedPaths)
-  if (preferenceSave.status === 'failure') {
-    return {
-      status: 'error',
-      message: 'Your changes did not save. Check your connection and try again.',
-      displayNameError: null,
-    }
-  }
-
-  revalidatePath('/home')
   revalidatePath('/settings')
-  revalidatePath('/progress')
   return { status: 'saved', message: 'Saved.', displayNameError: null }
 }

@@ -5,10 +5,6 @@ import { SettingsForm } from '@/components/settings/settings-form'
 import { RetryButton } from '@/components/system/retry-button'
 import { ErrorState } from '@/components/ui/error-state'
 import { loadProfilePreferences, logProfilePreferencesLoadFailure } from '@/lib/profile-preferences'
-import {
-  loadPathPreferencesForUser,
-  logPathPreferencesFailure,
-} from '@/lib/path-preferences-server'
 import { createClient } from '@/lib/supabase/server'
 
 export const metadata: Metadata = {
@@ -27,20 +23,12 @@ export default async function SettingsPage({
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [profile, paths] = await Promise.all([
-    loadProfilePreferences(
-      supabase
-        .from('profiles')
-        .select('display_name, focus_areas, timezone')
-        .eq('id', user.id)
-        .maybeSingle(),
-    ),
-    loadPathPreferencesForUser(supabase, user.id),
-  ])
+  const profile = await loadProfilePreferences(
+    supabase.from('profiles').select('display_name, timezone').eq('id', user.id).maybeSingle(),
+  )
 
-  if (profile.status === 'failure' || paths.status === 'failure') {
-    if (profile.status === 'failure') logProfilePreferencesLoadFailure('settings', profile)
-    if (paths.status === 'failure') logPathPreferencesFailure('settings', paths)
+  if (profile.status === 'failure') {
+    logProfilePreferencesLoadFailure('settings', profile)
     return (
       <div className="flex flex-col gap-12 pt-4 pb-12">
         <h1 className="prompt-display text-foreground text-2xl">Settings</h1>
@@ -59,12 +47,7 @@ export default async function SettingsPage({
     <div className="flex flex-col gap-12 pt-4 pb-12">
       <h1 className="prompt-display text-foreground text-2xl">Settings</h1>
 
-      <SettingsForm
-        displayName={profile.data.displayName}
-        paths={paths.data.paths}
-        primarySlug={paths.data.primarySlug}
-        secondarySlugs={paths.data.secondarySlugs}
-      />
+      <SettingsForm displayName={profile.data.displayName} />
 
       <LogoutForm failed={query.logout === 'failed'} />
     </div>

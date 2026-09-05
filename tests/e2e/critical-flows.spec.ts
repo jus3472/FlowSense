@@ -182,12 +182,13 @@ test('new user chooses an ordered primary and secondary path during onboarding',
     page.getByRole('heading', { name: 'What do you want to get better at?' }),
   ).toBeVisible()
   await expect(page.getByRole('radio', { name: 'General Speaking' })).toBeChecked()
-  await page.getByRole('group', { name: 'Starting track' }).getByText('Interviews').click()
+  await page.getByRole('group', { name: 'Primary track' }).getByText('Interviews').click()
   await page.getByRole('group', { name: 'Additional paths' }).getByText('Presentations').click()
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
   await expect(page).toHaveURL(/\/home$/)
-  await expect(page.getByRole('heading', { name: 'Continue Interviews' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Continue General Speaking' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Your other paths' })).toBeVisible()
+  await expect(page.getByText('Interviews', { exact: true })).toBeVisible()
   await expect(page.getByText('Presentations', { exact: true })).toBeVisible()
 
   const state = await currentState(request)
@@ -304,10 +305,11 @@ test('keeps the full brand and final navigation within desktop and narrow viewpo
 test('history and progress start empty after an isolated reset', async ({ page }) => {
   await logIn(page)
   await page.goto('/history')
+  await expect(page.getByRole('heading', { name: 'History', level: 1 })).toBeVisible()
   await expect(page.getByText('No responses yet')).toBeVisible()
   await page.goto('/progress')
-  await expect(page.getByRole('heading', { name: 'Your progress' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Path progress' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Progress', level: 1 })).toHaveCount(1)
+  await expect(page.getByRole('region', { name: 'Track progress' })).toBeVisible()
   await expect(page.getByText('No practice results yet')).toBeVisible()
 })
 
@@ -549,9 +551,11 @@ test('structured lessons retry thresholds without reducing durable progress', as
   await expect(page.getByText('Give a clear response for beginner lesson 2.')).toBeVisible()
 
   await page.goto('/progress')
-  await expect(page.getByRole('heading', { name: 'Path progress' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Progress', level: 1 })).toHaveCount(1)
+  await expect(page.getByRole('region', { name: 'Track progress' })).toBeVisible()
   await expect(page.getByText('1 / 30', { exact: true }).first()).toBeVisible()
   await page.goto('/history')
+  await expect(page.getByText('Give a clear response for beginner lesson 1.')).toHaveCount(2)
   await expect(page.getByText('Beginner · Lesson 1', { exact: true })).toHaveCount(2)
   await expect(page.getByText('Passed', { exact: true })).toHaveCount(1)
   await expect(page.getByText('Not passed', { exact: true })).toHaveCount(1)
@@ -743,30 +747,35 @@ test('structured provider-neutral retry counts activity without changing progres
   await expect(page.getByRole('heading', { name: 'Lesson locked' })).toBeVisible()
 })
 
-test('existing user can change Home priority without losing prior path progress', async ({
+test('Settings omits track controls and preserves prior path progress', async ({
   page,
   request,
 }) => {
   await reset(request, true, { pathSlug: 'interviews', passedLessons: 1, score: 74 })
   await logIn(page)
-  await expect(page.getByRole('heading', { name: 'Continue Interviews' })).toBeVisible()
-  await expect(page.getByText('1 / 30 lessons passed', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Continue General Speaking' })).toBeVisible()
+  await expect(
+    page.getByRole('region', { name: 'Your other paths' }).getByText('Beginner · 1 / 10 passed'),
+  ).toBeVisible()
 
   await page.goto('/settings')
-  await page.getByRole('group', { name: 'Starting track' }).getByText('Presentations').click()
-  await page.getByRole('group', { name: 'Additional paths' }).getByText('Interviews').click()
+  await expect(page.getByRole('radio')).toHaveCount(0)
+  await expect(page.getByRole('checkbox')).toHaveCount(0)
+  await expect(page.getByText('Starting track')).toHaveCount(0)
+  await expect(page.getByText('Additional paths')).toHaveCount(0)
+  await page.getByLabel('Display name').fill('River')
   await page.getByRole('button', { name: 'Save changes' }).click()
   await expect(page.getByRole('status')).toHaveText('Saved.')
 
   await page.goto('/home')
-  await expect(page.getByRole('heading', { name: 'Continue Presentations' })).toBeVisible()
-  const otherPaths = page.getByRole('region', { name: 'Your other paths' })
-  await expect(otherPaths.getByText('Interviews', { exact: true })).toBeVisible()
-  await expect(otherPaths.getByText('Beginner · 1 / 10 passed', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Continue General Speaking' })).toBeVisible()
+  await expect(
+    page.getByRole('region', { name: 'Your other paths' }).getByText('Beginner · 1 / 10 passed'),
+  ).toBeVisible()
 
   await page.goto('/progress')
   const interviewCard = page
-    .locator('section[aria-labelledby="curriculum-progress-heading"]')
+    .getByRole('region', { name: 'Track progress' })
     .getByText('Interviews', { exact: true })
   await expect(interviewCard).toBeVisible()
   await expect(page.getByText('1 / 30', { exact: true })).toBeVisible()
@@ -774,6 +783,28 @@ test('existing user can change Home priority without losing prior path progress'
   const state = await currentState(request)
   expect(state.lessonProgress).toHaveLength(1)
   expect(state.lessonProgress[0]?.best_score).toBe(74)
+  expect(state.profile.display_name).toBe('River')
+})
+
+test('Home follows the newest completed structured Track', async ({ page, request, context }) => {
+  await reset(request)
+  await context.grantPermissions(['microphone'], { origin: APP })
+  await processingMocks(page, { scores: [74, 74] })
+  await logIn(page)
+  await expect(page.getByRole('heading', { name: 'Continue General Speaking' })).toBeVisible()
+
+  await page.goto('/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record')
+  await recordOne(page)
+  await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
+  await page.goto('/home')
+  await expect(page.getByRole('heading', { name: 'Continue Interviews' })).toBeVisible()
+
+  await page.goto('/practice/paths/presentations/lessons/presentations-beginner-01-skill-1/record')
+  await recordOne(page)
+  await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
+
+  await page.goto('/home')
+  await expect(page.getByRole('heading', { name: 'Continue Presentations' })).toBeVisible()
 })
 
 test('@mobile mobile navigation exposes all primary destinations and account menu', async ({

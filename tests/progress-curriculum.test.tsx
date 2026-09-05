@@ -215,13 +215,17 @@ describe('curriculum progress display', () => {
   it('keeps valid curriculum visible when speaking trends fail, and vice versa', () => {
     const { rerender } = render(<ProgressDashboard dashboard={null} curriculum={overview()} />)
 
-    expect(screen.getByRole('heading', { name: 'Path progress' })).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+    expect(screen.getByRole('heading', { name: 'Progress', level: 1 })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Track progress' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Path progress' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Your progress')).not.toBeInTheDocument()
     expect(screen.getByText('Speaking skill progress is unavailable')).toBeInTheDocument()
 
     rerender(
       <ProgressDashboard dashboard={speakingDashboard()} curriculum={null} curriculumUnavailable />,
     )
-    expect(screen.getByText('Path progress is unavailable')).toBeInTheDocument()
+    expect(screen.getByText('Track progress is unavailable')).toBeInTheDocument()
     expect(screen.getByText('No practice results yet')).toBeInTheDocument()
   })
 })

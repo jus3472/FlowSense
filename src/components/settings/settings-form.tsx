@@ -1,28 +1,23 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, useEffect, useRef } from 'react'
 import { updateProfile } from '@/actions/profile'
-import { PathPreferenceFields } from '@/components/onboarding/path-preference-fields'
 import { Button } from '@/components/ui/button'
 import { TextField } from '@/components/ui/text-field'
-import type { PathSlug } from '@/lib/curriculum/contracts'
 import { initialProfileFormState } from '@/lib/forms'
-import type { PathPreferenceOption } from '@/lib/path-preferences'
+import { browserTimezone, UTC_TIMEZONE } from '@/lib/timezone'
 
 interface SettingsFormProps {
   displayName: string
-  paths: readonly PathPreferenceOption[]
-  primarySlug: PathSlug
-  secondarySlugs: readonly PathSlug[]
 }
 
-export function SettingsForm({
-  displayName,
-  paths,
-  primarySlug,
-  secondarySlugs,
-}: SettingsFormProps) {
+export function SettingsForm({ displayName }: SettingsFormProps) {
   const [state, formAction, pending] = useActionState(updateProfile, initialProfileFormState)
+  const timezoneInput = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (timezoneInput.current) timezoneInput.current.value = browserTimezone()
+  }, [])
 
   return (
     <form action={formAction} className="flex flex-col gap-8">
@@ -36,11 +31,7 @@ export function SettingsForm({
         error={state.displayNameError}
       />
 
-      <PathPreferenceFields
-        paths={paths}
-        initialPrimary={primarySlug}
-        initialSecondaries={secondarySlugs}
-      />
+      <input ref={timezoneInput} type="hidden" name="timezone" defaultValue={UTC_TIMEZONE} />
 
       {state.message ? (
         <p

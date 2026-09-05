@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { HistoryList } from '@/components/history/history-list'
 import { deleteAttempt } from '@/lib/results/api'
 import type { HistoryEntry } from '@/lib/results/history'
-import type { HistoryScoreSummary } from '@/lib/results/history-cohort'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }))
 
@@ -43,27 +42,6 @@ const entries: HistoryEntry[] = [
     retryOfAttemptId: null,
   },
 ]
-
-function scoreSummary(
-  values: readonly number[],
-  overrides: Partial<HistoryScoreSummary> = {},
-): HistoryScoreSummary {
-  return {
-    cohort: { kind: 'v2', scoreVersion: 'v2.score.1', rubricVersion: 'v2', mode: 'practice' },
-    points: values.map((value, index) => ({
-      attemptId: `cohort-${index}`,
-      createdAt: new Date(2026, 7, 20 + index).toISOString(),
-      value,
-    })),
-    average:
-      values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length,
-    scannedCount: values.length,
-    excludedCount: 0,
-    scanLimit: 200,
-    truncated: false,
-    ...overrides,
-  }
-}
 
 describe('HistoryList', () => {
   beforeEach(() => {
@@ -282,6 +260,7 @@ describe('HistoryList', () => {
     expect(screen.getByText('Interview')).toBeInTheDocument()
     expect(screen.getByText('Presentation')).toBeInTheDocument()
     expect(screen.getByText('Conversation · Custom prompt · Retry')).toBeInTheDocument()
+    expect(screen.getByText('Conversation prompt')).toBeInTheDocument()
   })
 
   it('shows structured lesson, stars, pass, checkpoint, and retry context', () => {
@@ -310,12 +289,13 @@ describe('HistoryList', () => {
     )
 
     expect(screen.getAllByText('Interviews')).toHaveLength(2)
+    expect(screen.getByText('Describe a place you know well.')).toBeInTheDocument()
     expect(screen.getByText('Beginner · Lesson 10')).toBeInTheDocument()
     expect(screen.queryByText('Handling conflict')).not.toBeInTheDocument()
     expect(screen.getByText('Checkpoint · Retry')).toBeInTheDocument()
     expect(screen.getByLabelText('1 stars')).toHaveTextContent('★☆☆')
     expect(screen.getByText('Passed')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Lesson 10/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /Describe a place.*Lesson 10/ })).toHaveAttribute(
       'href',
       '/attempts/attempt-1',
     )
@@ -414,34 +394,21 @@ describe('HistoryList', () => {
     )
   })
 
-  it('labels the trend and average as limited to one compatible bounded cohort', () => {
+  it('uses a graceful prompt fallback without rendering score-trend UI', () => {
     render(
       <HistoryList
         entries={[
-          entries[0]!,
-          { ...entries[0]!, id: 'attempt-2', score: 72 },
-          { ...entries[0]!, id: 'attempt-3', score: 92 },
+          { ...entries[0]!, id: 'missing', promptText: null },
+          { ...entries[0]!, id: 'blank', promptText: '   ' },
         ]}
-        scoreSummary={scoreSummary([72, 82, 92], {
-          scannedCount: 5,
-          excludedCount: 2,
-          truncated: true,
-        })}
         focusPhrase="with less filler"
-        hasNext
       />,
     )
 
-    expect(screen.getByText('Compatible score trend')).toBeInTheDocument()
-    expect(screen.getByText('cohort average 82')).toBeInTheDocument()
-    expect(
-      screen.getByRole('img', { name: 'Compatible scores, averaging 82 out of 100' }),
-    ).toBeInTheDocument()
-    expect(screen.getByText(/latest 200 completed responses/)).toBeInTheDocument()
-    expect(
-      screen.getByText(/2 responses use another mode or result generation/),
-    ).toBeInTheDocument()
-    expect(screen.getByText(/Pages show up to 20/)).toBeInTheDocument()
+    expect(screen.getAllByText('Prompt unavailable')).toHaveLength(2)
+    expect(screen.queryByText('Compatible score trend')).not.toBeInTheDocument()
+    expect(screen.queryByText(/cohort average/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
   })
 
   it('keeps unsupported and partial responses visible with factual labels', () => {
@@ -451,7 +418,6 @@ describe('HistoryList', () => {
           { ...entries[0]!, id: 'unsupported', resultKind: 'unsupported', score: null },
           { ...entries[0]!, id: 'partial', resultKind: 'partial', score: null },
         ]}
-        scoreSummary={scoreSummary([], { scannedCount: 2, excludedCount: 2 })}
         focusPhrase="with less filler"
       />,
     )
@@ -460,22 +426,5 @@ describe('HistoryList', () => {
     expect(screen.getByText(/Partial result/)).toBeInTheDocument()
     expect(screen.getByText('Unsupported')).toBeInTheDocument()
     expect(screen.getByText('Overall unavailable')).toBeInTheDocument()
-    expect(
-      screen.getByText('No compatible scored responses are available in this filter.'),
-    ).toBeInTheDocument()
-  })
-
-  it('states that a single compatible score is insufficient for a trend', () => {
-    render(
-      <HistoryList
-        entries={entries}
-        scoreSummary={scoreSummary([82])}
-        focusPhrase="with less filler"
-      />,
-    )
-
-    expect(screen.getByText('cohort average 82')).toBeInTheDocument()
-    expect(screen.getByText('A trend needs at least two compatible responses.')).toBeInTheDocument()
-    expect(screen.queryByRole('img')).not.toBeInTheDocument()
   })
 })

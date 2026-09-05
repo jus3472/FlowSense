@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { ProgressDashboard } from '@/components/progress/progress-dashboard'
 import { RetryButton } from '@/components/system/retry-button'
 import { ErrorState } from '@/components/ui/error-state'
+import { PageTitle } from '@/components/ui/page-title'
 import { loadCurriculumOverviewForUser } from '@/lib/curriculum/server'
 import { parseProgressMode } from '@/lib/progress/display'
 import { getProgressDashboardData } from '@/lib/progress/server'
@@ -32,12 +33,15 @@ export default async function ProgressPage({
 
   if (speakingResult.status === 'failure' && curriculumResult.status !== 'ready') {
     return (
-      <ErrorState
-        title="Progress is unavailable"
-        description="Your progress could not be loaded. Try again in a moment."
-      >
-        <RetryButton />
-      </ErrorState>
+      <div className="flex flex-col gap-12 pt-4 pb-12">
+        <PageTitle>Progress</PageTitle>
+        <ErrorState
+          title="Progress is unavailable"
+          description="Your progress could not be loaded. Try again in a moment."
+        >
+          <RetryButton />
+        </ErrorState>
+      </div>
     )
   }
 

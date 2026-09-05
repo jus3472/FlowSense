@@ -9,7 +9,6 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
-import { TrendChart } from '@/components/history/trend-chart'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { deleteAttempt } from '@/lib/results/api'
@@ -27,7 +26,6 @@ import {
   type HistoryMetadataFilter,
   type HistoryQuery,
 } from '@/lib/results/history'
-import type { HistoryScoreSummary } from '@/lib/results/history-cohort'
 import { attemptHref } from '@/lib/routes'
 import { cn } from '@/lib/utils'
 
@@ -40,16 +38,6 @@ const METADATA_FILTERS: HistoryMetadataFilter[] = [
   'custom',
   'retry',
 ]
-
-const EMPTY_SCORE_SUMMARY: HistoryScoreSummary = {
-  cohort: null,
-  points: [],
-  average: null,
-  scannedCount: 0,
-  excludedCount: 0,
-  scanLimit: 200,
-  truncated: false,
-}
 
 function TrashIcon() {
   return (
@@ -84,7 +72,6 @@ const ICON_BUTTON =
 
 export function HistoryList({
   entries: initial,
-  scoreSummary = EMPTY_SCORE_SUMMARY,
   focusPhrase,
   query = DEFAULT_HISTORY_QUERY,
   hasAnyEntries = initial.length > 0,
@@ -92,7 +79,6 @@ export function HistoryList({
   hasNext = false,
 }: {
   entries: HistoryEntry[]
-  scoreSummary?: HistoryScoreSummary
   focusPhrase: string
   query?: HistoryQuery
   hasAnyEntries?: boolean
@@ -215,8 +201,6 @@ export function HistoryList({
       <p role="status" aria-live="polite" className="sr-only">
         {announcement}
       </p>
-      <TrendChart summary={scoreSummary} />
-
       <div className="flex flex-col gap-3">
         <label className="text-muted flex flex-col gap-1 text-sm" htmlFor="history-metadata-filter">
           Show responses
@@ -277,10 +261,13 @@ export function HistoryList({
                       <p className="text-muted text-xs font-medium">{entry.lesson.pathTitle}</p>
                     ) : null}
                     <p className="text-foreground min-w-0 text-sm font-medium break-words">
-                      {entry.lesson
-                        ? `${entry.lesson.chapterLevel[0]?.toUpperCase()}${entry.lesson.chapterLevel.slice(1)} · Lesson ${entry.lesson.lessonPosition}`
-                        : entry.promptText}
+                      {entry.promptText?.trim() ? entry.promptText : 'Prompt unavailable'}
                     </p>
+                    {entry.lesson ? (
+                      <p className="text-muted mt-1 text-xs">
+                        {`${entry.lesson.chapterLevel[0]?.toUpperCase()}${entry.lesson.chapterLevel.slice(1)} · Lesson ${entry.lesson.lessonPosition}`}
+                      </p>
+                    ) : null}
                     {historyContext(entry).length > 0 ? (
                       <p className="text-muted mt-1 text-xs">{historyContext(entry).join(' · ')}</p>
                     ) : null}

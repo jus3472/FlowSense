@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { HistoryList } from '@/components/history/history-list'
 import { RetryButton } from '@/components/system/retry-button'
 import { ErrorState } from '@/components/ui/error-state'
+import { PageTitle } from '@/components/ui/page-title'
 import { focusPhrase, sanitizeFocusAreas } from '@/lib/focus-areas'
 import { historyHref, parseHistoryQuery, type HistorySearchParams } from '@/lib/results/history'
 import { loadHistoryPage, safeHistoryErrorCode } from '@/lib/results/history-server'
@@ -46,7 +47,7 @@ export default async function HistoryPage({
     })
     return (
       <div className="flex flex-col gap-12 pt-4 pb-12">
-        <h1 className="prompt-display text-foreground text-2xl">Your history</h1>
+        <PageTitle>History</PageTitle>
         <ErrorState
           title="Your history did not load"
           description="The connection to your account failed. Your responses are safe."
@@ -59,10 +60,9 @@ export default async function HistoryPage({
 
   return (
     <div className="flex flex-col gap-12 pt-4 pb-12">
-      <h1 className="prompt-display text-foreground text-2xl">Your history</h1>
+      <PageTitle>History</PageTitle>
       <HistoryList
         entries={historyResult.data.entries}
-        scoreSummary={historyResult.data.scoreSummary}
         focusPhrase={phrase}
         query={parsed.query}
         hasAnyEntries={historyResult.data.hasAnyEntries}

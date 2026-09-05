@@ -135,12 +135,43 @@ function modelFor(
   secondary: readonly CurriculumPathProgress[] = [],
   available: readonly CurriculumPathProgress[] = [],
 ) {
-  const model = buildHomeCurriculumModel(overview(primary, secondary, available))
+  const recentLessonId = primary.lessons[0]?.lesson.id ?? null
+  const model = buildHomeCurriculumModel(overview(primary, secondary, available), recentLessonId)
   if (!model) throw new Error('Expected a primary Home path.')
   return model
 }
 
 describe('Home curriculum progression', () => {
+  it('falls back to General Speaking when there is no relevant structured activity', () => {
+    const data = overview(
+      progress('interviews'),
+      [progress('presentations')],
+      [progress('general-speaking'), progress('conversations')],
+    )
+
+    expect(buildHomeCurriculumModel(data, null)?.primary.pathTitle).toBe('General Speaking')
+    expect(buildHomeCurriculumModel(data, 'unknown-lesson')?.primary.pathTitle).toBe(
+      'General Speaking',
+    )
+  })
+
+  it('changes the primary Track when a newer structured lesson comes from another Track', () => {
+    const interviews = progress('interviews')
+    const presentations = progress('presentations')
+    const data = overview(
+      progress('general-speaking'),
+      [interviews],
+      [presentations, progress('conversations')],
+    )
+
+    const interviewLesson = interviews.lessons[3]!.lesson.id
+    const presentationLesson = presentations.lessons[4]!.lesson.id
+    expect(buildHomeCurriculumModel(data, interviewLesson)?.primary.pathTitle).toBe('Interviews')
+    expect(buildHomeCurriculumModel(data, presentationLesson)?.primary.pathTitle).toBe(
+      'Presentations',
+    )
+  })
+
   it('uses the first authoritative lesson for a fresh user', () => {
     const model = modelFor(progress('interviews'))
 

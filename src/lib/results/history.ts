@@ -8,7 +8,7 @@ import type { HistoryResultKind } from '@/lib/results/history-cohort'
 export interface HistoryEntry {
   id: string
   createdAt: string
-  promptText: string
+  promptText: string | null
   score: number | null
   resultKind?: HistoryResultKind
   practiceMode?: PracticeMode | null

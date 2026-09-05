@@ -343,6 +343,10 @@ describe('Practice overview', () => {
   it('shows track order, progress, lesson numbers, and state-specific direct actions', () => {
     render(<PracticeOverview overview={overview()} />)
 
+    expect(screen.getByRole('heading', { name: 'Tracks', level: 1 })).toHaveClass(
+      'prompt-display',
+      'text-2xl',
+    )
     const tracks = screen.getByRole('region', { name: 'Tracks' })
     expect(
       within(tracks)

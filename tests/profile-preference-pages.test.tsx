@@ -86,7 +86,9 @@ function client(options: ClientOptions) {
     select: vi.fn(() => profileQuery),
     eq: vi.fn(() => profileQuery),
     maybeSingle: vi.fn(() =>
-      options.profileThrows ? Promise.reject(options.profileThrows) : Promise.resolve(options.profile),
+      options.profileThrows
+        ? Promise.reject(options.profileThrows)
+        : Promise.resolve(options.profile),
     ),
   }
   const pathQuery = chainResult(options.paths ?? { data: PATHS, error: null })
@@ -110,8 +112,10 @@ function client(options: ClientOptions) {
 }
 
 async function renderSettings(options: ClientOptions) {
-  mocks.createClient.mockResolvedValue(client(options))
+  const setup = client(options)
+  mocks.createClient.mockResolvedValue(setup)
   render(await SettingsPage({ searchParams: Promise.resolve({}) }))
+  return setup
 }
 
 async function renderFocus(options: ClientOptions) {
@@ -166,15 +170,15 @@ describe('preference page load failures', () => {
     expect(JSON.stringify(logging.mock.calls)).not.toContain(PRIVATE_ERROR_TEXT)
   })
 
-  it('fails closed on malformed ordered path rows', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    await renderSettings({
+  it('does not load path preferences for Settings', async () => {
+    const setup = await renderSettings({
       profile: { data: { display_name: 'River', focus_areas: [], timezone: null }, error: null },
       preferences: { data: [{ path_id: PATHS[1].id, rank: 2 }], error: null },
     })
 
-    expect(screen.getByRole('heading', { name: 'Your settings did not load' })).toBeInTheDocument()
-    expect(screen.queryByRole('radio', { name: 'Interviews' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Display name')).toHaveValue('River')
+    expect(setup.from).toHaveBeenCalledTimes(1)
+    expect(setup.from).toHaveBeenCalledWith('profiles')
   })
 })
 
@@ -193,7 +197,7 @@ describe('path preference forms', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument()
   })
 
-  it('renders a saved primary and ordered optional secondary paths in Settings', async () => {
+  it('renders only the remaining profile fields in Settings', async () => {
     await renderSettings({
       profile: {
         data: { display_name: 'River', focus_areas: ['presentations'], timezone: null },
@@ -209,9 +213,12 @@ describe('path preference forms', () => {
     })
 
     expect(screen.getByLabelText('Display name')).toHaveValue('River')
-    expect(screen.getByRole('radio', { name: 'Interviews' })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: 'Presentations' })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: 'Interviews' })).toBeDisabled()
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.queryByText('Starting track')).not.toBeInTheDocument()
+    expect(screen.queryByText('Additional paths')).not.toBeInTheDocument()
+    expect(screen.queryByText('Primary', { exact: true })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument()
   })
 
   it('lets the user change the primary and add another path without changing availability', async () => {

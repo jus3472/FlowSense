@@ -5,6 +5,7 @@ import { ProgressTrend } from '@/components/progress/progress-trend'
 import { RetryButton } from '@/components/system/retry-button'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
+import { PageTitle } from '@/components/ui/page-title'
 import type { CurriculumOverviewData } from '@/lib/curriculum/overview'
 import { selectCategory, selectProgressDimension } from '@/lib/progress/display'
 import { retryDifferenceLabel } from '@/lib/progress/retries'
@@ -103,21 +104,15 @@ export function ProgressDashboard({
       v3MetricIds.some((metric) => v3Window.metrics[metric].state === 'insufficient_data'))
 
   return (
-    <div className="flex flex-col gap-8 pb-12">
-      <header>
-        <p className="section-label text-muted">Progress</p>
-        <h1 className="prompt-display text-foreground text-2xl">Your progress</h1>
-      </header>
+    <div className="flex flex-col gap-12 pt-4 pb-12">
+      <PageTitle>Progress</PageTitle>
 
       {curriculum ? <CurriculumProgress overview={curriculum} /> : null}
       {curriculumUnavailable ? (
-        <section aria-labelledby="curriculum-progress-heading" className="flex flex-col gap-3">
-          <h2 id="curriculum-progress-heading" className="text-foreground text-xl font-semibold">
-            Path progress
-          </h2>
+        <section aria-label="Track progress">
           <Card className="flex flex-col gap-3">
             <div>
-              <h3 className="text-foreground font-medium">Path progress is unavailable</h3>
+              <h2 className="text-foreground font-medium">Track progress is unavailable</h2>
               <p className="text-muted mt-1 text-sm">Your lesson progress could not be loaded.</p>
             </div>
             <RetryButton />

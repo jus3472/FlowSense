@@ -57,6 +57,10 @@ describe('Practice overview page states', () => {
       expect(
         screen.getByRole('heading', { name: 'Your practice paths did not load' }),
       ).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Tracks', level: 1 })).toHaveClass(
+        'prompt-display',
+        'text-2xl',
+      )
       expect(screen.getByText(description)).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
       expect(screen.queryByRole('heading', { name: 'Your paths' })).not.toBeInTheDocument()

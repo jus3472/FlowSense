@@ -1,6 +1,7 @@
 import { CurriculumStars } from '@/components/curriculum/stars'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { PageTitle } from '@/components/ui/page-title'
 import type { CurriculumLessonProgress, CurriculumPathProgress } from '@/lib/curriculum/contracts'
 import type { CurriculumOverviewData } from '@/lib/curriculum/overview'
 import { curriculumLessonRecordHref, curriculumPathHref } from '@/lib/curriculum/routes'
@@ -104,10 +105,8 @@ function PathCard({ item }: { item: CurriculumOverviewData['paths'][number] }) {
 export function PracticeOverview({ overview }: { overview: CurriculumOverviewData }) {
   return (
     <div className="flex flex-col gap-12">
-      <section aria-labelledby="your-paths-heading" className="flex flex-col gap-4">
-        <h1 id="your-paths-heading" className="text-foreground text-xl font-semibold">
-          Tracks
-        </h1>
+      <PageTitle id="tracks-heading">Tracks</PageTitle>
+      <section aria-labelledby="tracks-heading" className="flex flex-col gap-4">
         <div className="flex min-w-0 flex-col gap-4">
           {overview.paths.map((item) => (
             <PathCard key={item.progress.path.id} item={item} />

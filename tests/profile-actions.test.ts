@@ -63,9 +63,7 @@ interface FakeClientOptions {
 }
 
 function fakeClient(options: FakeClientOptions = {}) {
-  let preferenceRows: Array<{ path_id: string; rank: number }> = [
-    { path_id: PATHS[0].id, rank: 0 },
-  ]
+  let preferenceRows: Array<{ path_id: string; rank: number }> = [{ path_id: PATHS[0].id, rank: 0 }]
   let profilePayload: Record<string, unknown> | null = null
   const events: string[] = []
 
@@ -76,7 +74,9 @@ function fakeClient(options: FakeClientOptions = {}) {
       if (profilePayload) {
         return {
           data:
-            options.profileWriteData === undefined ? { ...profilePayload } : options.profileWriteData,
+            options.profileWriteData === undefined
+              ? { ...profilePayload }
+              : options.profileWriteData,
           error: options.profileWriteError ?? null,
         }
       }
@@ -137,6 +137,13 @@ function preferenceForm(primary = 'general-speaking', secondaries: string[] = []
   formData.set('primary_path', primary)
   for (const secondary of secondaries) formData.append('secondary_path', secondary)
   formData.set('timezone', 'America/New_York')
+  return formData
+}
+
+function profileForm(displayName = '', timezone = 'America/New_York') {
+  const formData = new FormData()
+  formData.set('display_name', displayName)
+  formData.set('timezone', timezone)
   return formData
 }
 
@@ -212,12 +219,11 @@ describe('onboarding path persistence', () => {
   )
 })
 
-describe('settings path persistence', () => {
-  it('changes the primary path through the atomic RPC without mutating progress or scores', async () => {
+describe('settings profile persistence', () => {
+  it('updates the profile without reading or writing path preferences, progress, or scores', async () => {
     const setup = fakeClient({ timezone: 'America/Los_Angeles' })
     mocks.createClient.mockResolvedValue(setup.client)
-    const formData = preferenceForm('conversations', ['general-speaking'])
-    formData.set('display_name', ' River ')
+    const formData = profileForm(' River ', 'America/New_York')
 
     await expect(updateProfile(initialProfileFormState, formData)).resolves.toEqual({
       status: 'saved',
@@ -228,29 +234,36 @@ describe('settings path persistence', () => {
       { id: USER_ID, display_name: 'River', timezone: 'America/Los_Angeles' },
       { onConflict: 'id' },
     )
-    expect(setup.rpc).toHaveBeenCalledWith('replace_profile_path_preferences', {
-      path_ids: [PATHS[3].id, PATHS[0].id],
-    })
+    expect(setup.rpc).not.toHaveBeenCalled()
+    expect(setup.client.from).not.toHaveBeenCalledWith('practice_paths')
+    expect(setup.client.from).not.toHaveBeenCalledWith('profile_path_preferences')
     expect(setup.client.from).not.toHaveBeenCalledWith('lesson_progress')
     expect(setup.client.from).not.toHaveBeenCalledWith('attempts')
-    expect(mocks.revalidatePath).toHaveBeenCalledWith('/home')
+    expect(mocks.revalidatePath).toHaveBeenCalledTimes(1)
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/settings')
   })
 
-  it('returns a visible error when the primary path is missing', async () => {
-    await expect(updateProfile(initialProfileFormState, new FormData())).resolves.toEqual({
-      status: 'error',
-      message: 'Choose one primary path.',
+  it('saves without the removed path fields', async () => {
+    const setup = fakeClient()
+    mocks.createClient.mockResolvedValue(setup.client)
+
+    await expect(updateProfile(initialProfileFormState, profileForm('River'))).resolves.toEqual({
+      status: 'saved',
+      message: 'Saved.',
       displayNameError: null,
     })
-    expect(mocks.createClient).not.toHaveBeenCalled()
+    expect(setup.profileQuery.upsert).toHaveBeenCalledWith(
+      { id: USER_ID, display_name: 'River', timezone: 'America/New_York' },
+      { onConflict: 'id' },
+    )
   })
 
-  it('does not report saved when preference readback differs', async () => {
-    const setup = fakeClient({ keepReadback: true })
+  it('does not report saved when profile readback differs', async () => {
+    const setup = fakeClient({ profileWriteData: { display_name: 'Other', timezone: 'UTC' } })
     mocks.createClient.mockResolvedValue(setup.client)
 
     await expect(
-      updateProfile(initialProfileFormState, preferenceForm('interviews')),
+      updateProfile(initialProfileFormState, profileForm('River')),
     ).resolves.toMatchObject({ status: 'error' })
   })
 })

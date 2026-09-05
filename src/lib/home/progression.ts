@@ -39,6 +39,20 @@ export interface HomeCurriculumModel {
   secondary: readonly HomeSecondaryPath[]
 }
 
+function homePrimaryPath(
+  overview: CurriculumOverviewData,
+  recentLessonId: string | null,
+): CurriculumOverviewPath | null {
+  const recent = recentLessonId
+    ? overview.paths.find((item) =>
+        item.progress.lessons.some((lesson) => lesson.lesson.id === recentLessonId),
+      )
+    : null
+  return (
+    recent ?? overview.paths.find((item) => item.progress.path.slug === 'general-speaking') ?? null
+  )
+}
+
 function levelLabel(value: string): string {
   return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
 }
@@ -144,14 +158,18 @@ function buildSecondary(item: CurriculumOverviewPath): HomeSecondaryPath {
   }
 }
 
-/** Adapts the shared progression engine for Home without recalculating achievement. */
+/** Adapts shared progression using recent structured activity without recalculating achievement. */
 export function buildHomeCurriculumModel(
   overview: CurriculumOverviewData,
+  recentLessonId: string | null = null,
 ): HomeCurriculumModel | null {
-  const primary = overview.paths.find((item) => item.selection === 'primary')
+  const primary = homePrimaryPath(overview, recentLessonId)
   if (!primary) return null
   const secondary = overview.paths
-    .filter((item) => item.selection === 'selected')
+    .filter(
+      (item) =>
+        item.progress.path.id !== primary.progress.path.id && item.selection !== 'available',
+    )
     .sort((left, right) => (left.preferenceRank ?? 0) - (right.preferenceRank ?? 0))
     .map(buildSecondary)
   return { primary: buildPrimary(primary), secondary }

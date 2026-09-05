@@ -165,14 +165,7 @@ export function CurriculumProgress({ overview }: { overview: CurriculumOverviewD
   const available = overview.paths.filter(({ selection }) => selection === 'available')
 
   return (
-    <section aria-labelledby="curriculum-progress-heading" className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <h2 id="curriculum-progress-heading" className="text-foreground text-xl font-semibold">
-          Path progress
-        </h2>
-        <p className="text-muted text-sm">Your lesson progress stays with each path.</p>
-      </div>
-
+    <section aria-label="Track progress" className="flex flex-col gap-6">
       <div className="flex min-w-0 flex-col gap-4">
         {selected.map((item) => (
           <SelectedPathProgress key={item.progress.path.id} item={item} />

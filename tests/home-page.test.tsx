@@ -7,6 +7,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   loadCurriculum: vi.fn(),
+  loadRecentLesson: vi.fn(),
+  logRecentLessonFailure: vi.fn(),
   buildCurriculum: vi.fn(),
   redirect: vi.fn(),
 }))
@@ -33,6 +35,10 @@ vi.mock('@/lib/curriculum/server', () => ({
 }))
 vi.mock('@/lib/home/progression', () => ({
   buildHomeCurriculumModel: mocks.buildCurriculum,
+}))
+vi.mock('@/lib/home/recent-lesson', () => ({
+  loadRecentStructuredLessonId: mocks.loadRecentLesson,
+  logRecentStructuredLessonFailure: mocks.logRecentLessonFailure,
 }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: mocks.createClient }))
 
@@ -71,6 +77,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.createClient.mockResolvedValue(supabaseClient())
   mocks.loadCurriculum.mockResolvedValue({ status: 'ready', data: { paths: [] } })
+  mocks.loadRecentLesson.mockResolvedValue({ status: 'ready', lessonId: 'interview-lesson-1' })
   mocks.buildCurriculum.mockReturnValue(curriculumModel)
 })
 
@@ -82,6 +89,8 @@ describe('Home data orchestration', () => {
     render(await HomePage())
 
     expect(mocks.loadCurriculum).toHaveBeenCalledWith(client, 'user-1')
+    expect(mocks.loadRecentLesson).toHaveBeenCalledWith(client, 'user-1')
+    expect(mocks.buildCurriculum).toHaveBeenCalledWith({ paths: [] }, 'interview-lesson-1')
     expect(screen.getByRole('heading', { name: 'Continue Interviews' })).toBeInTheDocument()
     expect(screen.queryByText('Open with a clear answer')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Latest response' })).not.toBeInTheDocument()
@@ -102,5 +111,15 @@ describe('Home data orchestration', () => {
     expect(screen.getByRole('heading', { name: 'Your path did not load' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
     expect(screen.queryByText('Latest response')).not.toBeInTheDocument()
+  })
+
+  it('uses General Speaking fallback selection when recent activity cannot load', async () => {
+    const failure = { status: 'failure', reason: 'query', error: { code: 'PGRST500' } }
+    mocks.loadRecentLesson.mockResolvedValue(failure)
+
+    render(await HomePage())
+
+    expect(mocks.logRecentLessonFailure).toHaveBeenCalledWith(failure)
+    expect(mocks.buildCurriculum).toHaveBeenCalledWith({ paths: [] }, null)
   })
 })

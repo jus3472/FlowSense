@@ -21,11 +21,13 @@ describe('completed attempt query boundaries', () => {
     expect(prompts.match(/\.eq\('status', 'done'\)/g)).toHaveLength(1)
   })
 
-  it('lists terminal History rows but keeps its score cohort done-only', () => {
+  it('lists terminal History rows without a separate score-cohort query', () => {
     const history = source('src/lib/results/history-server.ts')
 
-    expect(history.match(/\.eq\('status', 'done'\)/g)).toHaveLength(1)
+    expect(history).not.toContain(".eq('status', 'done')")
     expect(history.match(/\.in\('status', \['done', 'failed', 'timed_out'\]\)/g)).toHaveLength(2)
+    expect(history).not.toContain('HISTORY_SCORE_SCAN_SIZE')
+    expect(history).not.toContain('summarizeHistoryScoreCohort')
     expect(history).not.toContain('score.not.is.null')
     expect(history).not.toContain('section_scores.not.is.null')
   })
