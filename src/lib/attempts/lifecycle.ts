@@ -76,33 +76,6 @@ export function canRunScoring(status: AttemptStatus): boolean {
   return status === 'scoring' || status === 'failed' || status === 'timed_out'
 }
 
-export type AttemptRubricKind = 'v3' | 'v2' | 'legacy' | 'unsupported'
-
-/** Only explicit legacy metadata may use the historical scoring implementation. */
-export function classifyAttemptRubric(value: unknown): AttemptRubricKind {
-  if (value === 'v3') return 'v3'
-  if (value === 'v2') return 'v2'
-  if (value === null || value === 'v1' || value === 'legacy') return 'legacy'
-  return 'unsupported'
-}
-
-export function shouldUseV3Assembler(
-  rubricKind: AttemptRubricKind,
-  hasV3Mode: boolean,
-  legacyRecheck: boolean,
-): boolean {
-  return rubricKind === 'v3' && hasV3Mode && !legacyRecheck
-}
-
-/** A genuine legacy retry overrides contradictory v2 row metadata. */
-export function shouldUseV2Assembler(
-  rubricKind: AttemptRubricKind,
-  hasV2Mode: boolean,
-  legacyRecheck: boolean,
-): boolean {
-  return rubricKind === 'v2' && hasV2Mode && !legacyRecheck
-}
-
 export function terminalStatusForTimeout(timedOut: boolean): 'failed' | 'timed_out' {
   return timedOut ? 'timed_out' : 'failed'
 }

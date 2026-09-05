@@ -1,270 +1,59 @@
-import { readAttemptResult, storedTranscriptWords } from '@/lib/results/attempt-result'
-import { DELIVERY_POINTS } from '@/lib/scoring/mechanical'
-import { V2_SCORE_PAYLOAD_VERSION } from '@/lib/scoring/v2/assemble'
 import { describe, expect, it } from 'vitest'
+import { readAttemptResult, storedTranscriptWords } from '@/lib/results/attempt-result'
 import { v3Snapshot } from './helpers/result-snapshots'
 
-const checks = {
-  answered: { passed: true, severity: null, quote: null, observation: null, suggestion: null },
-  explained: { passed: true, severity: null, quote: null, observation: null, suggestion: null },
-  word_choice: { passed: true, severity: null, quote: null, observation: null, suggestion: null },
-  logical_order: { passed: true, severity: null, quote: null, observation: null, suggestion: null },
-  no_repetition: { passed: true, severity: null, quote: null, observation: null, suggestion: null },
-}
-
-const metric = (points: number) => ({
-  points,
-  max_points: points,
-  raw: 0,
-  component: 1,
-  label: null,
-})
-const metrics = Object.fromEntries(
-  Object.entries(DELIVERY_POINTS).map(([name, points]) => [name, metric(points)]),
-)
-
-const legacySections = {
-  content: {
-    earned: 50,
-    max: 50,
-    checks: { answered: 14, explained: 12, word_choice: 12, logical_order: 7, no_repetition: 5 },
-  },
-  delivery: { earned: 50, max: 50, metrics: Object.fromEntries(Object.entries(DELIVERY_POINTS)) },
-}
-
-const legacyContent = {
-  status: 'checked',
-  model: 'legacy-model',
-  error: null,
-  checks,
-  extra_spans: [],
-  tightened: null,
-  tightened_outcome: 'none',
-  dropped: [],
-  points: legacySections.content.checks,
-  disputes_applied: 0,
-}
-
-const statistics = {
-  word_count: 4,
-  recording_ms: 12_000,
-  speaking_ms: 10_000,
-  clean_pause_count: 0,
-  mid_sentence_pause_count: 0,
-  total_silence_ms: 2_000,
-  leading_silence_ms: 0,
-  trailing_silence_ms: 0,
-  silence_ratio: 0.1,
-  longest_pause_ms: 500,
-  pace_variance: 0,
-  backtrack_count: 0,
-  backtrack_note: null,
-  counted_items: [],
-  repeated_phrases: [],
-  noise_floor: 0.01,
-  speech_level: 0.1,
-  speech_threshold: 0.02,
-}
-
-function legacyInput(overrides: Record<string, unknown> = {}) {
+function input(sectionScores: unknown = v3Snapshot()) {
   return {
     id: 'attempt-1',
-    promptText: 'Describe your day.',
-    transcript: 'I took a walk.',
-    durationMs: 12_000,
-    createdAt: '2026-08-26T12:00:00.000Z',
-    audioUrl: 'https://example.test/audio',
-    score: 100,
-    sectionScores: legacySections,
-    metrics: {
-      delivery: { metrics, statistics, pauses: [] },
-    },
-    contentResult: legacyContent,
-    ...overrides,
+    promptText: 'Prompt',
+    transcript: 'A response.',
+    durationMs: 1_000,
+    createdAt: '2026-09-05T12:00:00.000Z',
+    audioUrl: null,
+    score: 80,
+    sectionScores,
+    metrics: {},
+    contentResult: {},
   }
 }
 
-function v2Payload(partial = false) {
-  const weights = {
-    fluency: 22,
-    clarity: 20,
-    vocabulary: 12,
-    grammar: 12,
-    structure: 18,
-    delivery: 16,
-  }
-  const categories = Object.fromEntries(
-    Object.entries(weights).map(([category, maxPoints]) => [
-      category,
-      {
-        category,
-        availability: 'available',
-        status: partial && category === 'grammar' ? 'not_checked' : 'scored',
-        component: partial && category === 'grammar' ? null : 1,
-        earned_points: partial && category === 'grammar' ? null : maxPoints,
-        max_points: maxPoints,
-        measurements: {},
-        evidence: [],
-        deductions: [],
-        warnings: [],
-      },
-    ]),
-  )
-  return {
-    version: V2_SCORE_PAYLOAD_VERSION,
-    rubric_version: 'v2',
-    mode: 'practice',
-    total_earned_points: partial ? null : 100,
-    total_max_points: 100,
-    categories,
-    warnings: [],
-  }
-}
+describe('attempt result decoding', () => {
+  it('returns the current v3.2 payload', () => {
+    expect(readAttemptResult(input())).toMatchObject({ kind: 'v3', payload: { version: 'v3.score.2' } })
+  })
 
-describe('attempt result reader', () => {
-  it('returns a stored legacy snapshot without recalculating it', () => {
-    const stored = legacyInput({
-      score: 37,
-      sectionScores: { ...legacySections, content: { ...legacySections.content, earned: 9 } },
+  it('preserves a resultless terminal shape as incomplete', () => {
+    expect(
+      readAttemptResult({
+        ...input(null),
+        score: null,
+        contentResult: null,
+      }),
+    ).toEqual({ kind: 'incomplete' })
+  })
+
+  it('fails closed for old and future versions', () => {
+    expect(readAttemptResult(input({ ...v3Snapshot(), version: 'v3.score.1' }))).toMatchObject({
+      kind: 'unsupported_version',
+      scoreVersion: 'v3.score.1',
     })
-    const result = readAttemptResult(stored)
-    expect(result.kind).toBe('legacy')
-    if (result.kind === 'legacy') {
-      expect(result.attempt.score).toBe(37)
-      expect(result.attempt.sections.content.earned).toBe(9)
-    }
-  })
-
-  it.each([false, true])('recognizes a structurally valid %s v2 payload', (partial) => {
-    const result = readAttemptResult(
-      legacyInput({ score: partial ? null : 100, sectionScores: v2Payload(partial) }),
-    )
-    expect(result.kind).toBe('v2')
-    if (result.kind === 'v2') {
-      expect(result.payload.total_earned_points).toBe(partial ? null : 100)
-    }
-  })
-
-  it('uses the complete stored v2 snapshot when the legacy score column is null', () => {
-    const payload = v2Payload()
-    const result = readAttemptResult(legacyInput({ score: null, sectionScores: payload }))
-
-    expect(result.kind).toBe('v2')
-    if (result.kind === 'v2') {
-      expect(result.payload).toBe(payload)
-      expect(result.payload.total_earned_points).toBe(100)
-    }
-  })
-
-  it('returns complete and partial v3 payloads without reading legacy renderer data', () => {
-    const complete = v3Snapshot()
-    const completeResult = readAttemptResult(
-      legacyInput({ score: null, sectionScores: complete, metrics: null, contentResult: null }),
-    )
-    expect(completeResult.kind).toBe('v3')
-    if (completeResult.kind === 'v3') expect(completeResult.payload).toBe(complete)
-
-    const partial = v3Snapshot({ unavailableMetric: 'energy' })
-    const partialResult = readAttemptResult(
-      legacyInput({ score: null, sectionScores: partial, metrics: null, contentResult: null }),
-    )
-    expect(partialResult.kind).toBe('v3')
-    if (partialResult.kind === 'v3') expect(partialResult.payload.total_earned_points).toBeNull()
-  })
-
-  it('lets a genuine legacy payload win over v2 row metadata', () => {
-    expect(readAttemptResult(legacyInput({ rubricVersion: 'v2' })).kind).toBe('legacy')
-  })
-
-  it('fails malformed stored JSON safely rather than casting it as legacy', () => {
-    expect(readAttemptResult(legacyInput({ metrics: { delivery: { metrics: {} } } })).kind).toBe(
-      'malformed',
-    )
-  })
-
-  it('fails an unknown future payload version safely', () => {
-    expect(
-      readAttemptResult(
-        legacyInput({ sectionScores: { ...v2Payload(), version: 'future.score.1' } }),
-      ).kind,
-    ).toBe('unsupported_version')
-  })
-
-  it('keeps an attempt with no stored score incomplete', () => {
-    expect(
-      readAttemptResult(
-        legacyInput({ score: null, sectionScores: null, metrics: null, contentResult: null }),
-      ).kind,
-    ).toBe('incomplete')
-  })
-
-  it.each([
-    { capture: { duration_ms: 1 } },
-    { transcript: { words: [] } },
-    { practice: { additional_context: 'context' } },
-  ])('keeps raw pre-score metrics incomplete', (metrics) => {
-    expect(
-      readAttemptResult(
-        legacyInput({ score: null, sectionScores: null, contentResult: null, metrics }),
-      ).kind,
-    ).toBe('incomplete')
-  })
-
-  it('rejects malformed nested legacy renderer data', () => {
-    expect(
-      readAttemptResult(
-        legacyInput({
-          metrics: {
-            delivery: { metrics, statistics: { ...statistics, word_count: 'four' }, pauses: [] },
-          },
-        }),
-      ).kind,
-    ).toBe('malformed')
-    expect(
-      readAttemptResult(
-        legacyInput({ contentResult: { ...legacyContent, extra_spans: [{ text: 1 }] } }),
-      ).kind,
-    ).toBe('malformed')
-  })
-
-  it.each([42, null])('rejects a present non-object transcript block', (transcript) => {
-    expect(
-      readAttemptResult(
-        legacyInput({ metrics: { delivery: { metrics, statistics, pauses: [] }, transcript } }),
-      ).kind,
-    ).toBe('malformed')
-  })
-
-  it('accepts valid transcript words but rejects bad timings and confidence', () => {
-    const withWords = (words: unknown[]) => ({
-      delivery: { metrics, statistics, pauses: [] },
-      transcript: { words },
+    expect(readAttemptResult(input({ ...v3Snapshot(), version: 'v3.score.99' }))).toMatchObject({
+      kind: 'unsupported_version',
+      scoreVersion: 'v3.score.99',
     })
-    expect(
-      readAttemptResult(
-        legacyInput({
-          metrics: withWords([{ word: 'hello', start: 0, end: 0.4, confidence: 0.9 }]),
-        }),
-      ).kind,
-    ).toBe('legacy')
-    expect(
-      readAttemptResult(
-        legacyInput({ metrics: withWords([{ word: 'hello', start: 'now', end: 0.4 }]) }),
-      ).kind,
-    ).toBe('malformed')
-    expect(
-      readAttemptResult(
-        legacyInput({ metrics: withWords([{ word: 'hello', start: 0, end: 0.4, confidence: 2 }]) }),
-      ).kind,
-    ).toBe('malformed')
   })
 
-  it('exposes only structurally valid stored transcript words for current result annotations', () => {
-    const words = [{ word: 'hello', start: 0, end: 0.4, confidence: 0.9 }]
+  it('does not convert partial stored fields into an incomplete result', () => {
+    expect(readAttemptResult({ ...input(null), score: 80 })).toEqual({ kind: 'malformed' })
+  })
+
+  it('accepts only ordered, bounded transcript words', () => {
+    const words = [
+      { word: 'A', start: 0, end: 0.2, confidence: 0.9 },
+      { word: 'response', start: 0.3, end: 0.8, confidence: 0.8 },
+    ]
     expect(storedTranscriptWords({ transcript: { words } })).toEqual(words)
-    expect(
-      storedTranscriptWords({ transcript: { words: [{ word: 'hello', start: 0.4, end: 0 }] } }),
-    ).toEqual([])
-    expect(storedTranscriptWords(null)).toEqual([])
+    expect(storedTranscriptWords({ transcript: { words: [...words].reverse() } })).toEqual([])
+    expect(storedTranscriptWords({ transcript: { words: [{ ...words[0], confidence: 2 }] } })).toEqual([])
   })
 })

@@ -5,11 +5,11 @@ import {
   databaseClientOptions,
   loadEnvFile,
 } from './lib/migrations.mjs'
+import { v3Snapshot } from '../tests/helpers/result-snapshots'
 import {
   legacySectionSnapshot,
-  legacyV3Snapshot,
-  v3Snapshot,
-} from '../tests/helpers/result-snapshots'
+  obsoleteV3Snapshot,
+} from '../tests/helpers/obsolete-result-snapshots'
 
 const OWNER = 'a1000000-0000-4000-8000-000000000001'
 const OTHER = 'a2000000-0000-4000-8000-000000000002'
@@ -143,7 +143,7 @@ async function main(): Promise<void> {
       [OWNER],
     )
 
-    const obsolete = legacyV3Snapshot({ component: 0.9 })
+    const obsolete = obsoleteV3Snapshot({ component: 0.9 })
     await insertAttempt({
       id: OBSOLETE_BEST,
       userId: OWNER,

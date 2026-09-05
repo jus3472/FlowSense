@@ -16,7 +16,7 @@ import {
   v3PrimaryMeasurement,
   v3TranscriptSegments,
 } from '@/lib/results/v3'
-import { legacyV3Snapshot, v3Snapshot } from './helpers/result-snapshots'
+import { v3Snapshot } from './helpers/result-snapshots'
 import { wordsFrom } from './helpers/transcript'
 
 describe('v3 result presentation helpers', () => {
@@ -41,7 +41,6 @@ describe('v3 result presentation helpers', () => {
       {
         type: 'highlight',
         text: 'vague',
-        kind: 'word_choice',
         label: 'Word Choice: wording that could be more precise',
         details: [
           'Word Choice: wording that could be more precise',
@@ -357,25 +356,6 @@ describe('v3 result presentation helpers', () => {
     expect(v3MetricHasDetails('specificity', specificity, specificityDetails)).toBe(true)
   })
 
-  it('keeps first-word corroboration diagnostics out of the user-facing detail list', () => {
-    const metric = legacyV3Snapshot({
-      evidenceMetric: 'time_to_first_word',
-      measurements: {
-        seconds: 2.9,
-        transcript_ms: 3_200,
-        amplitude_onset_ms: 650,
-        anchored_acoustic_onset_ms: 2_900,
-        selected_onset_ms: 2_900,
-        rms_corroborated: true,
-        source: 'anchored_acoustic',
-        origin: 'recording_start',
-      },
-    }).sections.how_you_sounded.metrics.time_to_first_word
-
-    expect(v3PrimaryMeasurement('time_to_first_word', metric)).toBe('2.9 sec')
-    expect(v3MeasurementDetails(metric)).toEqual(['seconds: 2.90'])
-  })
-
   it('summarizes composite Energy evidence while preserving historical pitch-spread display', () => {
     const current = v3Snapshot({
       evidenceMetric: 'energy',
@@ -460,7 +440,6 @@ describe('v3 result presentation helpers', () => {
     expect(v3TranscriptSegments(transcript, payload)).toContainEqual({
       type: 'highlight',
       text: 'Um,',
-      kind: 'word_choice',
       label: 'Conciseness: unnecessary wording',
       details: [
         'Conciseness: unnecessary wording',

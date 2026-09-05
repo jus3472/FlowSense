@@ -1,14 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { describe, expect, it, vi } from 'vitest'
 import { loadLessonAttemptHistoryForUser } from '@/lib/results/lesson-attempt-history'
-import { DELIVERY_POINTS } from '@/lib/scoring/mechanical'
 import type { Database } from '@/lib/types/database'
-import {
-  legacySectionSnapshot,
-  legacyV3Snapshot,
-  v2Snapshot,
-  v3Snapshot,
-} from './helpers/result-snapshots'
+import { v3Snapshot } from './helpers/result-snapshots'
 
 vi.mock('server-only', () => ({}))
 
@@ -33,59 +27,6 @@ interface Operation {
   args: unknown[]
 }
 
-const LEGACY_METRIC = (points: number) => ({
-  points,
-  max_points: points,
-  raw: 0,
-  component: 1,
-  label: null,
-})
-
-const LEGACY_METRICS = Object.fromEntries(
-  Object.entries(DELIVERY_POINTS).map(([name, points]) => [name, LEGACY_METRIC(points)]),
-)
-
-const LEGACY_STATISTICS = {
-  word_count: 4,
-  recording_ms: 12_000,
-  speaking_ms: 10_000,
-  clean_pause_count: 0,
-  mid_sentence_pause_count: 0,
-  total_silence_ms: 2_000,
-  leading_silence_ms: 0,
-  trailing_silence_ms: 0,
-  silence_ratio: 0.1,
-  longest_pause_ms: 500,
-  pace_variance: 0,
-  backtrack_count: 0,
-  backtrack_note: null,
-  counted_items: [],
-  repeated_phrases: [],
-  noise_floor: 0.01,
-  speech_level: 0.1,
-  speech_threshold: 0.02,
-}
-
-const LEGACY_CHECKS = Object.fromEntries(
-  ['answered', 'explained', 'word_choice', 'logical_order', 'no_repetition'].map((name) => [
-    name,
-    { passed: true, severity: null, quote: null, observation: null, suggestion: null },
-  ]),
-)
-
-const LEGACY_CONTENT = {
-  status: 'checked',
-  model: 'legacy-model',
-  error: null,
-  checks: LEGACY_CHECKS,
-  extra_spans: [],
-  tightened: null,
-  tightened_outcome: 'none',
-  dropped: [],
-  points: legacySectionSnapshot.content.checks,
-  disputes_applied: 0,
-}
-
 function row(id: string, overrides: Partial<FakeRow> = {}): FakeRow {
   const payload = v3Snapshot({ component: 0.8 })
   return {
@@ -104,18 +45,6 @@ function row(id: string, overrides: Partial<FakeRow> = {}): FakeRow {
     status: 'done',
     ...overrides,
   }
-}
-
-function legacyRow(id: string, finishedAt: string): FakeRow {
-  return row(id, {
-    finished_at: finishedAt,
-    score: 100,
-    section_scores: legacySectionSnapshot,
-    metrics: {
-      delivery: { metrics: LEGACY_METRICS, statistics: LEGACY_STATISTICS, pauses: [] },
-    },
-    content_result: LEGACY_CONTENT,
-  })
 }
 
 class FakeQuery implements PromiseLike<{ data: FakeRow[] | null; error: unknown }> {
@@ -189,22 +118,15 @@ function fakeSupabase(rows: FakeRow[], error: unknown = null) {
 }
 
 describe('structured lesson attempt history', () => {
-  it('returns other viewable legacy, v2, v3, and neutral results newest first', async () => {
-    const v2 = v2Snapshot({ component: 0.7 })
-    const v3Score1 = legacyV3Snapshot({ component: 0.75 })
+  it('returns other current and neutral results newest first', async () => {
     const neutral = v3Snapshot({ unavailableMetric: 'energy' })
+    const current = v3Snapshot({ component: 0.7 })
     const setup = fakeSupabase([
       row('current-attempt', { finished_at: '2026-09-05T12:00:00.000Z' }),
-      legacyRow('legacy-attempt', '2026-09-02T12:00:00.000Z'),
-      row('v2-attempt', {
-        finished_at: '2026-09-03T12:00:00.000Z',
-        score: v2.total_earned_points,
-        section_scores: v2,
-      }),
-      row('v3-score-1-attempt', {
+      row('current-prior-attempt', {
         finished_at: '2026-09-03T18:00:00.000Z',
-        score: v3Score1.total_earned_points,
-        section_scores: v3Score1,
+        score: current.total_earned_points,
+        section_scores: current,
       }),
       row('neutral-attempt', {
         finished_at: '2026-09-04T12:00:00.000Z',
@@ -224,19 +146,9 @@ describe('structured lesson attempt history', () => {
           finishedAt: '2026-09-04T12:00:00.000Z',
         },
         {
-          attemptId: 'v3-score-1-attempt',
-          score: v3Score1.total_earned_points,
+          attemptId: 'current-prior-attempt',
+          score: current.total_earned_points,
           finishedAt: '2026-09-03T18:00:00.000Z',
-        },
-        {
-          attemptId: 'v2-attempt',
-          score: v2.total_earned_points,
-          finishedAt: '2026-09-03T12:00:00.000Z',
-        },
-        {
-          attemptId: 'legacy-attempt',
-          score: 100,
-          finishedAt: '2026-09-02T12:00:00.000Z',
         },
       ],
     })

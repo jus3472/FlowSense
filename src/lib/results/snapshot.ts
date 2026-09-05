@@ -1,33 +1,13 @@
-import { CHECK_NAMES } from '@/lib/scoring/content'
-import { DELIVERY_POINTS } from '@/lib/scoring/mechanical'
-import { isScorePayloadForDefinition, type V2ScorePayload } from '@/lib/scoring/v2/assemble'
-import { scoringDefinitionFor } from '@/lib/scoring/v2/registry'
 import { isV3ScorePayload } from '@/lib/scoring/v3/assemble'
 import {
-  V3_LEGACY_SCORE_PAYLOAD_VERSION,
   V3_RUBRIC_VERSION,
   V3_SCORE_PAYLOAD_VERSION,
-  type StoredV3ScorePayload,
+  type V3ScorePayload,
 } from '@/lib/scoring/v3/contracts'
-
-export interface LegacySectionSnapshot {
-  content: {
-    earned: number
-    max: number
-    checks: Record<(typeof CHECK_NAMES)[number], number>
-  }
-  delivery: {
-    earned: number
-    max: number
-    metrics: Record<keyof typeof DELIVERY_POINTS, number>
-  }
-}
 
 export type StoredSectionSnapshot =
   | { kind: 'none' }
-  | { kind: 'legacy'; sections: LegacySectionSnapshot }
-  | { kind: 'v2'; payload: V2ScorePayload }
-  | { kind: 'v3'; payload: StoredV3ScorePayload }
+  | { kind: 'v3'; payload: V3ScorePayload }
   | {
       kind: 'unsupported_version'
       scoreVersion: string | null
@@ -39,33 +19,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function finiteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value)
-}
-
-function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  return Object.keys(value).length === keys.length && keys.every((key) => key in value)
-}
-
-function isLegacySectionSnapshot(value: unknown): value is LegacySectionSnapshot {
-  if (!isRecord(value) || !isRecord(value.content) || !isRecord(value.delivery)) return false
-  const { content, delivery } = value
-  const checks = content.checks
-  const metrics = delivery.metrics
-  if (!finiteNumber(content.earned) || !finiteNumber(content.max) || !isRecord(checks)) {
-    return false
-  }
-  if (!finiteNumber(delivery.earned) || !finiteNumber(delivery.max) || !isRecord(metrics)) {
-    return false
-  }
-  return (
-    exactKeys(checks, CHECK_NAMES) &&
-    CHECK_NAMES.every((name) => finiteNumber(checks[name])) &&
-    exactKeys(metrics, Object.keys(DELIVERY_POINTS)) &&
-    Object.values(metrics).every(finiteNumber)
-  )
-}
-
 function hasVersionedShape(value: Record<string, unknown>): boolean {
   return [
     'version',
@@ -73,42 +26,24 @@ function hasVersionedShape(value: Record<string, unknown>): boolean {
     'mode',
     'total_earned_points',
     'total_max_points',
-    'categories',
+    'sections',
   ].some((key) => key in value)
 }
 
 /**
- * The only persisted section-score interpretation boundary. It accepts exact
- * supported versions, preserves legacy independently, and fails closed for
- * future or malformed versioned snapshots.
+ * The only persisted section-score interpretation boundary. It accepts the
+ * exact current version and fails closed for older, future, or malformed data.
  */
 export function decodeStoredSectionSnapshot(value: unknown): StoredSectionSnapshot {
   if (value === null) return { kind: 'none' }
-  if (!isRecord(value)) return { kind: 'malformed' }
-
-  if (hasVersionedShape(value)) {
-    if (typeof value.version !== 'string' || typeof value.rubric_version !== 'string') {
-      return { kind: 'malformed' }
-    }
-    const scoreVersion = value.version
-    const rubricVersion = value.rubric_version
-    if (
-      (scoreVersion === V3_SCORE_PAYLOAD_VERSION ||
-        scoreVersion === V3_LEGACY_SCORE_PAYLOAD_VERSION) &&
-      rubricVersion === V3_RUBRIC_VERSION
-    ) {
-      return isV3ScorePayload(value) ? { kind: 'v3', payload: value } : { kind: 'malformed' }
-    }
-    const definition = scoringDefinitionFor(scoreVersion, rubricVersion)
-    if (!definition) {
-      return { kind: 'unsupported_version', scoreVersion, rubricVersion }
-    }
-    return isScorePayloadForDefinition(value, definition)
-      ? { kind: 'v2', payload: value }
-      : { kind: 'malformed' }
+  if (!isRecord(value) || !hasVersionedShape(value)) return { kind: 'malformed' }
+  if (typeof value.version !== 'string' || typeof value.rubric_version !== 'string') {
+    return { kind: 'malformed' }
   }
-
-  return isLegacySectionSnapshot(value)
-    ? { kind: 'legacy', sections: value }
-    : { kind: 'malformed' }
+  const scoreVersion = value.version
+  const rubricVersion = value.rubric_version
+  if (scoreVersion !== V3_SCORE_PAYLOAD_VERSION || rubricVersion !== V3_RUBRIC_VERSION) {
+    return { kind: 'unsupported_version', scoreVersion, rubricVersion }
+  }
+  return isV3ScorePayload(value) ? { kind: 'v3', payload: value } : { kind: 'malformed' }
 }

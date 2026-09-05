@@ -1,7 +1,7 @@
 /**
  * Signal analysis for the capture timelines. Pure functions over sample arrays
  * so they can be tested against synthetic waveforms rather than a live
- * microphone. Prompt 3 derives its delivery metrics from what these produce, so
+ * microphone. Current audio scoring derives its measurements from what these produce, so
  * the values stay raw and unsmoothed.
  */
 

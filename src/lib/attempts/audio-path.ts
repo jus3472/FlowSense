@@ -13,8 +13,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Narrows a stored path before any service-role storage access. New attempts
- * use the immutable upload snapshot; legacy rows must at least have a valid
- * capture MIME from which the exact owned path can be reconstructed.
+ * use the immutable upload snapshot. Resultless terminal rows may retain only
+ * capture MIME data, from which the exact owned path can be reconstructed.
  */
 export function validateOwnedAttemptAudioPath(input: {
   userId: string

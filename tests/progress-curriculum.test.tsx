@@ -16,7 +16,7 @@ import {
 } from '@/lib/curriculum/contracts'
 import { buildCurriculumOverview, type CurriculumOverviewData } from '@/lib/curriculum/overview'
 import { buildCurriculumPathProgress } from '@/lib/curriculum/progression'
-import { aggregateV2Progress } from '@/lib/progress/aggregation'
+import { aggregateV3Progress } from '@/lib/progress/v3-aggregation'
 import type { ProgressDashboardData } from '@/lib/progress/server'
 
 vi.mock('next/link', () => ({
@@ -106,7 +106,7 @@ function overview(
 
 function speakingDashboard(): ProgressDashboardData {
   return {
-    progress: aggregateV2Progress([], { now: new Date('2026-08-28T12:00:00.000Z') }),
+    progress: aggregateV3Progress([], { now: new Date('2026-08-28T12:00:00.000Z') }),
     retryComparisons: [],
     coverage: { completedAttemptLimit: 200, truncated: false },
   }

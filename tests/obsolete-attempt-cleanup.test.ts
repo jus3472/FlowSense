@@ -8,12 +8,12 @@ import {
   type MaintenanceAttemptRow,
 } from '@/lib/maintenance/obsolete-attempts'
 import { assertSafePlan, type CleanupPlan } from '../scripts/lib/obsolete-attempt-cleanup'
+import { v3Snapshot } from './helpers/result-snapshots'
 import {
   legacySectionSnapshot,
-  legacyV3Snapshot,
-  v2Snapshot,
-  v3Snapshot,
-} from './helpers/result-snapshots'
+  obsoleteV2Snapshot,
+  obsoleteV3Snapshot,
+} from './helpers/obsolete-result-snapshots'
 
 const USER_ID = '10000000-0000-4000-8000-000000000001'
 const OTHER_USER_ID = '20000000-0000-4000-8000-000000000002'
@@ -72,8 +72,8 @@ describe('obsolete-attempt cleanup selection', () => {
   it('selects each exact supported obsolete generation', () => {
     const rows = [
       row('10000000-0000-4000-8000-000000000011', legacySectionSnapshot),
-      row('10000000-0000-4000-8000-000000000012', v2Snapshot()),
-      row('10000000-0000-4000-8000-000000000013', legacyV3Snapshot()),
+      row('10000000-0000-4000-8000-000000000012', obsoleteV2Snapshot()),
+      row('10000000-0000-4000-8000-000000000013', obsoleteV3Snapshot()),
     ]
     expect(
       selectObsoleteAttempts(rows, USER_ID, new Set(['legacy', 'v2.score.1', 'v3.score.1'])).map(
@@ -83,7 +83,7 @@ describe('obsolete-attempt cleanup selection', () => {
   })
 
   it('keeps another user and unfinished or malformed rows out of scope', () => {
-    const obsolete = legacyV3Snapshot()
+    const obsolete = obsoleteV3Snapshot()
     const rows = [
       row('10000000-0000-4000-8000-000000000014', obsolete),
       row('20000000-0000-4000-8000-000000000015', obsolete, { user_id: OTHER_USER_ID }),
@@ -99,14 +99,53 @@ describe('obsolete-attempt cleanup selection', () => {
     expect(classifyAttemptGeneration(rows[4]!)).toMatchObject({ kind: 'unsupported' })
   })
 
+  it('rejects forged obsolete payloads with incomplete or invalid nested shapes', () => {
+    const valid = obsoleteV3Snapshot()
+    const emptySections = row('10000000-0000-4000-8000-000000000022', {
+      ...valid,
+      sections: {},
+    })
+    const wrongMetricKeys = row('10000000-0000-4000-8000-000000000023', {
+      ...valid,
+      sections: {
+        ...valid.sections,
+        how_you_sounded: { ...valid.sections.how_you_sounded, metrics: { energy: valid.sections.how_you_sounded.metrics.energy } },
+      },
+    })
+    const nonnumericPoints = row('10000000-0000-4000-8000-000000000024', {
+      ...valid,
+      sections: {
+        ...valid.sections,
+        what_you_said: { ...valid.sections.what_you_said, earned_points: '40' },
+      },
+    })
+    const emptyCategories = row('10000000-0000-4000-8000-000000000025', {
+      ...obsoleteV2Snapshot(),
+      categories: {},
+    })
+    const legacySectionMismatch = row('10000000-0000-4000-8000-000000000026', {
+      ...legacySectionSnapshot,
+      content: { ...legacySectionSnapshot.content, earned: 49 },
+    })
+    const legacyRowMismatch = row('10000000-0000-4000-8000-000000000027', legacySectionSnapshot, { score: 99 })
+    for (const candidate of [emptySections, wrongMetricKeys, nonnumericPoints, emptyCategories, legacySectionMismatch, legacyRowMismatch]) {
+      expect(classifyAttemptGeneration(candidate)).toMatchObject({ kind: 'malformed' })
+    }
+    expect(selectObsoleteAttempts(
+      [emptySections, wrongMetricKeys, nonnumericPoints, emptyCategories, legacySectionMismatch, legacyRowMismatch],
+      USER_ID,
+      new Set(['v2.score.1', 'v3.score.1']),
+    )).toEqual([])
+  })
+
   it('targets only exact owned immutable audio paths', () => {
     const attemptId = '10000000-0000-4000-8000-000000000019'
     const path = `${USER_ID}/${attemptId}.webm`
-    const valid = row(attemptId, legacyV3Snapshot(), {
+    const valid = row(attemptId, obsoleteV3Snapshot(), {
       audio_path: path,
       metrics: { upload: { storage_path: path, mime_type: 'audio/webm' } },
     })
-    const unsafe = row('10000000-0000-4000-8000-000000000020', legacyV3Snapshot(), {
+    const unsafe = row('10000000-0000-4000-8000-000000000020', obsoleteV3Snapshot(), {
       audio_path: `${OTHER_USER_ID}/shared.webm`,
       metrics: {
         upload: { storage_path: `${OTHER_USER_ID}/shared.webm`, mime_type: 'audio/webm' },
@@ -132,7 +171,7 @@ describe('obsolete-attempt cleanup selection', () => {
   })
 
   it('fails closed before mutation when dependencies are unexpected', () => {
-    const attempt = row('10000000-0000-4000-8000-000000000021', legacyV3Snapshot())
+    const attempt = row('10000000-0000-4000-8000-000000000021', obsoleteV3Snapshot())
     const plan: CleanupPlan = {
       targetUserId: USER_ID,
       generations: ['v3.score.1'],

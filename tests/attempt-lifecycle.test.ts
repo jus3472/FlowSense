@@ -13,12 +13,9 @@ import {
   canRunScoring,
   canRunTranscription,
   canTransitionAttempt,
-  classifyAttemptRubric,
   isActiveAttemptStatus,
   isAttemptStatus,
   isRetryableAttemptStatus,
-  shouldUseV2Assembler,
-  shouldUseV3Assembler,
 } from '@/lib/attempts/lifecycle'
 import type { CreateAttemptPayload } from '@/lib/recording/attempt-payload'
 import type { LibraryPrompt } from '@/lib/prompts/selection'
@@ -82,30 +79,6 @@ describe('attempt lifecycle contract', () => {
     expect(['done', 'failed', 'timed_out'].some(isActiveAttemptStatus)).toBe(false)
   })
 
-  it('allows v3, v2, or explicit legacy metadata into a scoring implementation', () => {
-    expect(classifyAttemptRubric('v3')).toBe('v3')
-    expect(classifyAttemptRubric('v2')).toBe('v2')
-    expect(classifyAttemptRubric('v1')).toBe('legacy')
-    expect(classifyAttemptRubric('legacy')).toBe('legacy')
-    expect(classifyAttemptRubric(null)).toBe('legacy')
-    expect(classifyAttemptRubric('v4')).toBe('unsupported')
-    expect(classifyAttemptRubric(undefined)).toBe('unsupported')
-  })
-
-  it('keeps a legacy recheck out of v2 dispatch despite v2 row metadata', () => {
-    expect(shouldUseV2Assembler('v2', true, true)).toBe(false)
-    expect(shouldUseV2Assembler('v2', true, false)).toBe(true)
-    expect(shouldUseV2Assembler('legacy', true, false)).toBe(false)
-    expect(shouldUseV2Assembler('unsupported', true, false)).toBe(false)
-  })
-
-  it('dispatches only valid v3 attempts to the v3 assembler', () => {
-    expect(shouldUseV3Assembler('v3', true, false)).toBe(true)
-    expect(shouldUseV3Assembler('v3', false, false)).toBe(false)
-    expect(shouldUseV3Assembler('v3', true, true)).toBe(false)
-    expect(shouldUseV3Assembler('v2', true, false)).toBe(false)
-    expect(shouldUseV3Assembler('legacy', true, false)).toBe(false)
-  })
 })
 
 describe('authoritative attempt creation', () => {

@@ -90,12 +90,6 @@ const CURRICULUM_PROMPTS = PRACTICE_LESSONS.map((lesson) => {
 })
 const PROMPTS = [...FREE_PROMPTS, ...CURRICULUM_PROMPTS]
 const QUERY_CONTROL_KEYS = new Set(['select', 'order', 'limit', 'offset', 'or'])
-const WEIGHTS = {
-  practice: [22, 20, 12, 12, 18, 16],
-  interview: [18, 22, 14, 12, 22, 12],
-  presentation: [16, 20, 14, 10, 20, 20],
-  conversation: [24, 22, 12, 12, 14, 16],
-}
 const V3_WEIGHTS = {
   practice: {
     what_you_said: {
@@ -439,48 +433,6 @@ function allocateScore(weights, score) {
   return earned
 }
 
-function scorePayload(attempt, failure = false, forcedScore = null) {
-  const names = ['fluency', 'clarity', 'vocabulary', 'grammar', 'structure', 'delivery']
-  const weights = WEIGHTS[attempt.practice_mode] ?? WEIGHTS.practice
-  const forcedEarned = forcedScore === null ? null : allocateScore(weights, forcedScore)
-  const categories = Object.fromEntries(
-    names.map((name, index) => {
-      const unavailable = failure && ['vocabulary', 'grammar', 'structure'].includes(name)
-      const max = weights[index]
-      const earned =
-        forcedEarned === null
-          ? Math.max(0, max - (state.attempts.length > 1 ? 1 : 3))
-          : forcedEarned[index]
-      return [
-        name,
-        {
-          category: name,
-          availability: 'available',
-          status: unavailable ? 'not_checked' : 'scored',
-          component: unavailable ? null : earned / max,
-          earned_points: unavailable ? null : earned,
-          max_points: max,
-          measurements: {},
-          evidence: [],
-          deductions: unavailable ? [] : [{ detail: `${name} measurement.` }],
-          warnings: unavailable ? ['Provider check was unavailable.'] : [],
-        },
-      ]
-    }),
-  )
-  return {
-    version: 'v2.score.1',
-    rubric_version: 'v2',
-    mode: attempt.practice_mode,
-    total_earned_points: failure
-      ? null
-      : Object.values(categories).reduce((sum, item) => sum + item.earned_points, 0),
-    total_max_points: 100,
-    categories,
-    warnings: failure ? ['Some provider checks were unavailable.'] : [],
-  }
-}
-
 function v3ScorePayload(attempt, failure = false, forcedScore = null) {
   const weights = V3_WEIGHTS[attempt.practice_mode] ?? V3_WEIGHTS.practice
   const entries = [
@@ -679,42 +631,7 @@ function raiseLessonProgress(attempt) {
   ) {
     return
   }
-  if (attempt.rubric_version === 'v3') {
-    if (!validV3ScorePayload(attempt, snapshot)) return
-  } else if (attempt.rubric_version === 'v2') {
-    const categories = Object.entries(snapshot?.categories ?? {})
-    const validNames = new Set([
-      'fluency',
-      'clarity',
-      'vocabulary',
-      'grammar',
-      'structure',
-      'delivery',
-    ])
-    if (
-      snapshot?.version !== 'v2.score.1' ||
-      snapshot?.rubric_version !== 'v2' ||
-      snapshot?.mode !== attempt.practice_mode ||
-      snapshot?.total_earned_points !== attempt.score ||
-      snapshot?.total_max_points !== 100 ||
-      categories.length !== 6 ||
-      categories.some(
-        ([name, category]) =>
-          !validNames.has(name) ||
-          category?.category !== name ||
-          category?.availability !== 'available' ||
-          category?.status !== 'scored' ||
-          typeof category?.earned_points !== 'number' ||
-          typeof category?.max_points !== 'number',
-      ) ||
-      categories.reduce((sum, [, category]) => sum + category.earned_points, 0) !== attempt.score ||
-      categories.reduce((sum, [, category]) => sum + category.max_points, 0) !== 100
-    ) {
-      return
-    }
-  } else {
-    return
-  }
+  if (attempt.rubric_version !== 'v3' || !validV3ScorePayload(attempt, snapshot)) return
 
   const existing = state.lessonProgress.find(
     (row) => row.user_id === attempt.user_id && row.lesson_id === attempt.lesson_id,
@@ -812,19 +729,14 @@ const server = createServer(async (req, res) => {
     const failure = input.failure === true
     const forcedScore =
       Number.isInteger(input.score) && input.score >= 0 && input.score <= 100 ? input.score : null
-    // New attempts use v3 by default. Tests can still request v2 explicitly for
-    // historical/cohort compatibility coverage.
-    const useV3 = input.scoreVersion !== 'v2.score.1' && input.rubricVersion !== 'v2'
-    const snapshot = useV3
-      ? v3ScorePayload(attempt, failure, forcedScore)
-      : scorePayload(attempt, failure, forcedScore)
-    attempt.rubric_version = useV3 ? 'v3' : 'v2'
+    const snapshot = v3ScorePayload(attempt, failure, forcedScore)
+    attempt.rubric_version = 'v3'
     attempt.score = failure ? null : snapshot.total_earned_points
     attempt.section_scores = snapshot
     attempt.content_result = null
     attempt.metrics = {
       ...attempt.metrics,
-      [useV3 ? 'v3' : 'v2']: {
+      v3: {
         score: snapshot,
         content: { status: failure ? 'not_checked' : 'checked' },
         scored_at: timestamp(),

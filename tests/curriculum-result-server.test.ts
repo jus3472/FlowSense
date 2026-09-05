@@ -33,10 +33,10 @@ function resultInput(
     attemptId: ATTEMPT_ID,
     promptId: PROMPT_ID,
     practiceMode: 'practice',
-    rubricVersion: 'v2',
+    rubricVersion: 'v3',
     currentScore: 84,
     snapshotMode: 'practice',
-    snapshotRubricVersion: 'v2',
+    snapshotRubricVersion: 'v3',
     snapshotScore: 84,
     ...overrides,
   }

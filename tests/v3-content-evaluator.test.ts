@@ -13,7 +13,7 @@ import {
   V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE,
   V3ContentParseError,
 } from '@/lib/scoring/v3/content/evaluate'
-import { legacyContentEvidenceInput, v3ContentEvidenceInput } from '@/lib/scoring/v3/content/input'
+import { v3ContentEvidenceInput } from '@/lib/scoring/v3/content/input'
 import { buildV3ContentUserPrompt, V3_CONTENT_SYSTEM_PROMPT } from '@/lib/scoring/v3/content/prompt'
 import { WHAT_YOU_SAID_METRICS } from '@/lib/scoring/v3/contracts'
 import { describe, expect, it, vi } from 'vitest'
@@ -720,13 +720,6 @@ describe('v3 content evaluator contract', () => {
         metric: 'conciseness',
       })
     })
-  })
-
-  it('preserves lexical mechanical exclusions for historical v2 rechecks', () => {
-    const transcript = 'Um, I led the launch.'
-    expect(
-      legacyContentEvidenceInput(transcript, wordsFrom(transcript)).mechanicallyCounted,
-    ).toEqual([{ start: 0, end: 3, text: 'Um,', category: 'filler' }])
   })
 
   it('retries once, then returns no usable metric when output remains malformed', async () => {

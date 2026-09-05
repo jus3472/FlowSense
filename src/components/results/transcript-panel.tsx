@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import type { Segment } from '@/lib/results/highlights'
+import type { Segment } from '@/lib/results/segments'
 
 /**
  * Amber means one thing: this cost points. Every mark is a tint behind the

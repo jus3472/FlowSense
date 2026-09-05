@@ -1,17 +1,15 @@
 import 'server-only'
 
-import {
-  aggregateV2Progress,
-  type ProgressAggregation,
-  type ProgressAggregationOptions,
-} from '@/lib/progress/aggregation'
 import { readProgressAttemptRows, safeProgressErrorCode } from '@/lib/progress/load'
 import {
   recentRetryComparisons,
-  recentV3RetryComparisons,
   type ProgressRetryComparison,
 } from '@/lib/progress/retries'
-import { aggregateV3Progress, type V3ProgressAggregation } from '@/lib/progress/v3-aggregation'
+import {
+  aggregateV3Progress,
+  type V3ProgressAggregation,
+} from '@/lib/progress/v3-aggregation'
+import type { PracticeMode } from '@/lib/practice/contracts'
 import { createClient } from '@/lib/supabase/server'
 
 /**
@@ -26,10 +24,8 @@ export interface ProgressQueryCoverage {
 }
 
 export interface ProgressDashboardData {
-  progress: ProgressAggregation
-  v3Progress?: V3ProgressAggregation
+  progress: V3ProgressAggregation
   retryComparisons: readonly ProgressRetryComparison[]
-  v3RetryComparisons?: readonly ProgressRetryComparison[]
   coverage: ProgressQueryCoverage
 }
 
@@ -40,7 +36,7 @@ export type ProgressDashboardLoadResult =
 /** User-scoped retrieval seam for the progress server component. */
 export async function getProgressDashboardData(
   userId: string,
-  options: ProgressAggregationOptions,
+  options: { now: Date; mode?: PracticeMode },
 ): Promise<ProgressDashboardLoadResult> {
   try {
     const supabase = await createClient()
@@ -65,13 +61,8 @@ export async function getProgressDashboardData(
     return {
       status: 'ready',
       data: {
-        progress: aggregateV2Progress(rows.attempts, options),
-        v3Progress: aggregateV3Progress(rows.attempts, options),
+        progress: aggregateV3Progress(rows.attempts, options),
         retryComparisons: recentRetryComparisons(rows.attempts, {
-          now: options.now,
-          mode: options.mode,
-        }),
-        v3RetryComparisons: recentV3RetryComparisons(rows.attempts, {
           now: options.now,
           mode: options.mode,
         }),

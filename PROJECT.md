@@ -36,7 +36,7 @@ src/components/          Screen-oriented components and shared ui/
 src/lib/env/             The only modules that read environment variables
 src/lib/supabase/        Browser, server, admin, and session clients
 src/lib/recording/       Capture, sampling, processing, storage, and playback
-src/lib/scoring/         Framework-free scoring and rewrite enforcement
+src/lib/scoring/         Framework-free scoring and evidence validation
 src/lib/deepgram/        Transcription request and parsing
 src/lib/deepseek/        Content model interface, provider, and prompts
 src/lib/results/         Result shaping and transcript highlights
@@ -59,8 +59,8 @@ countdown completes. Preparation audio is not stored or scored.
 
 Transcription uses Deepgram `nova-2` with punctuation and filler words enabled. Do not turn on smart formatting because the application needs the original disfluencies. `nova-3` must not replace it without checking filler behavior on real recordings.
 
-New attempts use rubric `v3` and payload `v3.score.2`. Historical `v3.score.1` payloads retain their
-original five-metric How You Sounded section and remain authoritative. The two sections are always worth 50 points.
+Attempts use rubric `v3` and payload `v3.score.2`. Other stored score formats fail closed as
+unsupported and are never reinterpreted. The two sections are always worth 50 points.
 DeepSeek evaluates only the six content metrics as normalized components under a strict schema.
 DeepSeek owns context-aware fillers and the other semantic Conciseness findings. Code retains only
 clear false starts and restarts within Conciseness, validates exact UTF-16 evidence, requires an
@@ -70,8 +70,8 @@ capture evidence and the final Deepgram word array:
 
 For new v3 attempts, `section_scores` is the only authoritative result snapshot. Its measurement maps
 contain only score inputs and user-facing or audit-relevant values. Raw audio-analysis diagnostics are
-computed transiently. `content_result` stores the compact `v3.content-audit.1` provider record, while
-historical full content results and historical `metrics.v3` copies remain readable and untouched.
+computed transiently. `content_result` stores the compact `v3.content-audit.1` provider record. Any
+older full content results or `metrics.v3` copies remain stored but are not interpreted as current.
 
 - Pace is perceived delivery rate: timed words divided by the response span from selected speech onset through the final word. Normal phrase and sentence spacing stays in the denominator. Only interword duration beyond Paused Time's contextual allowance is removed, so a long hesitation is not charged again as slow Pace.
 - Paused Time combines excessive beginning hesitation and excessive interword pauses. It uses the same hardened first-word onset as Pace, allows more time at the beginning and natural sentence boundaries than mid-thought, adds only duration beyond each allowance, and never counts trailing silence.
@@ -119,34 +119,6 @@ Any required metric that is missing, malformed, or insufficient makes the compos
 unavailable. Partial output never becomes a trustworthy zero or passing result. General Practice is
 the default weight configuration for Free Practice and Custom Prompt unless another mode is selected.
 
-The following 50/50, ten-metric score is the current legacy v1 implementation retained during the
-v2 transition. It does not define the v2 category architecture:
-
-| Section         | Check or metric          | Points |
-| --------------- | ------------------------ | -----: |
-| What you said   | Answered the question    |     14 |
-| What you said   | Explained your reasoning |     12 |
-| What you said   | Word choice              |     12 |
-| What you said   | Logical order            |      7 |
-| What you said   | No repetition            |      5 |
-| How you sounded | Filler words             |     18 |
-| How you sounded | Mid-sentence pauses      |     14 |
-| How you sounded | Energy                   |      8 |
-| How you sounded | Pace                     |      6 |
-| How you sounded | Time to first word       |      4 |
-
-The legacy v1 mechanical scores are pure functions over the stored capture timelines and Deepgram
-word array. Points use `round(max_points * component_score)`. Pace uses speaking time, not wall-clock
-duration, so silence is not charged under both Pace and Mid-sentence pauses. Energy uses median
-absolute deviation after octave correction. Time to first word remains unclamped so broken capture
-data is visible rather than hidden.
-
-The legacy v1 content route sends the prompt, punctuated transcript, word count, duration, and
-repeated phrases to DeepSeek. The model is a detector, not a critic. Failures award full content
-points and set content status to `not_checked`; the UI renders dashes for those checks.
-
-Every model quote is validated against the transcript. Content spans overlapping mechanically counted speech are dropped before scoring. Tightened rewrites receive the filler surfaces that must be deleted. The application then validates the rewrite, retries once with exact violations, and finally strips remaining counted fillers or Word choice spans with punctuation repair. False starts are not part of the rewrite deletion list because the ordinary word must remain once.
-
 ## Data and Security
 
 Supabase owns authentication, Postgres, and private recording storage. The main tables are:
@@ -154,25 +126,22 @@ Supabase owns authentication, Postgres, and private recording storage. The main 
 - `profiles`: user name and focus areas. A signup trigger creates each row.
 - `prompts`: active built-in prompts, publicly readable. An attempt can instead retain custom prompt text.
 - `attempts`: prompt snapshot, audio path, transcript, duration, score, sections, metrics, and content result. `prompt_text` is intentionally denormalized so later edits do not rewrite history.
-- `note_feedback`: disputes against content findings. Disputes are reapplied when results are read; they do not overwrite the stored model result.
 
-Scoring metrics and content results are JSONB by design. Every new v3-scored attempt must record its
-rubric and score version alongside its stored result snapshots. Historical v1 and v2 attempts may
-have null or older metadata; their stored snapshots remain authoritative. Later rubric, model, or
-mode changes must not overwrite, mix, or silently reinterpret a past result. New shapes must remain
-compatible with historical `attempts` data. RLS applies to every user table and the private
-`recordings` bucket. Add explicit insert policies when adding a table or storage path.
+Scoring metrics and content results are JSONB by design. Every scored attempt records rubric `v3`
+and score version `v3.score.2`. Unknown or removed formats are unsupported rather than mixed or
+silently reinterpreted. Resultless terminal attempts preserve their stored prompt, transcript,
+capture data, and recording. RLS applies to every user table and the private `recordings` bucket.
+Add explicit insert policies when adding a table or storage path.
 
-Only `src/lib/env/server.ts` may read server secrets, including the optional `AZURE_SPEECH_KEY`. The lint configuration and tests enforce this boundary. Never add secrets to a client component, a public environment variable, documentation examples, or committed local files. Azure pronunciation evidence is guarded to documented short-audio formats and is never a deduction.
+Only `src/lib/env/server.ts` may read server secrets. The lint configuration and tests enforce this boundary. Never add secrets to a client component, a public environment variable, documentation examples, or committed local files.
 
 ## Results and Interface
 
-For v3 results the page order is overall and two section scores, a short metric-grounded
-recommendation, transcript, What You Said, How You Sounded, and the recording player. Historical v1
-and v2 results retain their schema-specific renderer. The score bar is a literal proportion of 100,
-not a gauge or target.
+The result page order is overall and two section scores, a short metric-grounded recommendation,
+transcript, What You Said, How You Sounded, and the recording player. Unsupported formats receive a
+generic unavailable state. The score bar is a literal proportion of 100, not a gauge or target.
 
-Amber transcript marks mean exactly one thing: the marked speech cost points. Whole-response checks such as Answered the question and Logical order do not create transcript marks. Each content finding is shown once: a quoted finding must not repeat in its grouped span list. The statistics count shown to users must visibly match the units in the displayed list.
+Amber transcript marks mean exactly one thing: the marked speech cost points. Whole-response metrics such as Answered the Prompt and Structure do not create transcript marks. Each content finding is shown once: a quoted finding must not repeat in its grouped span list. The statistics count shown to users must visibly match the units in the displayed list.
 
 The active visual system is token-based in `src/app/globals.css`: a restrained water-toned light and dark palette, white or dark surfaces, cyan accent, warm amber highlight, Inter body text, Sora display text, and JetBrains Mono for measurements. Responsive form, column, reading, and page widths keep prose focused while allowing Tracks, Progress, and navigation to use intentional desktop layouts. Rounded white or dark surfaces use quiet borders and restrained shadows, with consistent page rhythm and semantic focus states. Components use semantic Tailwind tokens only. The tests reject component hex values, Tailwind color scales, invalid spacing, insufficient contrast, and nonliteral score-bar behavior.
 
@@ -189,10 +158,9 @@ npm run db:push
 npm run inspect:attempts
 npm run inspect:scores
 npm run inspect:content-reliability
-npm run inspect:rewrites
 ```
 
-Inspection scripts need the local database connection. `npm run inspect:rewrites` is read-only by default, but `npm run inspect:rewrites -- --write` persists enforced rewrites and may make provider requests during retries.
+Inspection scripts need the local database connection.
 
 `npm run inspect:content-reliability -- --limit 100` is always read-only and reports only aggregate
 result versions, category states, provider-call counts, and completion timestamps. Use

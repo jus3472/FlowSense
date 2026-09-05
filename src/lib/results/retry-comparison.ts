@@ -1,10 +1,8 @@
-import { SKILL_CATEGORIES, type SkillCategory } from '@/lib/practice/contracts'
 import { v3MetricIds, v3MetricResult } from '@/lib/results/v3'
-import type { V2ScorePayload } from '@/lib/scoring/v2/assemble'
 import {
   V3_METRIC_LABELS,
-  type StoredV3MetricId,
-  type StoredV3ScorePayload,
+  type V3MetricId,
+  type V3ScorePayload,
 } from '@/lib/scoring/v3/contracts'
 
 /** A display hint only. It never suppresses numeric stored-result evidence. */
@@ -12,7 +10,7 @@ export const RETRY_COMPARISON_NOISE_POINTS = 2
 export const MAX_RETRY_CHAIN_LENGTH = 8
 
 export interface RetryComparisonRow {
-  category: SkillCategory | StoredV3MetricId | 'overall'
+  category: V3MetricId | 'overall'
   label: string
   currentPoints: number
   previousPoints: number
@@ -60,69 +58,10 @@ export async function loadRetryAncestorChain<T extends RetryChainNode>(
   return null
 }
 
-function compatible(current: V2ScorePayload, previous: V2ScorePayload): boolean {
-  return (
-    current.version === previous.version &&
-    current.rubric_version === previous.rubric_version &&
-    current.mode === previous.mode &&
-    SKILL_CATEGORIES.every(
-      (category) =>
-        current.categories[category].max_points === previous.categories[category].max_points,
-    )
-  )
-}
-
-function categoryLabel(category: SkillCategory): string {
-  return category.slice(0, 1).toUpperCase() + category.slice(1)
-}
-
-/** Compares only compatible stored v2 snapshots, with no quality interpretation. */
-export function compareRetryResults(
-  current: V2ScorePayload,
-  previous: V2ScorePayload | null,
-): RetryComparison | null {
-  if (!previous || !compatible(current, previous)) return null
-  const rows: RetryComparisonRow[] = []
-  if (current.total_earned_points !== null && previous.total_earned_points !== null) {
-    const deltaPoints = current.total_earned_points - previous.total_earned_points
-    rows.push({
-      category: 'overall',
-      label: 'Overall',
-      currentPoints: current.total_earned_points,
-      previousPoints: previous.total_earned_points,
-      maxPoints: current.total_max_points,
-      deltaPoints,
-      withinNoise: Math.abs(deltaPoints) <= RETRY_COMPARISON_NOISE_POINTS,
-    })
-  }
-  for (const category of SKILL_CATEGORIES) {
-    const currentCategory = current.categories[category]
-    const previousCategory = previous.categories[category]
-    if (
-      currentCategory.status !== 'scored' ||
-      previousCategory.status !== 'scored' ||
-      currentCategory.earned_points === null ||
-      previousCategory.earned_points === null
-    )
-      continue
-    const deltaPoints = currentCategory.earned_points - previousCategory.earned_points
-    rows.push({
-      category,
-      label: categoryLabel(category),
-      currentPoints: currentCategory.earned_points,
-      previousPoints: previousCategory.earned_points,
-      maxPoints: currentCategory.max_points,
-      deltaPoints,
-      withinNoise: Math.abs(deltaPoints) <= RETRY_COMPARISON_NOISE_POINTS,
-    })
-  }
-  return { rows }
-}
-
 /** Compares only exact v3 score/rubric/mode snapshots. */
 export function compareV3RetryResults(
-  current: StoredV3ScorePayload,
-  previous: StoredV3ScorePayload | null,
+  current: V3ScorePayload,
+  previous: V3ScorePayload | null,
 ): RetryComparison | null {
   if (
     !previous ||

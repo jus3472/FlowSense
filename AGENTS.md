@@ -20,15 +20,15 @@ Read [README.md](README.md) and [PROJECT.md](PROJECT.md) before making product o
 - Preserve the two product invariants: the app measures rather than judges, and a speech span can cost points under only one check or metric. A model instruction is not sufficient enforcement when the behavior affects scores.
 - FlowSense measures one response, never a permanent rating of the person. New attempts use exactly 10 visible metrics across two 50-point sections: What You Said has Answered the Prompt, Specificity, Structure, Conciseness, Word Choice, and Grammar; How You Sounded has Pace, Paused Time, Articulation, and Energy. General Practice (`practice`), Interviews (`interview`), Presentations (`presentation`), and Conversations (`conversation`) change weights and thresholds, but remain one scoring system. Prompts can come from the built-in library or be custom.
 - Grammar and vocabulary feedback must identify a concrete response-level choice that affects clarity or effectiveness. Do not turn either category into vocabulary training, a level assessment, or a status judgment. Never assess accent. Future pronunciation work must measure intelligibility or phoneme accuracy, never whether someone sounds native.
-- Keep changes compatible with historical `attempts` data. Preserve stored prompt, transcript, capture, scoring-result, and result-snapshot data. Every new v3-scored attempt must store a rubric and score version. Legacy v1 and v2 attempts may have null or older metadata, and their stored snapshots remain authoritative; later changes must not overwrite or silently reinterpret them. Metrics and content results are JSONB on purpose, and disputes are reapplied on read rather than written into the original result.
+- Preserve stored prompt, transcript, capture, and current result-snapshot data. Every scored attempt must store rubric `v3` and score version `v3.score.2`. Other stored score formats fail closed as unsupported and must never be silently reinterpreted. Preserve resultless terminal attempts and their recording/retry compatibility. Metrics and content results are JSONB on purpose.
 
 ## Scoring and Capture
 
-- The older six-category v2, 50/50 ten-metric v1, and 11-metric `v3.score.1` implementations are retained only for historical attempts. Do not treat them as the current 10-metric `v3.score.2` architecture for new attempts.
+- Application runtime supports only the 10-metric `v3.score.2` architecture. Historical migrations and explicit maintenance tooling may recognize removed versions, but product routes and renderers must fail closed on them.
 - Mechanical scoring is deliberately framework-free and pure over stored timelines and transcript words. Add or update focused tests with every scoring behavior change.
 - Deepgram `nova-2` with fillers and punctuation is intentional. Do not enable smart formatting or replace the model without real-speech verification of filler transcription.
-- Content provider failures must not cost points: return `not_checked` content with full content points, and preserve the UI's non-passing state.
-- Validate model outputs in code. Quotes must be real transcript substrings, mechanically counted speech cannot also be a content span, and tightened rewrites must remove every counted filler or flagged Word choice span after retry and mechanical fallback.
+- Content provider failures must not cost points: return `not_checked` content, keep affected section and total scores unavailable, and preserve the UI's non-passing state.
+- Validate model outputs in code. Quotes must be real transcript substrings, and mechanically counted speech cannot also be a content span.
 - Preserve capture guards that ensure exactly one stream and recorder per attempt. Preserve measured `duration_ms` as the source of truth for playback and scoring.
 
 ## Interface and Copy
@@ -42,5 +42,5 @@ Read [README.md](README.md) and [PROJECT.md](PROJECT.md) before making product o
 
 - Run `npm run verify` for changes that affect application behavior, types, styling, copy, or tests. Run focused tests during iteration when appropriate.
 - Do not run `npm run db:push` against a database without explicit user approval. Migrations and RLS changes need a careful review.
-- `npm run inspect:attempts` and `npm run inspect:scores` inspect stored data. `npm run inspect:rewrites -- --write` mutates attempts and can make provider calls, so run it only when the task requires that effect.
+- `npm run inspect:attempts` and `npm run inspect:scores` inspect stored data.
 - Keep `.env.local` private. Only `src/lib/env/server.ts` reads server-only keys; use its helpers instead of reading `process.env` elsewhere.

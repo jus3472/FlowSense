@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { legacySectionSnapshot, v2Snapshot, v3Snapshot } from './helpers/result-snapshots'
+import { v3Snapshot } from './helpers/result-snapshots'
 
 vi.mock('server-only', () => ({}))
 
@@ -46,7 +46,7 @@ function setupClient(options: SetupOptions = {}) {
 }
 
 function attempt(overrides: Record<string, unknown> = {}) {
-  const sectionScores = overrides.sectionScores ?? v2Snapshot({ component: 0.8 })
+  const sectionScores = overrides.sectionScores ?? v3Snapshot({ component: 0.8 })
   const score =
     'score' in overrides
       ? overrides.score
@@ -76,16 +76,6 @@ describe('recordPracticeActivityDay', () => {
     [
       'new-schema provider neutral',
       attempt({ score: null, sectionScores: v3Snapshot({ unavailableMetric: 'energy' }) }),
-    ],
-    ['below the lesson threshold', attempt({ sectionScores: v2Snapshot({ component: 0.6 }) })],
-    ['above the lesson threshold', attempt({ sectionScores: v2Snapshot({ component: 0.9 }) })],
-    [
-      'provider neutral',
-      attempt({ score: null, sectionScores: v2Snapshot({ notCheckedCategory: 'grammar' }) }),
-    ],
-    [
-      'legacy free or custom practice',
-      attempt({ score: 80, sectionScores: legacySectionSnapshot }),
     ],
   ])('records %s as activity', async (_label, input) => {
     const setup = setupClient({ timezone: 'America/New_York' })

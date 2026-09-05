@@ -65,10 +65,10 @@ describe('design system', () => {
    * anyone else. A short bar on a low score is the honest picture.
    */
   it('draws the score bar as a literal proportion of 100', () => {
-    const header = files.find((file) => file.path.endsWith('results/score-header.tsx'))
+    const header = files.find((file) => file.path.endsWith('ui/score-progress.tsx'))
     expect(header).toBeDefined()
-    expect(header?.contents).toMatch(/score \/ 100/)
-    expect(header?.contents).toMatch(/scaleX\(\$\{fill\}\)/)
+    expect(header?.contents).toMatch(/value \/ max/)
+    expect(header?.contents).toContain('width: `${percentage}%`')
   })
 
   it('has no hex color in any component', () => {
@@ -94,11 +94,10 @@ describe('design system', () => {
     expect(violations).toEqual([])
   })
 
-  it('uses defined responsive score type tokens on the v2 result screen', () => {
-    const v2Results = files.find((file) => file.path.endsWith('results/v2-results-view.tsx'))
-    expect(v2Results?.contents).toContain('text-3xl')
-    expect(v2Results?.contents).toContain('sm:text-4xl')
-    expect(v2Results?.contents).not.toMatch(/text-5xl|text-6xl/)
+  it('uses restrained score type tokens on the current result screen', () => {
+    const results = files.find((file) => file.path.endsWith('results/v3-results-view.tsx'))
+    expect(results?.contents).toContain('text-4xl')
+    expect(results?.contents).not.toMatch(/text-5xl|text-6xl/)
   })
 })
 
@@ -107,9 +106,8 @@ describe('server only keys', () => {
     'SUPABASE_SECRET_KEY',
     'DEEPGRAM_API_KEY',
     'DEEPSEEK_API_KEY',
-    'AZURE_SPEECH_KEY',
   ]
-  const SERVER_ONLY_CONFIGURATION = [...SECRETS, 'AZURE_SPEECH_ENDPOINT']
+  const SERVER_ONLY_CONFIGURATION = [...SECRETS]
 
   it('reads the secrets in exactly one module', () => {
     const readers = files

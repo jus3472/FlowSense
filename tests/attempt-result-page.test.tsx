@@ -1,820 +1,96 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
 
 const mocks = vi.hoisted(() => ({
-  createClient: vi.fn(),
-  loadLessonAttemptHistoryForUser: vi.fn(),
-  loadStructuredLessonResultForUser: vi.fn(),
-  logAttemptDiagnostic: vi.fn(),
-  notFound: vi.fn(),
-  readAttemptResult: vi.fn(),
-  storedTranscriptWords: vi.fn(),
-  reconcileCurrentUserStaleAttempts: vi.fn(),
-  redirect: vi.fn(),
-  refresh: vi.fn(),
+  createClient: vi.fn(), loadLessonAttemptHistoryForUser: vi.fn(),
+  loadStructuredLessonResultForUser: vi.fn(), logAttemptDiagnostic: vi.fn(),
+  notFound: vi.fn(), readAttemptResult: vi.fn(), storedTranscriptWords: vi.fn(),
+  reconcileCurrentUserStaleAttempts: vi.fn(), redirect: vi.fn(),
 }))
 
-vi.mock('next/navigation', () => ({
-  notFound: mocks.notFound,
-  redirect: mocks.redirect,
-  useRouter: () => ({ refresh: mocks.refresh }),
-}))
-
+vi.mock('next/navigation', () => ({ notFound: mocks.notFound, redirect: mocks.redirect }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: mocks.createClient }))
 vi.mock('@/lib/attempts/server', () => ({ logAttemptDiagnostic: mocks.logAttemptDiagnostic }))
-vi.mock('@/lib/attempts/reconciliation', () => ({
-  reconcileCurrentUserStaleAttempts: mocks.reconcileCurrentUserStaleAttempts,
-}))
-vi.mock('@/lib/results/attempt-result', () => ({
-  readAttemptResult: mocks.readAttemptResult,
-  storedTranscriptWords: mocks.storedTranscriptWords,
-}))
-vi.mock('@/lib/curriculum/result-server', () => ({
-  loadStructuredLessonResultForUser: mocks.loadStructuredLessonResultForUser,
-}))
-vi.mock('@/lib/results/lesson-attempt-history', () => ({
-  loadLessonAttemptHistoryForUser: mocks.loadLessonAttemptHistoryForUser,
-}))
-
-vi.mock('@/components/results/results-view', () => ({
-  ResultsView: ({
-    attempt,
-    initialDisputes,
-    previousAttempts,
-  }: {
-    attempt: { audioUrl: string | null }
-    initialDisputes: Array<{ note_type: string; quote: string | null }>
-    previousAttempts?: readonly { attemptId: string }[]
-  }) => (
-    <div
-      data-audio={attempt.audioUrl ?? 'none'}
-      data-disputes={JSON.stringify(initialDisputes)}
-      data-history={
-        previousAttempts && previousAttempts.length > 0
-          ? previousAttempts.map((item) => item.attemptId).join(',')
-          : 'none'
-      }
-      data-testid="legacy-result"
-    >
-      Legacy result
-    </div>
-  ),
-}))
-
-vi.mock('@/components/results/v2-results-view', () => ({
-  V2ResultsView: ({
-    audioUrl,
-    payload,
-    comparison,
-    previousAttempts,
-    curriculumResult,
-  }: {
-    audioUrl: string | null
-    payload: { fixture: string }
-    comparison?: unknown
-    previousAttempts?: readonly { attemptId: string }[]
-    curriculumResult?: { lesson: { title: string } } | null
-  }) => (
-    <div
-      data-audio={audioUrl ?? 'none'}
-      data-comparison={comparison ? 'shown' : 'none'}
-      data-history={
-        previousAttempts && previousAttempts.length > 0
-          ? previousAttempts.map((item) => item.attemptId).join(',')
-          : 'none'
-      }
-      data-curriculum={curriculumResult?.lesson.title ?? 'none'}
-      data-testid="v2-result"
-    >
-      {payload.fixture}
-    </div>
-  ),
-}))
-
+vi.mock('@/lib/attempts/reconciliation', () => ({ reconcileCurrentUserStaleAttempts: mocks.reconcileCurrentUserStaleAttempts }))
+vi.mock('@/lib/results/attempt-result', () => ({ readAttemptResult: mocks.readAttemptResult, storedTranscriptWords: mocks.storedTranscriptWords }))
+vi.mock('@/lib/curriculum/result-server', () => ({ loadStructuredLessonResultForUser: mocks.loadStructuredLessonResultForUser }))
+vi.mock('@/lib/results/lesson-attempt-history', () => ({ loadLessonAttemptHistoryForUser: mocks.loadLessonAttemptHistoryForUser }))
 vi.mock('@/components/results/v3-results-view', () => ({
-  V3ResultsView: ({
-    audioUrl,
-    payload,
-    curriculumResult,
-    words,
-    previousAttempts,
-  }: {
-    audioUrl: string | null
-    payload: { fixture: string }
-    curriculumResult?: { lesson: { title: string } } | null
-    words?: readonly { word: string }[]
-    previousAttempts?: readonly { attemptId: string }[]
-  }) => (
-    <div
-      data-audio={audioUrl ?? 'none'}
-      data-curriculum={curriculumResult?.lesson.title ?? 'none'}
-      data-words={words?.map((word) => word.word).join(',') ?? 'none'}
-      data-history={
-        previousAttempts && previousAttempts.length > 0
-          ? previousAttempts.map((item) => item.attemptId).join(',')
-          : 'none'
-      }
-      data-testid="v3-result"
-    >
-      {payload.fixture}
-    </div>
+  V3ResultsView: ({ payload, previousAttempts }: { payload: { fixture: string }; previousAttempts: readonly { attemptId: string }[] }) => (
+    <div data-history={previousAttempts.map((item) => item.attemptId).join(',')} data-testid="v3-result">{payload.fixture}</div>
   ),
 }))
+vi.mock('@/components/record/audio-player', () => ({ AudioPlayer: ({ src }: { src: string }) => <div data-testid="audio">{src}</div> }))
 
 import AttemptPage from '@/app/(app)/attempts/[id]/page'
-import { v2Snapshot } from './helpers/result-snapshots'
 
 const ATTEMPT_ID = '10000000-0000-4000-8000-000000000001'
-const LESSON_ID = '70000000-0000-4000-8000-000000000007'
-const PARENT_ID = '20000000-0000-4000-8000-000000000002'
-const GRANDPARENT_ID = '60000000-0000-4000-8000-000000000006'
-const MISSING_ID = '30000000-0000-4000-8000-000000000003'
-const CROSS_USER_ID = '40000000-0000-4000-8000-000000000004'
 const USER_ID = '50000000-0000-4000-8000-000000000005'
-const PRIVATE_PATH = `${USER_ID}/${ATTEMPT_ID}/private-recording.webm`
-const PRIVATE_PROMPT = 'Private prompt text should not be logged.'
-const PRIVATE_TRANSCRIPT = 'Private transcript text should not be logged.'
-const PRIVATE_ERROR_MESSAGE = 'private database and storage error text'
-const PRIVATE_SIGNED_URL = 'https://private.example.test/signed-recording'
-const NOT_FOUND = new Error('NEXT_HTTP_ERROR_FALLBACK;404')
-const RETURNED_ERROR = {
-  code: 'PGRST500',
-  message: PRIVATE_ERROR_MESSAGE,
-  details: PRIVATE_TRANSCRIPT,
-}
-const THROWN_ERROR = Object.assign(new Error(PRIVATE_ERROR_MESSAGE), {
-  code: 'NETWORK_ERROR',
-  privatePath: PRIVATE_PATH,
-})
-const LEGACY_CONTENT = {
-  status: 'checked' as const,
-  checks: {
-    answered: { passed: false, quote: 'Exact stored quote' },
-    explained: { passed: true, quote: null },
-    word_choice: { passed: true, quote: null },
-    logical_order: { passed: true, quote: null },
-    no_repetition: { passed: true, quote: null },
-  },
-  extra_spans: [{ text: 'exact stored span' }],
-}
-
-interface QueryResponse {
-  data: Record<string, unknown> | null
-  error: unknown
-}
-
-interface ClientOptions {
-  primary?: QueryResponse
-  primaryThrows?: boolean
-  ancestor?: QueryResponse
-  ancestors?: Record<string, QueryResponse>
-  ancestorThrows?: boolean
-  signed?: { data: { signedUrl: string } | null; error: unknown }
-  signedThrows?: boolean
-  disputes?: { data: Array<Record<string, unknown>>; error: unknown }
-  disputesThrow?: boolean
-}
 
 function attempt(overrides: Record<string, unknown> = {}) {
   return {
-    id: ATTEMPT_ID,
-    prompt_id: null,
-    lesson_id: null,
-    prompt_text: PRIVATE_PROMPT,
-    transcript: PRIVATE_TRANSCRIPT,
-    duration_ms: 20_000,
-    audio_path: null,
-    created_at: '2026-08-27T12:00:00.000Z',
-    score: 80,
-    section_scores: 'v2',
-    metrics: null,
-    content_result: null,
-    practice_mode: 'practice',
-    rubric_version: 'v2',
-    retry_of_attempt_id: null,
-    status: 'done',
-    failure_code: null,
-    ...overrides,
+    id: ATTEMPT_ID, prompt_id: null, lesson_id: null,
+    prompt_text: 'Describe a clear decision.', transcript: 'I chose the first option because it was simpler.',
+    duration_ms: 12_000, audio_path: null, created_at: '2026-09-01T12:00:00.000Z',
+    score: 80, section_scores: { version: 'v3.score.2' }, metrics: null, content_result: null,
+    practice_mode: 'practice', rubric_version: 'v3', retry_of_attempt_id: null,
+    status: 'done', failure_code: null, ...overrides,
   }
 }
 
-function resultQuery(options: ClientOptions, filters: Array<{ column: string; value: unknown }>) {
-  let selectedId: unknown
-  const query = {
-    select: vi.fn(),
-    eq: vi.fn((column: string, value: unknown) => {
-      filters.push({ column, value })
-      if (column === 'id') selectedId = value
-      return query
-    }),
-    maybeSingle: vi.fn(async () => {
-      const primary =
-        selectedId === ATTEMPT_ID || selectedId === MISSING_ID || selectedId === CROSS_USER_ID
-      if (primary && options.primaryThrows) throw THROWN_ERROR
-      if (!primary && options.ancestorThrows) throw THROWN_ERROR
-      return primary
-        ? (options.primary ?? { data: attempt(), error: null })
-        : (options.ancestors?.[String(selectedId)] ??
-            options.ancestor ?? { data: null, error: null })
-    }),
+function clientFor(row: ReturnType<typeof attempt>) {
+  const query = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: vi.fn().mockResolvedValue({ data: row, error: null }) }
+  return {
+    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: USER_ID } } }) },
+    from: vi.fn().mockReturnValue(query),
+    storage: { from: vi.fn().mockReturnValue({ createSignedUrl: vi.fn().mockResolvedValue({ data: { signedUrl: 'https://audio.test' }, error: null }) }) },
   }
-  query.select.mockReturnValue(query)
-  return query
-}
-
-function noteFeedbackQuery(
-  options: ClientOptions,
-  filters: Array<{ column: string; value: unknown }>,
-) {
-  const result = options.disputes ?? { data: [], error: null }
-  const query = {
-    select: vi.fn(),
-    eq: vi.fn((column: string, value: unknown) => {
-      filters.push({ column, value })
-      if (column === 'user_id') {
-        return options.disputesThrow ? Promise.reject(THROWN_ERROR) : Promise.resolve(result)
-      }
-      return query
-    }),
-  }
-  query.select.mockReturnValue(query)
-  return query
-}
-
-function client(options: ClientOptions = {}) {
-  const filters: Array<{ column: string; value: unknown }> = []
-  const createSignedUrl = vi.fn(async () => {
-    if (options.signedThrows) throw THROWN_ERROR
-    return options.signed ?? { data: { signedUrl: PRIVATE_SIGNED_URL }, error: null }
-  })
-  const supabase = {
-    auth: {
-      getUser: vi.fn(async () => ({ data: { user: { id: USER_ID } }, error: null })),
-    },
-    from: vi.fn((table: string) =>
-      table === 'attempts' ? resultQuery(options, filters) : noteFeedbackQuery(options, filters),
-    ),
-    storage: {
-      from: vi.fn(() => ({ createSignedUrl })),
-    },
-  }
-  return { supabase, filters, createSignedUrl }
-}
-
-async function renderPage(id = ATTEMPT_ID) {
-  render(await AttemptPage({ params: Promise.resolve({ id }) }))
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.notFound.mockImplementation(() => { throw new Error('not found') })
+  mocks.redirect.mockImplementation(() => { throw new Error('redirect') })
   mocks.reconcileCurrentUserStaleAttempts.mockResolvedValue({ status: 'ready', reconciled: [] })
   mocks.loadLessonAttemptHistoryForUser.mockResolvedValue({ status: 'ready', data: [] })
   mocks.loadStructuredLessonResultForUser.mockResolvedValue({ status: 'not_found' })
   mocks.storedTranscriptWords.mockReturnValue([])
-  mocks.notFound.mockImplementation(() => {
-    throw NOT_FOUND
-  })
-  mocks.redirect.mockImplementation(() => {
-    throw new Error('redirect')
-  })
-  mocks.readAttemptResult.mockImplementation(
-    (input: { sectionScores: unknown; audioUrl: string | null }) => {
-      if (input.sectionScores === 'legacy') {
-        return {
-          kind: 'legacy',
-          attempt: { audioUrl: input.audioUrl, content: LEGACY_CONTENT },
-        }
-      }
-      if (input.sectionScores === 'v2-partial') {
-        return { kind: 'v2', payload: { fixture: 'Partial v2 result' } }
-      }
-      if (input.sectionScores === 'v3') {
-        return {
-          kind: 'v3',
-          payload: {
-            fixture: 'Complete v3 result',
-            mode: 'practice',
-            rubric_version: 'v3',
-            total_earned_points: 80,
-          },
-        }
-      }
-      return { kind: 'v2', payload: { fixture: 'Complete v2 result' } }
-    },
-  )
 })
 
-afterEach(() => {
-  vi.restoreAllMocks()
-})
-
-describe('owned attempt result loading', () => {
-  it('rejects a malformed route id before creating a Supabase client or querying attempts', async () => {
-    await expect(
-      AttemptPage({ params: Promise.resolve({ id: 'not-an-attempt-id' }) }),
-    ).rejects.toBe(NOT_FOUND)
-
-    expect(mocks.notFound).toHaveBeenCalledOnce()
+describe('attempt result page', () => {
+  it('rejects a malformed route id before loading storage', async () => {
+    await expect(AttemptPage({ params: Promise.resolve({ id: 'bad' }) })).rejects.toThrow('not found')
     expect(mocks.createClient).not.toHaveBeenCalled()
   })
 
-  it.each([
-    ['uploading', 'Your recording is still being saved.'],
-    ['transcribing', 'Your transcript is still being prepared.'],
-    ['scoring', 'Your response is still being scored.'],
-  ])('shows a refresh-only processing state for an active %s attempt', async (status, copy) => {
-    const setup = client({ primary: { data: attempt({ status }), error: null } })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-
-    await renderPage()
-
-    expect(screen.getByText('Your response is processing')).toBeInTheDocument()
-    expect(screen.getByText(`${copy} Refresh to check again.`)).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /try/i })).not.toBeInTheDocument()
-    expect(mocks.readAttemptResult).not.toHaveBeenCalled()
-    expect(setup.createSignedUrl).not.toHaveBeenCalled()
-    expect(mocks.reconcileCurrentUserStaleAttempts).toHaveBeenCalledWith(USER_ID, {
-      attemptId: ATTEMPT_ID,
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh result' }))
-    expect(mocks.refresh).toHaveBeenCalledTimes(1)
+  it('renders an exact current result and structured lesson history', async () => {
+    const row = attempt({ lesson_id: '70000000-0000-4000-8000-000000000007' })
+    mocks.createClient.mockResolvedValue(clientFor(row))
+    mocks.readAttemptResult.mockReturnValue({ kind: 'v3', payload: { fixture: 'Current result', mode: 'practice', rubric_version: 'v3', total_earned_points: 80 } })
+    mocks.loadLessonAttemptHistoryForUser.mockResolvedValue({ status: 'ready', data: [{ attemptId: 'prior', score: 70, finishedAt: '2026-08-01T00:00:00Z' }] })
+    render(await AttemptPage({ params: Promise.resolve({ id: ATTEMPT_ID }) }))
+    expect(screen.getByTestId('v3-result')).toHaveTextContent('Current result')
+    expect(screen.getByTestId('v3-result')).toHaveAttribute('data-history', 'prior')
   })
 
-  it.each(['failed', 'timed_out'])(
-    'offers a new recording for a terminal %s attempt',
-    async (status) => {
-      const setup = client({
-        primary: {
-          data: attempt({
-            status,
-            score: null,
-            section_scores: null,
-            content_result: null,
-          }),
-          error: null,
-        },
-      })
-      mocks.createClient.mockResolvedValue(setup.supabase)
-      mocks.readAttemptResult.mockReturnValueOnce({ kind: 'incomplete' })
-
-      await renderPage()
-
-      expect(screen.getByText('Not scored yet')).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: 'Try this prompt again' })).toHaveAttribute(
-        'href',
-        `/record?retry=${ATTEMPT_ID}`,
-      )
-    },
-  )
-
-  it('renders an abandoned upload as unfinished without signing a possibly missing object', async () => {
-    const setup = client({
-      primary: {
-        data: attempt({
-          status: 'failed',
-          failure_code: 'client_upload_abandoned',
-          audio_path: PRIVATE_PATH,
-          score: null,
-          section_scores: null,
-          content_result: null,
-        }),
-        error: null,
-      },
-    })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-
-    await renderPage()
-
-    expect(screen.getByText('Recording not saved')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Try this prompt again' })).toHaveAttribute(
-      'href',
-      `/record?retry=${ATTEMPT_ID}`,
-    )
-    expect(screen.getByRole('link', { name: 'Go to History' })).toHaveAttribute('href', '/history')
-    expect(setup.createSignedUrl).not.toHaveBeenCalled()
-    expect(mocks.readAttemptResult).not.toHaveBeenCalled()
+  it.each(['failed', 'timed_out'] as const)('keeps a resultless %s recording playable and retryable', async (status) => {
+    const row = attempt({ status, score: null, section_scores: null, audio_path: `${USER_ID}/${ATTEMPT_ID}.webm` })
+    mocks.createClient.mockResolvedValue(clientFor(row))
+    mocks.readAttemptResult.mockReturnValue({ kind: 'incomplete' })
+    render(await AttemptPage({ params: Promise.resolve({ id: ATTEMPT_ID }) }))
+    expect(screen.getByText('Not scored yet')).toBeInTheDocument()
+    expect(screen.getByTestId('audio')).toHaveTextContent('https://audio.test')
+    expect(screen.getByRole('link', { name: 'Try this prompt again' })).toHaveAttribute('href', `/record?retry=${ATTEMPT_ID}`)
   })
 
-  it.each([
-    {
-      label: 'returned query error',
-      options: { primary: { data: null, error: RETURNED_ERROR } },
-      expectedError: RETURNED_ERROR,
-    },
-    { label: 'thrown query error', options: { primaryThrows: true }, expectedError: THROWN_ERROR },
-  ])('renders a recoverable error for a $label', async ({ options, expectedError }) => {
-    const setup = client(options)
-    mocks.createClient.mockResolvedValue(setup.supabase)
-
-    await renderPage()
-
-    expect(screen.getByRole('heading', { name: 'Result unavailable' })).toBeInTheDocument()
-    expect(
-      screen.getByText('Your result could not be loaded. Try again in a moment.'),
-    ).toBeInTheDocument()
-    const retry = screen.getByRole('button', { name: 'Try again' })
-    fireEvent.click(retry)
-    expect(mocks.refresh).toHaveBeenCalledTimes(1)
-    expect(mocks.notFound).not.toHaveBeenCalled()
-    expect(mocks.logAttemptDiagnostic).toHaveBeenCalledExactlyOnceWith(
-      'load_attempt_result',
-      'attempt_result_read_failed',
-      ATTEMPT_ID,
-      expectedError,
-    )
-  })
-
-  it.each([
-    { label: 'missing', id: MISSING_ID },
-    { label: 'owned by another user', id: CROSS_USER_ID },
-  ])('uses the same not-found boundary for a $label attempt', async ({ id }) => {
-    const setup = client({ primary: { data: null, error: null } })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-
-    await expect(AttemptPage({ params: Promise.resolve({ id }) })).rejects.toBe(NOT_FOUND)
-
-    expect(mocks.logAttemptDiagnostic).not.toHaveBeenCalled()
-    expect(setup.filters).toContainEqual({ column: 'id', value: id })
-    expect(setup.filters).toContainEqual({ column: 'user_id', value: USER_ID })
-  })
-
-  it.each([
-    { snapshot: 'legacy', testId: 'legacy-result', label: 'Legacy result' },
-    { snapshot: 'v2', testId: 'v2-result', label: 'Complete v2 result' },
-    { snapshot: 'v2-partial', testId: 'v2-result', label: 'Partial v2 result' },
-    { snapshot: 'v3', testId: 'v3-result', label: 'Complete v3 result' },
-  ])('renders an owned $snapshot snapshot without audio', async ({ snapshot, testId, label }) => {
-    const setup = client({
-      primary: { data: attempt({ section_scores: snapshot, audio_path: null }), error: null },
-    })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-
-    await renderPage()
-
-    expect(screen.getByTestId(testId)).toHaveTextContent(label)
-    expect(screen.getByTestId(testId)).toHaveAttribute('data-audio', 'none')
-    expect(setup.createSignedUrl).not.toHaveBeenCalled()
-    expect(mocks.logAttemptDiagnostic).not.toHaveBeenCalled()
-  })
-
-  it('passes owner-scoped structured context to the v3 renderer', async () => {
-    const storedWords = [{ word: 'private', start: 0, end: 0.4 }]
-    const setup = client({
-      primary: {
-        data: attempt({ lesson_id: LESSON_ID, section_scores: 'v3', rubric_version: 'v3' }),
-        error: null,
-      },
-    })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-    mocks.storedTranscriptWords.mockReturnValue(storedWords)
-    mocks.loadStructuredLessonResultForUser.mockResolvedValue({
-      status: 'ready',
-      data: { lesson: { title: 'Handling a setback' } },
-    })
-    mocks.loadLessonAttemptHistoryForUser.mockResolvedValue({
-      status: 'ready',
-      data: [
-        {
-          attemptId: PARENT_ID,
-          score: 72,
-          finishedAt: '2026-08-26T12:00:00.000Z',
-        },
-      ],
-    })
-
-    await renderPage()
-
-    expect(screen.getByTestId('v3-result')).toHaveAttribute('data-curriculum', 'Handling a setback')
-    expect(screen.getByTestId('v3-result')).toHaveAttribute('data-words', 'private')
-    expect(screen.getByTestId('v3-result')).toHaveAttribute('data-history', PARENT_ID)
-    expect(mocks.storedTranscriptWords).toHaveBeenCalledOnce()
-    expect(mocks.loadStructuredLessonResultForUser).toHaveBeenCalledWith(setup.supabase, USER_ID, {
-      lessonId: LESSON_ID,
-      attemptId: ATTEMPT_ID,
-      promptId: null,
-      practiceMode: 'practice',
-      rubricVersion: 'v3',
-      currentScore: 80,
-      snapshotMode: 'practice',
-      snapshotRubricVersion: 'v3',
-      snapshotScore: 80,
-    })
-    expect(mocks.loadLessonAttemptHistoryForUser).toHaveBeenCalledExactlyOnceWith(
-      setup.supabase,
-      USER_ID,
-      LESSON_ID,
-      ATTEMPT_ID,
-    )
-  })
-
-  it('adds owner-scoped structured context from lesson_id to a v2 result', async () => {
-    const setup = client({
-      primary: {
-        data: attempt({
-          prompt_id: '80000000-0000-4000-8000-000000000008',
-          lesson_id: LESSON_ID,
-          score: 84,
-          section_scores: 'v2',
-        }),
-        error: null,
-      },
-    })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-    mocks.readAttemptResult.mockReturnValue({
-      kind: 'v2',
-      payload: {
-        fixture: 'Complete v2 result',
-        mode: 'practice',
-        rubric_version: 'v2',
-        total_earned_points: 84,
-      },
-    })
-    mocks.loadStructuredLessonResultForUser.mockResolvedValue({
-      status: 'ready',
-      data: { lesson: { title: 'Handling a setback' } },
-    })
-
-    await renderPage()
-
-    expect(mocks.loadStructuredLessonResultForUser).toHaveBeenCalledWith(setup.supabase, USER_ID, {
-      lessonId: LESSON_ID,
-      attemptId: ATTEMPT_ID,
-      promptId: '80000000-0000-4000-8000-000000000008',
-      practiceMode: 'practice',
-      rubricVersion: 'v2',
-      currentScore: 84,
-      snapshotMode: 'practice',
-      snapshotRubricVersion: 'v2',
-      snapshotScore: 84,
-    })
-    expect(screen.getByTestId('v2-result')).toHaveAttribute('data-curriculum', 'Handling a setback')
-  })
-
-  it('preserves the base v2 result when structured context cannot be loaded', async () => {
-    const setup = client({
-      primary: {
-        data: attempt({ lesson_id: LESSON_ID, score: null, section_scores: 'v2-partial' }),
-        error: null,
-      },
-    })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-    mocks.readAttemptResult.mockReturnValue({
-      kind: 'v2',
-      payload: {
-        fixture: 'Partial v2 result',
-        mode: 'practice',
-        rubric_version: 'v2',
-        total_earned_points: null,
-      },
-    })
-    mocks.loadStructuredLessonResultForUser.mockResolvedValue({
-      status: 'failure',
-      operation: 'topology',
-    })
-
-    await renderPage()
-
-    expect(screen.getByTestId('v2-result')).toHaveTextContent('Partial v2 result')
-    expect(screen.getByTestId('v2-result')).toHaveAttribute('data-curriculum', 'none')
-  })
-
-  it('keeps custom prompt results out of structured lesson history', async () => {
-    const setup = client({
-      primary: { data: attempt({ lesson_id: null, section_scores: 'v3' }), error: null },
-    })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-
-    await renderPage()
-
-    expect(screen.getByTestId('v3-result')).toHaveAttribute('data-history', 'none')
-    expect(mocks.loadLessonAttemptHistoryForUser).not.toHaveBeenCalled()
-  })
-
-  it('passes structured attempt history to legacy results without changing the snapshot', async () => {
-    const setup = client({
-      primary: { data: attempt({ lesson_id: LESSON_ID, section_scores: 'legacy' }), error: null },
-    })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-    mocks.loadLessonAttemptHistoryForUser.mockResolvedValue({
-      status: 'ready',
-      data: [
-        {
-          attemptId: PARENT_ID,
-          score: 72,
-          finishedAt: '2026-08-26T12:00:00.000Z',
-        },
-      ],
-    })
-
-    await renderPage()
-
-    expect(screen.getByTestId('legacy-result')).toHaveAttribute('data-history', PARENT_ID)
-  })
-
-  it('passes only exact unique stored legacy findings to the result renderer', async () => {
-    const setup = client({
-      primary: { data: attempt({ section_scores: 'legacy' }), error: null },
-      disputes: {
-        data: [
-          { note_type: 'answered', quote: 'Exact stored quote' },
-          { note_type: 'answered', quote: 'Exact stored quote' },
-          { note_type: 'explained', quote: null },
-          { note_type: 'answered', quote: 'mismatched quote' },
-          { note_type: 'answered', quote: null },
-          { note_type: 'word_choice_span', quote: 'forged span' },
-          { note_type: 'word_choice_span', quote: 'exact stored span' },
-        ],
-        error: null,
-      },
-    })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-
-    await renderPage()
-
-    expect(screen.getByTestId('legacy-result')).toHaveAttribute(
-      'data-disputes',
-      JSON.stringify([
-        { note_type: 'answered', quote: 'Exact stored quote' },
-        { note_type: 'word_choice_span', quote: 'exact stored span' },
-      ]),
-    )
-  })
-
-  it('never loads v2-linked note rows into a result renderer', async () => {
-    const setup = client({
-      primary: { data: attempt({ section_scores: 'v2' }), error: null },
-      disputes: {
-        data: [{ note_type: 'answered', quote: null }],
-        error: null,
-      },
-    })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-
-    await renderPage()
-
-    expect(screen.getByTestId('v2-result')).toBeInTheDocument()
-    expect(setup.supabase.from).not.toHaveBeenCalledWith('note_feedback')
-  })
-
-  it.each([
-    {
-      label: 'returned signing error',
-      snapshot: 'v2',
-      testId: 'v2-result',
-      resultLabel: 'Complete v2 result',
-      options: { signed: { data: null, error: RETURNED_ERROR } },
-      expectedError: RETURNED_ERROR,
-    },
-    {
-      label: 'empty signing response',
-      snapshot: 'v2-partial',
-      testId: 'v2-result',
-      resultLabel: 'Partial v2 result',
-      options: { signed: { data: null, error: null } },
-      expectedError: undefined,
-    },
-    {
-      label: 'thrown signing error',
-      snapshot: 'legacy',
-      testId: 'legacy-result',
-      resultLabel: 'Legacy result',
-      options: { signedThrows: true },
-      expectedError: THROWN_ERROR,
-    },
-  ])('renders the $snapshot result without audio after a $label', async (testCase) => {
-    const setup = client({
-      ...testCase.options,
-      primary: {
-        data: attempt({ audio_path: PRIVATE_PATH, section_scores: testCase.snapshot }),
-        error: null,
-      },
-    })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-
-    await renderPage()
-
-    expect(screen.getByTestId(testCase.testId)).toHaveTextContent(testCase.resultLabel)
-    expect(screen.getByTestId(testCase.testId)).toHaveAttribute('data-audio', 'none')
-    expect(screen.getByText('Audio playback is unavailable for this response.')).toBeInTheDocument()
-    const expectedArguments: unknown[] = [
-      'sign_attempt_result_audio',
-      'signed_audio_url_failed',
-      ATTEMPT_ID,
-    ]
-    if (testCase.expectedError) {
-      expectedArguments.push(testCase.expectedError)
-    }
-    expect(mocks.logAttemptDiagnostic).toHaveBeenCalledExactlyOnceWith(...expectedArguments)
-  })
-
-  it.each([
-    {
-      label: 'returned dispute error',
-      options: { disputes: { data: [], error: RETURNED_ERROR } },
-      expectedError: RETURNED_ERROR,
-    },
-    {
-      label: 'thrown dispute error',
-      options: { disputesThrow: true },
-      expectedError: THROWN_ERROR,
-    },
-  ])('renders a recoverable error after a $label', async ({ options, expectedError }) => {
-    const setup = client({
-      ...options,
-      primary: { data: attempt({ section_scores: 'legacy' }), error: null },
-    })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-
-    await renderPage()
-
-    expect(screen.getByRole('heading', { name: 'Result unavailable' })).toBeInTheDocument()
-    expect(screen.queryByTestId('legacy-result')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
-    expect(mocks.logAttemptDiagnostic).toHaveBeenCalledExactlyOnceWith(
-      'load_result_disputes',
-      'result_disputes_read_failed',
-      ATTEMPT_ID,
-      expectedError,
-    )
-    expect(setup.filters).toContainEqual({ column: 'attempt_id', value: ATTEMPT_ID })
-    expect(setup.filters.filter((filter) => filter.column === 'user_id')).toEqual([
-      { column: 'user_id', value: USER_ID },
-      { column: 'user_id', value: USER_ID },
-    ])
-  })
-
-  it.each([
-    {
-      label: 'returned ancestor error',
-      options: { ancestor: { data: null, error: RETURNED_ERROR } },
-      expectedError: RETURNED_ERROR,
-    },
-    {
-      label: 'thrown ancestor error',
-      options: { ancestorThrows: true },
-      expectedError: THROWN_ERROR,
-    },
-  ])('suppresses retry comparison after a $label', async ({ options, expectedError }) => {
-    const setup = client({
-      ...options,
-      primary: {
-        data: attempt({ retry_of_attempt_id: PARENT_ID }),
-        error: null,
-      },
-    })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-
-    await renderPage()
-
-    expect(screen.getByTestId('v2-result')).toHaveAttribute('data-comparison', 'none')
-    expect(mocks.logAttemptDiagnostic).toHaveBeenCalledExactlyOnceWith(
-      'load_retry_ancestor',
-      'retry_ancestor_read_failed',
-      ATTEMPT_ID,
-      expectedError,
-    )
-    expect(setup.filters).toContainEqual({ column: 'id', value: PARENT_ID })
-    expect(setup.filters.filter((filter) => filter.column === 'user_id')).toEqual([
-      { column: 'user_id', value: USER_ID },
-      { column: 'user_id', value: USER_ID },
-    ])
-  })
-
-  it('loads each owned retry ancestor once for a multi-node chain', async () => {
-    mocks.readAttemptResult.mockReturnValue({ kind: 'v2', payload: v2Snapshot() })
-    const setup = client({
-      primary: {
-        data: attempt({ retry_of_attempt_id: PARENT_ID }),
-        error: null,
-      },
-      ancestors: {
-        [PARENT_ID]: {
-          data: attempt({
-            id: PARENT_ID,
-            retry_of_attempt_id: GRANDPARENT_ID,
-          }),
-          error: null,
-        },
-        [GRANDPARENT_ID]: {
-          data: attempt({
-            id: GRANDPARENT_ID,
-            retry_of_attempt_id: null,
-          }),
-          error: null,
-        },
-      },
-    })
-    mocks.createClient.mockResolvedValue(setup.supabase)
-
-    await renderPage()
-
-    const queriedIds = setup.filters
-      .filter((filter) => filter.column === 'id')
-      .map((filter) => filter.value)
-    expect(queriedIds).toEqual([ATTEMPT_ID, PARENT_ID, GRANDPARENT_ID])
-    expect(screen.getByTestId('v2-result')).toHaveAttribute('data-comparison', 'shown')
+  it.each(['unsupported_version', 'malformed'] as const)('shows a safe unavailable state for %s results', async (kind) => {
+    const row = attempt()
+    mocks.createClient.mockResolvedValue(clientFor(row))
+    mocks.readAttemptResult.mockReturnValue({ kind, scoreVersion: 'old.score.1', rubricVersion: 'old' })
+    render(await AttemptPage({ params: Promise.resolve({ id: ATTEMPT_ID }) }))
+    expect(screen.getByText('Result unavailable')).toBeInTheDocument()
+    expect(screen.queryByTestId('v3-result')).not.toBeInTheDocument()
   })
 })

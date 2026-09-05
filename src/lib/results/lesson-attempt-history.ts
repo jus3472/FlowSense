@@ -70,7 +70,7 @@ function historyItem(value: unknown, currentAttemptId: string): LessonAttemptHis
     metrics: value.metrics,
     contentResult: value.content_result,
   })
-  if (result.kind !== 'legacy' && result.kind !== 'v2' && result.kind !== 'v3') return null
+  if (result.kind !== 'v3') return null
 
   return {
     attemptId: value.id,

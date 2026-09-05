@@ -1,44 +1,52 @@
 import type { PracticeMode } from '@/lib/practice/contracts'
-import type {
-  ProgressAttemptInput,
-  ProgressPoint,
-  ProgressSeries,
-} from '@/lib/progress/aggregation'
-import {
-  LONGER_HISTORY_WINDOW_DAYS,
-  MINIMUM_PROGRESS_OBSERVATIONS,
-  RECENT_PROGRESS_WINDOW_DAYS,
-} from '@/lib/progress/aggregation'
 import { decodeStoredSectionSnapshot } from '@/lib/results/snapshot'
 import {
-  LEGACY_V3_METRIC_IDS,
   V3_METRIC_IDS,
-  V3_LEGACY_SCORE_PAYLOAD_VERSION,
-  type StoredV3MetricId,
+  type V3MetricId,
   type V3PersistedMetricScore,
-  type StoredV3ScorePayload,
+  type V3ScorePayload,
 } from '@/lib/scoring/v3/contracts'
+
+export const RECENT_PROGRESS_WINDOW_DAYS = 7
+export const LONGER_HISTORY_WINDOW_DAYS = 28
+export const MINIMUM_PROGRESS_OBSERVATIONS = 2
+
+export interface ProgressAttemptInput {
+  id: string
+  createdAt: string
+  sectionScores: unknown
+}
+
+export interface ProgressPoint {
+  attemptId: string
+  createdAt: string
+  value: number
+  valueOutOf: 100
+}
+
+export interface ProgressSeries {
+  points: readonly ProgressPoint[]
+  valueCount: number
+  state: 'ready' | 'insufficient_data'
+  averageValue: number | null
+}
 
 export interface V3ProgressWindow {
   attemptCount: number
   overall: ProgressSeries
-  metrics: Readonly<Record<StoredV3MetricId, ProgressSeries>>
+  metrics: Readonly<Record<V3MetricId, ProgressSeries>>
 }
 
 export interface V3ProgressAggregation {
-  cohort: { scoreVersion: string; rubricVersion: string } | null
-  metricIds: readonly StoredV3MetricId[]
+  metricIds: readonly V3MetricId[]
   counts: {
     input: number
     validV3: number
-    selectedCohort: number
-    earlierV2: number
-    legacy: number
+    included: number
     incomplete: number
     malformed: number
     unsupportedVersion: number
     excludedMode: number
-    excludedIncompatible: number
   }
   windows: {
     all: V3ProgressWindow
@@ -51,7 +59,7 @@ interface AcceptedAttempt {
   id: string
   createdAt: string
   time: number
-  payload: StoredV3ScorePayload
+  payload: V3ScorePayload
 }
 
 function emptySeries(): ProgressSeries {
@@ -70,21 +78,17 @@ function series(points: readonly ProgressPoint[]): ProgressSeries {
   }
 }
 
-function metricIdsFor(payload: StoredV3ScorePayload | null): readonly StoredV3MetricId[] {
-  return payload?.version === V3_LEGACY_SCORE_PAYLOAD_VERSION ? LEGACY_V3_METRIC_IDS : V3_METRIC_IDS
-}
-
 function emptyWindow(): V3ProgressWindow {
   return {
     attemptCount: 0,
     overall: emptySeries(),
     metrics: Object.fromEntries(
-      LEGACY_V3_METRIC_IDS.map((metric) => [metric, emptySeries()]),
-    ) as Record<StoredV3MetricId, ProgressSeries>,
+      V3_METRIC_IDS.map((metric) => [metric, emptySeries()]),
+    ) as Record<V3MetricId, ProgressSeries>,
   }
 }
 
-function metric(payload: StoredV3ScorePayload, id: StoredV3MetricId): V3PersistedMetricScore {
+function metric(payload: V3ScorePayload, id: V3MetricId): V3PersistedMetricScore {
   return id in payload.sections.what_you_said.metrics
     ? payload.sections.what_you_said.metrics[
         id as keyof typeof payload.sections.what_you_said.metrics
@@ -96,7 +100,7 @@ function metric(payload: StoredV3ScorePayload, id: StoredV3MetricId): V3Persiste
 
 function windowFor(
   attempts: readonly AcceptedAttempt[],
-  metricIds: readonly StoredV3MetricId[],
+  metricIds: readonly V3MetricId[],
 ): V3ProgressWindow {
   if (attempts.length === 0) return emptyWindow()
   const point = (attempt: AcceptedAttempt, value: number): ProgressPoint => ({
@@ -115,7 +119,7 @@ function windowFor(
       ),
     ),
     metrics: {
-      ...Object.fromEntries(LEGACY_V3_METRIC_IDS.map((id) => [id, emptySeries()])),
+      ...Object.fromEntries(V3_METRIC_IDS.map((id) => [id, emptySeries()])),
       ...Object.fromEntries(
         metricIds.map((id) => [
           id,
@@ -129,7 +133,7 @@ function windowFor(
           ),
         ]),
       ),
-    } as Record<StoredV3MetricId, ProgressSeries>,
+    } as Record<V3MetricId, ProgressSeries>,
   }
 }
 
@@ -142,8 +146,6 @@ export function aggregateV3Progress(
   if (!Number.isFinite(now)) throw new Error('Progress aggregation requires a valid current time.')
 
   let validV3 = 0
-  let earlierV2 = 0
-  let legacy = 0
   let incomplete = 0
   let malformed = 0
   let unsupportedVersion = 0
@@ -158,8 +160,6 @@ export function aggregateV3Progress(
     }
     const snapshot = decodeStoredSectionSnapshot(item.sectionScores)
     if (snapshot.kind === 'none') incomplete += 1
-    else if (snapshot.kind === 'legacy') legacy += 1
-    else if (snapshot.kind === 'v2') earlierV2 += 1
     else if (snapshot.kind === 'unsupported_version') unsupportedVersion += 1
     else if (snapshot.kind === 'malformed') malformed += 1
     else {
@@ -173,47 +173,27 @@ export function aggregateV3Progress(
   accepted.sort((left, right) => left.time - right.time || left.id.localeCompare(right.id))
   const recentStart = now - RECENT_PROGRESS_WINDOW_DAYS * 24 * 60 * 60 * 1_000
   const longerStart = now - LONGER_HISTORY_WINDOW_DAYS * 24 * 60 * 60 * 1_000
-  const newest = accepted.at(-1) ?? null
-  const cohort = newest
-    ? {
-        scoreVersion: newest.payload.version,
-        rubricVersion: newest.payload.rubric_version,
-      }
-    : null
-  const selected = cohort
-    ? accepted.filter(
-        (attempt) =>
-          attempt.payload.version === cohort.scoreVersion &&
-          attempt.payload.rubric_version === cohort.rubricVersion,
-      )
-    : []
-  const metricIds = metricIdsFor(newest?.payload ?? null)
-  const excludedIncompatibleV3 = accepted.length - selected.length
+  const metricIds = V3_METRIC_IDS
 
   return {
-    cohort,
     metricIds,
     counts: {
       input: input.length,
       validV3,
-      selectedCohort: selected.length,
-      earlierV2,
-      legacy,
+      included: accepted.length,
       incomplete,
       malformed,
       unsupportedVersion,
       excludedMode,
-      excludedIncompatible:
-        earlierV2 + legacy + incomplete + malformed + unsupportedVersion + excludedIncompatibleV3,
     },
     windows: {
-      all: windowFor(selected, metricIds),
+      all: windowFor(accepted, metricIds),
       recent: windowFor(
-        selected.filter((attempt) => attempt.time >= recentStart),
+        accepted.filter((attempt) => attempt.time >= recentStart),
         metricIds,
       ),
       longerHistory: windowFor(
-        selected.filter((attempt) => attempt.time >= longerStart && attempt.time < recentStart),
+        accepted.filter((attempt) => attempt.time >= longerStart && attempt.time < recentStart),
         metricIds,
       ),
     },

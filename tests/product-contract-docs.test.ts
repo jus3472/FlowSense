@@ -32,23 +32,21 @@ describe('v3 product contract documentation', () => {
     }
   })
 
-  it('requires versioning for v3 attempts while preserving authoritative legacy snapshots', () => {
+  it('requires current versioning and fail-closed non-current results', () => {
     for (const document of documents) {
-      expect(document.contents).toMatch(/new v3-scored attempt[\s\S]*rubric and score version/i)
-      expect(document.contents).toMatch(
-        /(legacy|historical) v1 and v2 attempts[\s\S]*(null or\s+older metadata|older or null metadata)/i,
-      )
-      expect(document.contents).toMatch(/stored snapshots remain authoritative/i)
+      expect(document.contents).toMatch(/rubric `v3`[\s\S]*`v3\.score\.2`/i)
+      expect(document.contents).toMatch(/(other|unknown)[\s\S]*formats?[\s\S]*fail closed|unsupported/i)
+      expect(document.contents).toMatch(/resultless terminal attempts?/i)
     }
   })
 
-  it('labels the v1 and v2 implementations separately from the v3 architecture', () => {
+  it('defines v3.2 as the only application runtime result generation', () => {
+    const readme = documents.find((document) => document.path === 'README.md')?.contents ?? ''
     const project = documents.find((document) => document.path === 'PROJECT.md')?.contents ?? ''
     const agents = documents.find((document) => document.path === 'AGENTS.md')?.contents ?? ''
 
-    expect(project).toMatch(/50\/50, ten-metric score[\s\S]*legacy v1 implementation/i)
-    expect(project).toMatch(/does not define the v2 category architecture/i)
-    expect(agents).toMatch(/six-category v2[\s\S]*ten-metric v1[\s\S]*v3\.score\.1/i)
-    expect(agents).toMatch(/current 10-metric `v3\.score\.2` architecture/i)
+    expect(readme).toMatch(/payload `v3\.score\.2`/i)
+    expect(project).toMatch(/payload `v3\.score\.2`/i)
+    expect(agents).toMatch(/runtime supports only[\s\S]*`v3\.score\.2`/i)
   })
 })

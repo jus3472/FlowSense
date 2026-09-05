@@ -1,4 +1,4 @@
-import type { Segment } from '@/lib/results/highlights'
+import type { Segment } from '@/lib/results/segments'
 import type { TranscriptWord } from '@/lib/deepgram/parse'
 import type { PracticeMode } from '@/lib/practice/contracts'
 import { buildTokens } from '@/lib/scoring/tokens'
@@ -6,19 +6,16 @@ import { AUDIO_THRESHOLDS_BY_MODE } from '@/lib/scoring/v3/audio'
 import { V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE } from '@/lib/scoring/v3/content/contracts'
 import {
   HOW_YOU_SOUNDED_METRICS,
-  LEGACY_HOW_YOU_SOUNDED_METRICS,
-  LEGACY_V3_METRIC_IDS,
   V3_METRIC_IDS,
   V3_METRIC_LABELS,
-  V3_LEGACY_SCORE_PAYLOAD_VERSION,
   WHAT_YOU_SAID_METRICS,
-  type StoredV3MetricId,
+  type V3MetricId,
   type V3PersistedMetricScore,
   type V3ScoreEvidence,
-  type StoredV3ScorePayload,
+  type V3ScorePayload,
 } from '@/lib/scoring/v3/contracts'
 
-export function v3SectionViews(payload: StoredV3ScorePayload) {
+export function v3SectionViews(_payload: V3ScorePayload) {
   return [
     {
       id: 'what_you_said',
@@ -28,38 +25,35 @@ export function v3SectionViews(payload: StoredV3ScorePayload) {
     {
       id: 'how_you_sounded',
       label: 'How You Sounded',
-      metrics:
-        payload.version === V3_LEGACY_SCORE_PAYLOAD_VERSION
-          ? LEGACY_HOW_YOU_SOUNDED_METRICS
-          : HOW_YOU_SOUNDED_METRICS,
+      metrics: HOW_YOU_SOUNDED_METRICS,
     },
   ] as const
 }
 
-export function v3MetricIds(payload: StoredV3ScorePayload): readonly StoredV3MetricId[] {
-  return payload.version === V3_LEGACY_SCORE_PAYLOAD_VERSION ? LEGACY_V3_METRIC_IDS : V3_METRIC_IDS
+export function v3MetricIds(_payload: V3ScorePayload): readonly V3MetricId[] {
+  return V3_METRIC_IDS
 }
 
 export interface V3MetricView {
-  id: StoredV3MetricId
+  id: V3MetricId
   label: string
   result: V3PersistedMetricScore
 }
 
 export function v3MetricResult(
-  payload: StoredV3ScorePayload,
-  id: StoredV3MetricId,
+  payload: V3ScorePayload,
+  id: V3MetricId,
 ): V3PersistedMetricScore {
   const metrics = {
     ...payload.sections.what_you_said.metrics,
     ...payload.sections.how_you_sounded.metrics,
-  } as Partial<Record<StoredV3MetricId, V3PersistedMetricScore>>
+  } as Partial<Record<V3MetricId, V3PersistedMetricScore>>
   const result = metrics[id]
   if (!result) throw new Error(`Stored v3 metric ${id} was missing.`)
   return result
 }
 
-export function v3MetricViews(payload: StoredV3ScorePayload): V3MetricView[] {
+export function v3MetricViews(payload: V3ScorePayload): V3MetricView[] {
   return v3MetricIds(payload).map((id) => ({
     id,
     label: V3_METRIC_LABELS[id],
@@ -121,7 +115,7 @@ export interface V3MetricDetailView {
   warnings: readonly string[]
 }
 
-function contentSummary(metric: StoredV3MetricId, result: V3PersistedMetricScore): string | null {
+function contentSummary(metric: V3MetricId, result: V3PersistedMetricScore): string | null {
   const full = result.component === 1 && result.details.length === 0
   if (metric === 'answered_prompt') {
     if (result.details.some((detail) => detail.kind === 'no_prompt_answer')) {
@@ -161,7 +155,7 @@ function contentSummary(metric: StoredV3MetricId, result: V3PersistedMetricScore
 
 /** A short, presentation-only answer to “How did I do?” for one stored metric. */
 export function v3MetricSummary(
-  metric: StoredV3MetricId,
+  metric: V3MetricId,
   result: V3PersistedMetricScore,
   mode: PracticeMode,
 ): string {
@@ -252,9 +246,6 @@ export function v3MetricSummary(
     return 'Your pitch or speaking rhythm stayed fairly even through much of the response.'
   }
 
-  if (metric === 'time_to_first_word') {
-    return 'Your response includes a measured start time.'
-  }
   return result.explanation ?? 'This metric was scored from the available evidence.'
 }
 
@@ -282,7 +273,7 @@ function cadenceLabel(component: number): string {
 }
 
 function measurementViews(
-  metric: StoredV3MetricId,
+  metric: V3MetricId,
   result: V3PersistedMetricScore,
   mode: PracticeMode,
 ): V3MetricMeasurementView[] {
@@ -385,17 +376,6 @@ function measurementViews(
     return rows.filter((item): item is V3MetricMeasurementView => item !== null)
   }
 
-  if (metric === 'time_to_first_word') {
-    const value =
-      numericMeasurement(result.measurements, 'seconds') ??
-      (() => {
-        const milliseconds = numericMeasurement(result.measurements, 'time_to_first_word_ms')
-        return milliseconds === null ? null : milliseconds / 1_000
-      })()
-    return value === null
-      ? []
-      : [{ label: 'Time to first word', value: `${value.toFixed(1)} sec`, help: null }]
-  }
   return []
 }
 
@@ -454,7 +434,7 @@ function energyFindingViews(result: V3PersistedMetricScore): V3MetricFindingView
 
 /** Friendly, metric-specific evidence derived only from the immutable stored result. */
 export function v3MetricDetails(
-  metric: StoredV3MetricId,
+  metric: V3MetricId,
   result: V3PersistedMetricScore,
   mode: PracticeMode,
 ): V3MetricDetailView {
@@ -495,7 +475,7 @@ export function v3MetricDetails(
 }
 
 export function v3MetricHasDetails(
-  metric: StoredV3MetricId,
+  metric: V3MetricId,
   result: V3PersistedMetricScore,
   details: V3MetricDetailView,
 ): boolean {
@@ -533,7 +513,7 @@ function seconds(milliseconds: number): string {
 
 /** Returns the primary user-facing raw measurement for a sounded metric. */
 export function v3PrimaryMeasurement(
-  metric: StoredV3MetricId,
+  metric: V3MetricId,
   result: V3PersistedMetricScore,
 ): string | null {
   if (metric === 'pace') {
@@ -541,12 +521,6 @@ export function v3PrimaryMeasurement(
       numericMeasurement(result.measurements, 'words_per_minute') ??
       numericMeasurement(result.measurements, 'articulation_rate_wpm')
     return value === null ? null : `${Math.round(value)} WPM`
-  }
-  if (metric === 'time_to_first_word') {
-    const value = numericMeasurement(result.measurements, 'seconds')
-    if (value !== null) return `${value.toFixed(1)} sec`
-    const milliseconds = numericMeasurement(result.measurements, 'time_to_first_word_ms')
-    return milliseconds === null ? null : seconds(milliseconds)
   }
   if (metric === 'paused_time') {
     const milliseconds =
@@ -672,7 +646,7 @@ function transcriptDeduction(
   }
 }
 
-const LOCAL_CONTENT_METRICS = new Set<StoredV3MetricId>(['conciseness', 'word_choice', 'grammar'])
+const LOCAL_CONTENT_METRICS = new Set<V3MetricId>(['conciseness', 'word_choice', 'grammar'])
 
 const CONCISENESS_HIGHLIGHT_LABELS: Readonly<Record<string, string>> = Object.freeze({
   filler: 'unnecessary filler',
@@ -684,7 +658,7 @@ const CONCISENESS_HIGHLIGHT_LABELS: Readonly<Record<string, string>> = Object.fr
   unnecessary_qualifier: 'unnecessary qualifier or closer',
 })
 
-function findingHeading(metric: StoredV3MetricId, kind: string): string {
+function findingHeading(metric: V3MetricId, kind: string): string {
   if (metric === 'conciseness') {
     return `Conciseness: ${CONCISENESS_HIGHLIGHT_LABELS[kind] ?? 'unnecessary wording'}`
   }
@@ -693,7 +667,7 @@ function findingHeading(metric: StoredV3MetricId, kind: string): string {
   return V3_METRIC_LABELS[metric]
 }
 
-function suggestionText(metric: StoredV3MetricId, suggestion: string | null): string[] {
+function suggestionText(metric: V3MetricId, suggestion: string | null): string[] {
   if (!suggestion) return []
   if (metric === 'word_choice') return [`More precise: ${suggestion}`]
   if (metric === 'grammar') return [`Clearer form: ${suggestion}`]
@@ -706,7 +680,7 @@ function uniqueLines(lines: readonly string[]): string[] {
 
 function contentTranscriptDeductions(
   transcript: string,
-  metric: StoredV3MetricId,
+  metric: V3MetricId,
   result: V3PersistedMetricScore,
 ): TranscriptDeduction[] {
   if (!LOCAL_CONTENT_METRICS.has(metric)) return []
@@ -832,7 +806,7 @@ function sameDetails(left: readonly string[], right: readonly string[]): boolean
 /** Amber marks only evidence that materially reduced displayed points and can be localized. */
 export function v3TranscriptSegments(
   transcript: string,
-  payload: StoredV3ScorePayload,
+  payload: V3ScorePayload,
   words: readonly TranscriptWord[] = [],
 ): Segment[] {
   const tokens = validTimedTokens(transcript, words)
@@ -883,7 +857,6 @@ export function v3TranscriptSegments(
     segments.push({
       type: 'highlight',
       text,
-      kind: 'word_choice',
       label: details[0] ?? 'Score deduction',
       details,
     })

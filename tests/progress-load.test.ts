@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { readProgressAttemptRows, safeProgressErrorCode } from '@/lib/progress/load'
-import { v2Snapshot } from './helpers/result-snapshots'
+import { v3Snapshot } from './helpers/result-snapshots'
 
 describe('progress data loading boundary', () => {
   it('distinguishes a valid empty result from a query failure', () => {
@@ -24,7 +24,7 @@ describe('progress data loading boundary', () => {
           created_at: '2026-08-26T12:00:00.000Z',
           retry_of_attempt_id: null,
           status: 'done',
-          section_scores: v2Snapshot({ notCheckedCategory: 'grammar' }),
+          section_scores: v3Snapshot({ notCheckedMetric: 'grammar' }),
         },
       ],
       false,
@@ -73,7 +73,7 @@ describe('progress data loading boundary', () => {
               created_at: '2026-08-26T12:00:00.000Z',
               retry_of_attempt_id: null,
               status,
-              section_scores: v2Snapshot(),
+              section_scores: v3Snapshot(),
             },
           ],
           false,
@@ -95,7 +95,7 @@ describe('progress data loading boundary', () => {
       created_at: `2026-08-2${6 - index}T12:00:00.000Z`,
       retry_of_attempt_id: null,
       status: 'done',
-      section_scores: v2Snapshot(),
+      section_scores: v3Snapshot(),
     }))
 
     expect(readProgressAttemptRows(rows, false, 2)).toMatchObject({

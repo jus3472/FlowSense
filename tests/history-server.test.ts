@@ -8,13 +8,15 @@ import {
 } from '@/lib/results/history-server'
 import type { AttemptStatus } from '@/lib/attempts/lifecycle'
 import type { Database, Json, PracticeMode, PromptSource } from '@/lib/types/database'
-import { legacySectionSnapshot, v2Snapshot } from './helpers/result-snapshots'
+import { v3Snapshot } from './helpers/result-snapshots'
 
 vi.mock('server-only', () => ({}))
 const mocks = vi.hoisted(() => ({ reconcileCurrentUserStaleAttempts: vi.fn() }))
 vi.mock('@/lib/attempts/reconciliation', () => ({
   reconcileCurrentUserStaleAttempts: mocks.reconcileCurrentUserStaleAttempts,
 }))
+
+const unsupportedResult = { version: 'future.score.1', rubric_version: 'future' } as Json
 
 interface FakeAttempt {
   id: string
@@ -44,7 +46,7 @@ function attempt(index: number, over: Partial<FakeAttempt> = {}): FakeAttempt {
     created_at: new Date(Date.UTC(2026, 7, 27, 0, 0, index)).toISOString(),
     prompt_text: `Prompt ${index}`,
     score: 70,
-    section_scores: legacySectionSnapshot as unknown as Json,
+    section_scores: v3Snapshot() as unknown as Json,
     practice_mode: 'practice',
     prompt_source: 'library',
     retry_of_attempt_id: null,
@@ -253,17 +255,17 @@ describe('history server loading', () => {
     const setup = fakeSupabase([
       attempt(1, {
         score: 61,
-        section_scores: legacySectionSnapshot as unknown as Json,
+        section_scores: { stale: true },
         practice_mode: null,
         prompt_source: null,
       }),
       attempt(2, {
         score: 82,
-        section_scores: v2Snapshot({ component: 0.8 }) as unknown as Json,
+        section_scores: unsupportedResult,
       }),
       attempt(3, {
         score: null,
-        section_scores: v2Snapshot({ notCheckedCategory: 'grammar' }) as unknown as Json,
+        section_scores: unsupportedResult,
       }),
       attempt(4, { status: 'uploading', score: 99 }),
       attempt(5, { status: 'transcribing', section_scores: { stale: true } }),
@@ -293,9 +295,9 @@ describe('history server loading', () => {
       ['attempt-010', null, 'partial'],
       ['attempt-008', null, undefined],
       ['attempt-007', null, undefined],
-      ['attempt-003', null, 'partial'],
-      ['attempt-002', 81, 'v2'],
-      ['attempt-001', 61, 'legacy'],
+      ['attempt-003', null, 'unsupported'],
+      ['attempt-002', null, 'unsupported'],
+      ['attempt-001', null, 'partial'],
     ])
     expect(
       result.data.entries
@@ -341,7 +343,7 @@ describe('history server loading', () => {
       attempt(2, {
         score: null,
         prompt_text: 'Explain one result to a new audience.',
-        section_scores: v2Snapshot({ notCheckedCategory: 'grammar' }) as unknown as Json,
+        section_scores: v3Snapshot({ notCheckedMetric: 'grammar' }) as unknown as Json,
         lesson_id: 'lesson-2',
         lesson: {
           title: 'Explain a result',
@@ -381,7 +383,7 @@ describe('history server loading', () => {
         lessonTitle: 'Handling conflict',
         lessonPosition: 10,
         checkpoint: true,
-        stars: 1,
+        stars: 2,
         outcome: 'passed',
       },
     ])
@@ -406,11 +408,11 @@ describe('history server loading', () => {
     const rows = Array.from({ length: HISTORY_PAGE_SIZE * 2 + 5 }, (_, index) => attempt(index))
     rows[2] = attempt(2, {
       score: null,
-      section_scores: v2Snapshot({ notCheckedCategory: 'grammar' }) as unknown as Json,
+      section_scores: unsupportedResult,
     })
     rows[3] = attempt(3, {
       score: 100,
-      section_scores: { ...v2Snapshot(), version: 'future.score.1' } as unknown as Json,
+      section_scores: unsupportedResult,
     })
     const setup = fakeSupabase(rows)
     const first = await loadHistoryPage(setup.client, 'user-1', {
@@ -439,11 +441,11 @@ describe('history server loading', () => {
         'attempt-000',
       ])
       expect(last.data.entries.map((entry) => entry.resultKind)).toEqual([
-        'legacy',
+        'current',
         'unsupported',
-        'partial',
-        'legacy',
-        'legacy',
+        'unsupported',
+        'current',
+        'current',
       ])
     }
     const ranges = setup.queries.flatMap((query) =>
@@ -467,15 +469,14 @@ describe('history server loading', () => {
       page: 1,
     })
     if (result.status !== 'ready') throw new Error('expected ready history')
-    expect(result.data.entries.map((entry) => entry.score)).toEqual([80, 40])
+    expect(result.data.entries.map((entry) => entry.score)).toEqual([80, 80])
   })
 
-  it('lists mixed result generations without a separate trend query', async () => {
-    const currentLow = v2Snapshot({ component: 0.6 })
-    const currentHigh = v2Snapshot({ component: 0.8 })
-    const future = { ...v2Snapshot({ component: 1 }), version: 'v3.score.1' }
+  it('classifies current, malformed, and unsupported results without a trend query', async () => {
+    const currentLow = v3Snapshot({ component: 0.6 })
+    const currentHigh = v3Snapshot({ component: 0.8 })
     const setup = fakeSupabase([
-      attempt(1, { score: 55, section_scores: legacySectionSnapshot as unknown as Json }),
+      attempt(1, { score: 55, section_scores: { stale: true } }),
       attempt(2, {
         score: 99,
         section_scores: currentLow as unknown as Json,
@@ -488,18 +489,18 @@ describe('history server loading', () => {
       }),
       attempt(4, {
         score: 95,
-        section_scores: v2Snapshot({ mode: 'interview', component: 0.95 }) as unknown as Json,
+        section_scores: v3Snapshot({ mode: 'interview', component: 0.95 }) as unknown as Json,
         practice_mode: 'interview',
         created_at: '2026-08-27T00:00:19.000Z',
       }),
       attempt(5, {
         score: 100,
-        section_scores: future as unknown as Json,
+        section_scores: unsupportedResult,
         created_at: '2026-08-27T00:00:23.000Z',
       }),
       attempt(6, {
-        score: 100,
-        section_scores: v2Snapshot({ notCheckedCategory: 'grammar' }) as unknown as Json,
+        score: null,
+        section_scores: v3Snapshot({ notCheckedMetric: 'grammar' }) as unknown as Json,
         created_at: '2026-08-27T00:00:22.000Z',
       }),
     ])
@@ -512,10 +513,10 @@ describe('history server loading', () => {
     expect(all.data.entries.map((entry) => [entry.id, entry.resultKind])).toEqual([
       ['attempt-005', 'unsupported'],
       ['attempt-006', 'partial'],
-      ['attempt-003', 'v2'],
-      ['attempt-002', 'v2'],
-      ['attempt-004', 'v2'],
-      ['attempt-001', 'legacy'],
+      ['attempt-003', 'current'],
+      ['attempt-002', 'current'],
+      ['attempt-004', 'current'],
+      ['attempt-001', 'partial'],
     ])
     expect(setup.queries).toHaveLength(2)
     expect(

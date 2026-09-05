@@ -19,7 +19,6 @@ import {
   type WhatYouSaidMetricId,
 } from '@/lib/scoring/v3/contracts'
 import { describe, expect, it } from 'vitest'
-import { legacyV3Snapshot } from './helpers/result-snapshots'
 
 function evaluation(metric: V3MetricId, component = 1): V3MetricEvaluation {
   return {
@@ -256,14 +255,11 @@ describe('v3 score assembler', () => {
     ).toBe(false)
   })
 
-  it('validates each persisted v3 version only against its own exact metric shape', () => {
+  it('validates only the exact current persisted metric shape', () => {
     const current = assembleV3Score({ mode: 'practice', content: content(), sounded: sounded() })
-    const legacy = legacyV3Snapshot()
 
     expect(isV3ScorePayload(current)).toBe(true)
-    expect(isV3ScorePayload(legacy)).toBe(true)
     expect(isV3ScorePayload({ ...current, version: 'v3.score.1' })).toBe(false)
-    expect(isV3ScorePayload({ ...legacy, version: 'v3.score.2' })).toBe(false)
   })
 
   it('accepts the prior recommendation copy on stored current-version snapshots', () => {

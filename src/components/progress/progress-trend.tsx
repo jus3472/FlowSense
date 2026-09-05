@@ -1,4 +1,4 @@
-import type { ProgressSeries } from '@/lib/progress/aggregation'
+import type { ProgressSeries } from '@/lib/progress/v3-aggregation'
 
 export function ProgressTrend({ label, series }: { label: string; series: ProgressSeries }) {
   const points = series.points.slice(-12)

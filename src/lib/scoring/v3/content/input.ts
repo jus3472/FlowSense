@@ -1,7 +1,6 @@
 import type { TranscriptWord } from '@/lib/deepgram/parse'
 import { analyseFillers, type FillerHit } from '@/lib/scoring/fillers'
 import { buildTokens } from '@/lib/scoring/tokens'
-import type { MechanicallyCountedSpan } from '@/lib/scoring/v2/content/contracts'
 import type { V3MechanicallyOwnedSpan, V3TranscriptSpan } from '@/lib/scoring/v3/content/contracts'
 
 export interface V3ContentEvidenceInput {
@@ -31,7 +30,7 @@ function spansFromHits(
   hits: readonly FillerHit[],
   tokens: ReturnType<typeof buildTokens>,
   transcript: string,
-): MechanicallyCountedSpan[] {
+): Array<Omit<V3MechanicallyOwnedSpan, 'category'> & { category: FillerHit['category'] }> {
   return hits.flatMap((hit) => {
     const selected = hit.token_indices.map((index) => tokens[index]).filter(Boolean)
     const first = selected[0]
@@ -61,19 +60,4 @@ export function v3ContentEvidenceInput(
     transcript,
   ).map((span): V3MechanicallyOwnedSpan => ({ ...span, category: 'false_start' }))
   return { mechanicallyOwned, unreliableTranscriptSpans }
-}
-
-/** Preserves the complete legacy exclusion set for historical v2 rechecks. */
-export function legacyContentEvidenceInput(
-  transcript: string,
-  words: readonly TranscriptWord[],
-): {
-  mechanicallyCounted: MechanicallyCountedSpan[]
-  unreliableTranscriptSpans: V3TranscriptSpan[]
-} {
-  const { fillers, tokens, unreliableTranscriptSpans } = tokenEvidence(transcript, words)
-  return {
-    mechanicallyCounted: spansFromHits(fillers.hits, tokens, transcript),
-    unreliableTranscriptSpans,
-  }
 }

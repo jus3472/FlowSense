@@ -13,7 +13,7 @@ import {
   loadCurriculumPathForUser,
 } from '@/lib/curriculum/server'
 import type { Database } from '@/lib/types/database'
-import { v2Snapshot } from './helpers/result-snapshots'
+import { v3Snapshot } from './helpers/result-snapshots'
 
 vi.mock('server-only', () => ({}))
 const mocks = vi.hoisted(() => ({ createClient: vi.fn() }))
@@ -225,7 +225,7 @@ function neutralAttempt(over: Partial<FakeRow> = {}): FakeRow {
     duration_ms: 20_000,
     transcript: 'A complete response.',
     score: null,
-    section_scores: v2Snapshot({ notCheckedCategory: 'grammar' }),
+    section_scores: v3Snapshot({ notCheckedMetric: 'grammar' }),
     created_at: '2026-08-28T00:00:00.000Z',
     ...over,
   }

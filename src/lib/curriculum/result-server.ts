@@ -127,7 +127,7 @@ export async function loadStructuredLessonResultForUser(
     (candidate) => candidate.lesson.id === input.lessonId,
   )
   if (!lessonProgress) return failure('topology')
-  const supportedRubric = input.rubricVersion === 'v2' || input.rubricVersion === 'v3'
+  const supportedRubric = input.rubricVersion === 'v3'
   const scoringIdentityMatches =
     supportedRubric &&
     input.snapshotRubricVersion === input.rubricVersion &&

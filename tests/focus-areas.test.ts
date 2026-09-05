@@ -63,7 +63,7 @@ describe('practice goals', () => {
     ])
   })
   it('keeps practice preferences out of scoring modules', () => {
-    for (const file of ['src/lib/scoring/assemble.ts', 'src/lib/scoring/v2/assemble.ts']) {
+    for (const file of ['src/lib/scoring/v3/assemble.ts', 'src/lib/scoring/v3/audio.ts']) {
       expect(readFileSync(file, 'utf8')).not.toContain('focus-areas')
     }
   })

@@ -1,17 +1,16 @@
+import { describe, expect, it } from 'vitest'
 import {
   classifySpeakingActivity,
   isSpeakingActivity,
-  type SpeakingActivityInput,
 } from '@/lib/activity/speaking'
-import { legacySectionSnapshot, v2Snapshot, v3Snapshot } from './helpers/result-snapshots'
-import { describe, expect, it } from 'vitest'
+import { v3Snapshot } from './helpers/result-snapshots'
 
-function activity(overrides: Partial<SpeakingActivityInput> = {}): SpeakingActivityInput {
-  const sectionScores = v2Snapshot({ component: 0.8 })
+function activity(overrides: Record<string, unknown> = {}) {
+  const sectionScores = v3Snapshot({ component: 0.8 })
   return {
     status: 'done',
-    durationMs: 1,
-    transcript: 'One measured response.',
+    durationMs: 10_000,
+    transcript: 'A current response.',
     score: sectionScores.total_earned_points,
     sectionScores,
     ...overrides,
@@ -19,122 +18,33 @@ function activity(overrides: Partial<SpeakingActivityInput> = {}): SpeakingActiv
 }
 
 describe('speaking activity classification', () => {
-  it('accepts exact scored and provider-neutral v3 results', () => {
-    const scored = v3Snapshot({ component: 0.6 })
-    const neutral = v3Snapshot({ unavailableMetric: 'articulation' })
-
-    expect(
-      classifySpeakingActivity(
-        activity({ score: scored.total_earned_points, sectionScores: scored }),
-      ),
-    ).toEqual({ kind: 'scored', score: scored.total_earned_points, resultKind: 'v3' })
-    expect(classifySpeakingActivity(activity({ score: null, sectionScores: neutral }))).toEqual({
-      kind: 'neutral',
-      score: null,
-      resultKind: 'v3',
-    })
-  })
-
-  it('accepts a structurally valid matching numeric v2 result below passing', () => {
-    const sectionScores = v2Snapshot({ component: 0.4 })
-    const result = classifySpeakingActivity(
-      activity({ score: sectionScores.total_earned_points, sectionScores }),
-    )
-
-    expect(result).toEqual({
+  it('accepts current numerical and provider-neutral results', () => {
+    expect(classifySpeakingActivity(activity())).toEqual({
       kind: 'scored',
-      score: sectionScores.total_earned_points,
-      resultKind: 'v2',
+      score: 80,
+      resultKind: 'current',
     })
-    expect(isSpeakingActivity(result)).toBe(true)
-  })
-
-  it('accepts a valid provider-incomplete v2 result as neutral activity', () => {
-    const sectionScores = v2Snapshot({ notCheckedCategory: 'grammar' })
-    const result = classifySpeakingActivity(activity({ score: null, sectionScores }))
-
-    expect(result).toEqual({ kind: 'neutral', score: null, resultKind: 'v2' })
-    expect(isSpeakingActivity(result)).toBe(true)
-  })
-
-  it('accepts a valid legacy result with a numeric score', () => {
+    const neutral = v3Snapshot({ unavailableMetric: 'energy' })
     expect(
-      classifySpeakingActivity(activity({ score: 64, sectionScores: legacySectionSnapshot })),
-    ).toEqual({ kind: 'scored', score: 64, resultKind: 'legacy' })
+      classifySpeakingActivity(activity({ score: null, sectionScores: neutral })),
+    ).toEqual({ kind: 'neutral', score: null, resultKind: 'current' })
   })
 
   it.each([
-    ['not done', { status: 'scoring' }, 'not_done'],
-    ['zero duration', { durationMs: 0 }, 'invalid_duration'],
-    ['negative duration', { durationMs: -1 }, 'invalid_duration'],
-    ['non-finite duration', { durationMs: Number.NaN }, 'invalid_duration'],
-    ['blank transcript', { transcript: '   ' }, 'empty_transcript'],
-    ['missing snapshot', { sectionScores: null }, 'missing_result'],
-    ['malformed snapshot', { sectionScores: {} }, 'malformed_result'],
-  ] as const)('rejects %s', (_label, overrides, reason) => {
-    const result = classifySpeakingActivity(activity(overrides))
-    expect(result).toEqual({ kind: 'invalid', reason })
-    expect(isSpeakingActivity(result)).toBe(false)
+    [{ status: 'failed' }, 'not_done'],
+    [{ durationMs: 0 }, 'invalid_duration'],
+    [{ transcript: '  ' }, 'empty_transcript'],
+    [{ score: 10 }, 'score_mismatch'],
+    [{ score: null, sectionScores: null }, 'missing_result'],
+    [{ sectionScores: {} }, 'malformed_result'],
+    [{ sectionScores: { ...v3Snapshot(), version: 'v3.score.1' } }, 'unsupported_result'],
+    [{ sectionScores: { ...v3Snapshot(), version: 'v3.score.99' } }, 'unsupported_result'],
+  ])('rejects invalid activity as %s', (overrides, reason) => {
+    expect(classifySpeakingActivity(activity(overrides))).toEqual({ kind: 'invalid', reason })
   })
 
-  it('rejects unsupported result versions', () => {
-    const current = v2Snapshot()
-    expect(
-      classifySpeakingActivity(activity({ sectionScores: { ...current, version: 'future' } })),
-    ).toEqual({ kind: 'invalid', reason: 'unsupported_result' })
-  })
-
-  it('rejects numeric v2 scalar mismatch and a synthetic zero for neutral v2', () => {
-    const scored = v2Snapshot({ component: 0.8 })
-    const neutral = v2Snapshot({ unavailableCategory: 'clarity' })
-
-    expect(classifySpeakingActivity(activity({ score: 79, sectionScores: scored }))).toEqual({
-      kind: 'invalid',
-      reason: 'score_mismatch',
-    })
-    expect(classifySpeakingActivity(activity({ score: 0, sectionScores: neutral }))).toEqual({
-      kind: 'invalid',
-      reason: 'score_mismatch',
-    })
-  })
-
-  it('rejects v3 scalar mismatches and structurally modified snapshots', () => {
-    const scored = v3Snapshot({ component: 0.8 })
-    const neutral = v3Snapshot({ notCheckedMetric: 'grammar' })
-    const modified = {
-      ...scored,
-      sections: {
-        ...scored.sections,
-        how_you_sounded: {
-          ...scored.sections.how_you_sounded,
-          metrics: {
-            ...scored.sections.how_you_sounded.metrics,
-            energy: { ...scored.sections.how_you_sounded.metrics.energy, max_points: 99 },
-          },
-        },
-      },
-    }
-
-    expect(classifySpeakingActivity(activity({ score: 79, sectionScores: scored }))).toEqual({
-      kind: 'invalid',
-      reason: 'score_mismatch',
-    })
-    expect(classifySpeakingActivity(activity({ score: 0, sectionScores: neutral }))).toEqual({
-      kind: 'invalid',
-      reason: 'score_mismatch',
-    })
-    expect(classifySpeakingActivity(activity({ sectionScores: modified }))).toEqual({
-      kind: 'invalid',
-      reason: 'malformed_result',
-    })
-  })
-
-  it('rejects missing or malformed legacy scores', () => {
-    expect(
-      classifySpeakingActivity(activity({ score: null, sectionScores: legacySectionSnapshot })),
-    ).toEqual({ kind: 'invalid', reason: 'score_mismatch' })
-    expect(
-      classifySpeakingActivity(activity({ score: 70.5, sectionScores: legacySectionSnapshot })),
-    ).toEqual({ kind: 'invalid', reason: 'score_mismatch' })
+  it('narrows valid activity', () => {
+    expect(isSpeakingActivity(classifySpeakingActivity(activity()))).toBe(true)
+    expect(isSpeakingActivity(classifySpeakingActivity(activity({ status: 'failed' })))).toBe(false)
   })
 })

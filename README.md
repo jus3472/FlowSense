@@ -17,9 +17,9 @@ that affects clarity or effectiveness. It is not vocabulary training, a vocabula
 or a status judgment. FlowSense never judges accent. Any future pronunciation feedback must measure
 intelligibility or phoneme accuracy, never whether someone sounds native.
 
-Every new v3-scored attempt must store a rubric and score version. Legacy v1 and v2 attempts may
-have older or null metadata; their stored snapshots remain authoritative, including the prompt,
-transcript, capture data, and scoring results, and must not be rewritten by later rubric changes.
+Every scored attempt stores rubric `v3` and payload `v3.score.2`. Other stored score formats fail
+closed as unsupported and are never silently reinterpreted. Resultless terminal attempts retain
+their prompt, transcript, capture data, recording playback, and fresh-retry path.
 
 ## Documentation
 
@@ -46,9 +46,7 @@ Required application variables:
 - `DEEPGRAM_API_KEY`
 - `DEEPSEEK_API_KEY`
 
-Optional server-only pronunciation evidence for historical v2 scoring uses
-`AZURE_SPEECH_ENDPOINT`, `AZURE_SPEECH_KEY`, and `AZURE_SPEECH_LOCALE`. New v3 attempts do not
-use Azure in their score. Their Articulation metric uses final Deepgram word confidence, guarded by
+Articulation uses final Deepgram word confidence, guarded by
 stored audio signal and evidence-coverage checks, and never measures accent conformity.
 
 `SUPABASE_DB_URL` is local-only and required only for database migrations and inspection scripts.
@@ -70,11 +68,7 @@ stored audio signal and evidence-coverage checks, and never measures accent conf
 | `npm run inspect:attempts`            | Inspect stored capture timelines            |
 | `npm run inspect:scores`              | Inspect scored attempt breakdowns           |
 | `npm run inspect:content-reliability` | Inspect aggregate content-provider health   |
-| `npm run inspect:rewrites`            | Audit stored tightened rewrites             |
 | `npm run check:scoring-calibration`   | Run local scoring calibration corpora       |
-
-`npm run inspect:rewrites -- --write` updates stored rewrites and can call the content provider
-when a retry is necessary. Run it deliberately.
 
 `npm run inspect:content-reliability -- --limit 100` runs a read-only aggregate over recent
 completed attempts. Add `--since <ISO-8601>` to inspect a deployment window. It never selects or
@@ -91,34 +85,8 @@ screenshots, videos, and the HTML report are written to ignored Playwright outpu
 
 ## Scoring calibration
 
-`npm run check:scoring-calibration` runs two primary generated, local-only v2 corpora, the existing
-Delivery-next calibration evidence, and deterministic v3 Energy fixtures. The exact snapshot corpus
-prints `PASS` or `DRIFT` and exits nonzero on implementation drift. The reviewed range corpus reads
-`fixtures/scoring/phase1-calibration.json` and compares normalized category scores from 0 through 100
-with reviewed ranges:
-
-- `INSIDE` is within the inclusive range.
-- `ABOVE` is more generous than the reviewed range.
-- `BELOW` is harsher than the reviewed range.
-- `UNAVAILABLE` means the generated evidence did not produce a category score.
-
-Within the reviewed-range suite, only an out-of-range or unavailable `strict` expectation makes the
-command fail. `broad` and `informational` misses are printed as nonblocking observations so calibration
-concerns remain visible without forcing a scoring change. Weighted points are context only; ranges
-compare normalized category components so modes remain comparable.
-
-Both corpora use generated transcripts, timelines, and hand-authored provider output; the reviewed
-corpus also includes literal generated prompts. They and the Delivery-next evidence make no provider
-or network calls, never read production attempts, and never rewrite baselines. Because provider output
-is hand-authored, the range corpus evaluates scoring behavior after detection; it does not validate
-live provider detection or provider mode sensitivity. After reviewing an intentional rubric or
-evaluator change, update the exact versioned expectations manually in
-`src/lib/scoring/v2/calibration.ts` in the same review as the scoring change.
-The unclear-pronunciation and intelligible second-language-accent fixtures carry normalized
-evidence only, with `eligibleForDeductions=false`. They do not assess native similarity or deduct
-for an intelligible accent.
-
-The v3 Energy fixtures cover monotone, restrained-natural, naturally expressive, exaggerated-pitch,
+`npm run check:scoring-calibration` runs deterministic current-v3 Energy fixtures for monotone,
+restrained-natural, naturally expressive, exaggerated-pitch,
 and rhythmically robotic signal patterns. They validate reviewed composite ranges without reading
 recordings or making provider calls.
 

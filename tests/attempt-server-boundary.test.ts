@@ -5,7 +5,6 @@ const ROUTES = [
   'src/app/api/attempts/route.ts',
   'src/app/api/attempts/abandon/route.ts',
   'src/app/api/attempts/[id]/route.ts',
-  'src/app/api/attempts/[id]/disputes/route.ts',
   'src/app/api/transcribe/route.ts',
   'src/app/api/score/route.ts',
 ]
@@ -51,19 +50,13 @@ describe('server-owned attempt boundary', () => {
   it('validates an exact owned path before every service-role storage operation', () => {
     const attemptRoute = readFileSync('src/app/api/attempts/[id]/route.ts', 'utf8')
     const transcribeRoute = readFileSync('src/app/api/transcribe/route.ts', 'utf8')
-    const scoreRoute = readFileSync('src/app/api/score/route.ts', 'utf8')
-
-    for (const source of [attemptRoute, transcribeRoute, scoreRoute]) {
+    for (const source of [attemptRoute, transcribeRoute]) {
       expect(source).toContain('validateOwnedAttemptAudioPath')
     }
     expect(attemptRoute).toContain('.remove([ownedAudio.storagePath])')
     expect(attemptRoute).not.toContain('.remove([attempt.audio_path])')
     expect(transcribeRoute).toContain('.download(ownedAudio.storagePath)')
     expect(transcribeRoute).not.toContain('.download(attempt.audio_path)')
-    expect(scoreRoute).toContain('audioPath: ownedAudio?.storagePath ?? null')
-    expect(scoreRoute).toContain(
-      'analyseClarity(transcriptWords, capture, pronunciation, transcript)',
-    )
   })
 
   it('persists only abnormal transcript diagnostics and never logs raw provider bodies', () => {
@@ -87,32 +80,21 @@ describe('server-owned attempt boundary', () => {
     expect(transcribeRoute).toContain("[attempt.status],\n      'scoring'")
   })
 
-  it('keeps v2 writes atomic and disputes outside stored attempt snapshots', () => {
+  it('keeps current score writes atomic', () => {
     const scoreRoute = readFileSync('src/app/api/score/route.ts', 'utf8')
-    const disputeRoute = readFileSync('src/app/api/attempts/[id]/disputes/route.ts', 'utf8')
     expect(scoreRoute).toContain(
       "transitionOwnedAttempt(admin, userId, attemptId, ['scoring'], 'done'",
     )
-    expect(scoreRoute).toContain(".eq('content_result->>status', 'not_checked')")
-    expect(disputeRoute).not.toContain(".from('attempts')\n    .update")
-    expect(disputeRoute).toContain("admin.from('note_feedback').insert")
+    expect(scoreRoute).toContain('section_scores: JSON.parse(JSON.stringify(assembled))')
   })
 
-  it('rejects unknown rubric versions before versioned reuse or legacy dispatch', () => {
+  it('rejects unknown rubric versions before current snapshot reuse', () => {
     const scoreRoute = readFileSync('src/app/api/score/route.ts', 'utf8')
-    const guard = scoreRoute.indexOf("rubricKind === 'unsupported'")
+    const guard = scoreRoute.indexOf("attempt.rubric_version !== 'v3'")
     expect(guard).toBeGreaterThan(-1)
     expect(guard).toBeLessThan(scoreRoute.indexOf('isV3ScorePayload(attempt.section_scores)'))
     expect(scoreRoute).toContain('ATTEMPT_FAILURE_CODES.unsupportedRubricVersion')
-    expect(scoreRoute).toContain('const legacyRecheck = isLegacyRecheckSnapshot({')
-    expect(scoreRoute).toContain(
-      'const runV2Assembler = shouldUseV2Assembler(rubricKind, Boolean(v2Mode), legacyRecheck)',
-    )
-    expect(scoreRoute).toContain(
-      'const runV3Assembler = shouldUseV3Assembler(rubricKind, Boolean(v3Mode), legacyRecheck)',
-    )
-    expect(scoreRoute).toContain('if (runV3Assembler && v3Mode)')
-    expect(scoreRoute).toContain('if (runV2Assembler && v2Mode)')
-    expect(scoreRoute).toContain("if (attempt.status === 'done' && !legacyRecheck)")
+    expect(scoreRoute).not.toContain('shouldUseV2Assembler')
+    expect(scoreRoute).toContain("if (attempt.status === 'done')")
   })
 })

@@ -5,7 +5,7 @@ import {
   logRecentStructuredLessonFailure,
 } from '@/lib/home/recent-lesson'
 import type { Database } from '@/lib/types/database'
-import { legacySectionSnapshot } from './helpers/result-snapshots'
+import { v3Snapshot } from './helpers/result-snapshots'
 
 vi.mock('server-only', () => ({}))
 
@@ -33,8 +33,8 @@ function row(overrides: Partial<Row> = {}): Row {
     status: 'done',
     duration_ms: 12_000,
     transcript: 'I gave one concrete example.',
-    score: 72,
-    section_scores: legacySectionSnapshot,
+    score: 80,
+    section_scores: v3Snapshot(),
     ...overrides,
   }
 }
@@ -135,9 +135,15 @@ describe('recent structured lesson loading', () => {
   })
 
   it('skips malformed activity and accepts the next valid structured response', async () => {
+    const validSnapshot = v3Snapshot({ component: 0.64 })
     const { client } = setup([
       row({ id: 'invalid-newest', lesson_id: 'presentations-lesson-2', transcript: '   ' }),
-      row({ id: 'valid-older', lesson_id: 'interviews-lesson-3', score: 64 }),
+      row({
+        id: 'valid-older',
+        lesson_id: 'interviews-lesson-3',
+        score: validSnapshot.total_earned_points,
+        section_scores: validSnapshot,
+      }),
     ])
 
     await expect(loadRecentStructuredLessonId(client, 'user-1')).resolves.toEqual({

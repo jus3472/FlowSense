@@ -3,7 +3,7 @@ import { ATTEMPT_FAILURE_CODES, type AttemptStatus } from '@/lib/attempts/lifecy
 import type { ChapterLevel, PathSlug, Stars } from '@/lib/curriculum/contracts'
 import { dayKey } from '@/lib/streak'
 import type { PracticeMode, PromptSource } from '@/lib/practice/contracts'
-import type { HistoryResultKind } from '@/lib/results/history-cohort'
+import type { HistoryResultKind } from '@/lib/results/history-result'
 
 export interface HistoryEntry {
   id: string
@@ -167,7 +167,7 @@ export function historyMode(entry: HistoryEntry): HistoryMetadataFilter {
   return 'general'
 }
 
-/** Concise stored metadata only. Null legacy values deliberately stay neutral. */
+/** Concise stored metadata only. Missing optional values deliberately stay neutral. */
 export function historyContext(entry: HistoryEntry): string[] {
   if (entry.lesson) {
     return [

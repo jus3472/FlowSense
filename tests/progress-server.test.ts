@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PROGRESS_COMPLETED_ATTEMPT_LIMIT, getProgressDashboardData } from '@/lib/progress/server'
-import { v2Snapshot, v3Snapshot } from './helpers/result-snapshots'
+import { v3Snapshot } from './helpers/result-snapshots'
 
 const mocks = vi.hoisted(() => ({ createClient: vi.fn() }))
 
@@ -89,7 +89,7 @@ function row(id: string, over: Partial<ProgressRow> = {}): ProgressRow {
     id,
     user_id: 'user-1',
     created_at: '2026-08-25T12:00:00.000Z',
-    section_scores: v2Snapshot(),
+    section_scores: v3Snapshot(),
     retry_of_attempt_id: null,
     status: 'done',
     ...over,
@@ -158,16 +158,19 @@ describe('progress server query window', () => {
       status: 'ready',
       data: {
         coverage: { truncated: false },
-        progress: { counts: { input: 0, selectedCohort: 0 } },
+        progress: { counts: { input: 0, included: 0 } },
       },
     })
   })
 
-  it('returns separate v3 and earlier v2 aggregations from one bounded query', async () => {
+  it('excludes old generations from the current aggregation', async () => {
     const current = v3Snapshot()
     useQuery([
       row('v3', { section_scores: current, created_at: '2026-08-25T12:00:00.000Z' }),
-      row('v2', { created_at: '2026-08-24T12:00:00.000Z' }),
+      row('old', {
+        section_scores: { ...current, version: 'v3.score.1' },
+        created_at: '2026-08-24T12:00:00.000Z',
+      }),
     ])
 
     const result = await getProgressDashboardData('user-1', {
@@ -176,8 +179,7 @@ describe('progress server query window', () => {
     expect(result).toMatchObject({
       status: 'ready',
       data: {
-        progress: { counts: { selectedCohort: 1, otherSupported: 1 } },
-        v3Progress: { counts: { selectedCohort: 1, earlierV2: 1 } },
+        progress: { counts: { included: 1, unsupportedVersion: 1 } },
       },
     })
   })

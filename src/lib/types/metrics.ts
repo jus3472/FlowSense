@@ -3,7 +3,6 @@ import type {
   DeepgramUnavailableQuality,
   TranscriptWord,
 } from '@/lib/deepgram/parse'
-import type { PronunciationEvaluation } from '@/lib/pronunciation/contracts'
 import type { ChapterLevel, PathSlug } from '@/lib/curriculum/contracts'
 
 export interface AmplitudeSample {
@@ -63,22 +62,10 @@ export interface AttemptCreationMetrics {
   }
 }
 
-/** Everything the mechanical half computed, stored beside the raw capture. */
-export interface DeliveryBlock {
-  metrics: unknown
-  statistics: unknown
-  pauses: unknown
-  warnings: string[]
-  scored_at: string
-  version: number
-}
-
 export interface AttemptMetrics {
   capture?: CaptureMetrics
   transcript?: TranscriptMetrics
-  delivery?: DeliveryBlock
   practice?: { target_duration_seconds?: number; additional_context?: string }
   creation?: AttemptCreationMetrics
   upload?: AttemptUploadMetrics
-  pronunciation?: PronunciationEvaluation
 }

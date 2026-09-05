@@ -8,7 +8,7 @@ import {
   type PathSlug,
 } from '@/lib/curriculum/contracts'
 import { isPassingScore, starsForScore } from '@/lib/curriculum/thresholds'
-import { readHistoryStoredResult } from '@/lib/results/history-cohort'
+import { readHistoryStoredResult } from '@/lib/results/history-result'
 import type { HistoryEntry, HistoryMetadataFilter, HistoryQuery } from '@/lib/results/history'
 import type { AttemptRow, Database } from '@/lib/types/database'
 

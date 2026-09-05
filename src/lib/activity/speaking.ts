@@ -1,10 +1,5 @@
 import { parseCurriculumScore } from '@/lib/curriculum/thresholds'
 import { decodeStoredSectionSnapshot } from '@/lib/results/snapshot'
-import { isV3ScorePayload } from '@/lib/scoring/v3/assemble'
-import {
-  V3_LEGACY_SCORE_PAYLOAD_VERSION,
-  V3_SCORE_PAYLOAD_VERSION,
-} from '@/lib/scoring/v3/contracts'
 
 export interface SpeakingActivityInput {
   status: unknown
@@ -24,13 +19,9 @@ export type SpeakingActivityInvalidReason =
   | 'score_mismatch'
 
 export type SpeakingActivityClassification =
-  | { kind: 'scored'; score: number; resultKind: 'v3' | 'v2' | 'legacy' }
-  | { kind: 'neutral'; score: null; resultKind: 'v3' | 'v2' }
+  | { kind: 'scored'; score: number; resultKind: 'current' }
+  | { kind: 'neutral'; score: null; resultKind: 'current' }
   | { kind: 'invalid'; reason: SpeakingActivityInvalidReason }
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 /**
  * Classifies one stored response for future activity ledgers. Activity is
@@ -51,26 +42,6 @@ export function classifySpeakingActivity(
     return { kind: 'invalid', reason: 'empty_transcript' }
   }
 
-  if (isV3ScorePayload(input.sectionScores)) {
-    const total = input.sectionScores.total_earned_points
-    if (total === null) {
-      return input.score === null
-        ? { kind: 'neutral', score: null, resultKind: 'v3' }
-        : { kind: 'invalid', reason: 'score_mismatch' }
-    }
-    const score = parseCurriculumScore(input.score)
-    return score !== null && score === total
-      ? { kind: 'scored', score, resultKind: 'v3' }
-      : { kind: 'invalid', reason: 'score_mismatch' }
-  }
-  if (
-    isRecord(input.sectionScores) &&
-    (input.sectionScores.version === V3_SCORE_PAYLOAD_VERSION ||
-      input.sectionScores.version === V3_LEGACY_SCORE_PAYLOAD_VERSION)
-  ) {
-    return { kind: 'invalid', reason: 'malformed_result' }
-  }
-
   const snapshot = decodeStoredSectionSnapshot(input.sectionScores)
   if (snapshot.kind === 'none') return { kind: 'invalid', reason: 'missing_result' }
   if (snapshot.kind === 'malformed') return { kind: 'invalid', reason: 'malformed_result' }
@@ -78,23 +49,16 @@ export function classifySpeakingActivity(
     return { kind: 'invalid', reason: 'unsupported_result' }
   }
 
-  if (snapshot.kind === 'legacy') {
-    const score = parseCurriculumScore(input.score)
-    return score === null
-      ? { kind: 'invalid', reason: 'score_mismatch' }
-      : { kind: 'scored', score, resultKind: 'legacy' }
-  }
-
   const total = snapshot.payload.total_earned_points
   if (total === null) {
     return input.score === null
-      ? { kind: 'neutral', score: null, resultKind: 'v2' }
+      ? { kind: 'neutral', score: null, resultKind: 'current' }
       : { kind: 'invalid', reason: 'score_mismatch' }
   }
 
   const score = parseCurriculumScore(input.score)
   return score !== null && score === total
-    ? { kind: 'scored', score, resultKind: 'v2' }
+    ? { kind: 'scored', score, resultKind: 'current' }
     : { kind: 'invalid', reason: 'score_mismatch' }
 }
 

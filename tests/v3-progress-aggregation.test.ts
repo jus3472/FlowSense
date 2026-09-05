@@ -1,113 +1,56 @@
 import { describe, expect, it } from 'vitest'
-import { aggregateV2Progress } from '@/lib/progress/aggregation'
 import { aggregateV3Progress } from '@/lib/progress/v3-aggregation'
-import { V3_METRIC_IDS } from '@/lib/scoring/v3/contracts'
-import {
-  legacySectionSnapshot,
-  legacyV3Snapshot,
-  progressAttempt,
-  v2Snapshot,
-  v3Snapshot,
-} from './helpers/result-snapshots'
+import { progressAttempt, v3Snapshot } from './helpers/result-snapshots'
 
-const NOW = new Date('2026-08-26T12:00:00.000Z')
+const NOW = new Date('2026-09-05T12:00:00.000Z')
 
-describe('v3 progress aggregation', () => {
-  it('builds only the exact v3 metric series and retains earlier cohorts as separate counts', () => {
+describe('current progress aggregation', () => {
+  it('aggregates only current v3.2 snapshots across current metrics', () => {
     const result = aggregateV3Progress(
       [
-        progressAttempt('earlier-v3', '2026-08-24T12:00:00.000Z', v3Snapshot({ component: 0.4 })),
-        progressAttempt('later-v3', '2026-08-25T12:00:00.000Z', v3Snapshot({ component: 0.8 })),
-        progressAttempt('legacy-v3', '2026-08-23T18:00:00.000Z', legacyV3Snapshot()),
-        progressAttempt('v2', '2026-08-23T12:00:00.000Z', v2Snapshot()),
-        progressAttempt('legacy', '2026-08-22T12:00:00.000Z', legacySectionSnapshot),
+        progressAttempt('a', '2026-09-03T12:00:00.000Z', v3Snapshot({ component: 0.6 })),
+        progressAttempt('b', '2026-09-04T12:00:00.000Z', v3Snapshot({ component: 0.8 })),
       ],
       { now: NOW },
     )
+    expect(result.counts.included).toBe(2)
+    expect(result.metricIds).toHaveLength(10)
+    expect(result.windows.all.overall.points.map((point) => point.attemptId)).toEqual(['a', 'b'])
+    expect(result.windows.all.metrics.energy.averageValue).toBe(70)
+  })
 
-    expect(result.cohort).toEqual({ scoreVersion: 'v3.score.2', rubricVersion: 'v3' })
+  it('filters by mode and excludes old, future, malformed, resultless, and future-dated rows', () => {
+    const current = v3Snapshot()
+    const result = aggregateV3Progress(
+      [
+        progressAttempt('practice', '2026-09-04T12:00:00.000Z', current),
+        progressAttempt('interview', '2026-09-04T13:00:00.000Z', v3Snapshot({ mode: 'interview' })),
+        progressAttempt('old', '2026-09-04T14:00:00.000Z', { ...current, version: 'v3.score.1' }),
+        progressAttempt('future', '2026-09-04T15:00:00.000Z', { ...current, version: 'v3.score.99' }),
+        progressAttempt('malformed', '2026-09-04T16:00:00.000Z', {}),
+        progressAttempt('none', '2026-09-04T17:00:00.000Z', null),
+        progressAttempt('later', '2026-09-06T12:00:00.000Z', current),
+      ],
+      { now: NOW, mode: 'practice' },
+    )
     expect(result.counts).toMatchObject({
-      validV3: 3,
-      selectedCohort: 2,
-      earlierV2: 1,
-      legacy: 1,
+      input: 7,
+      validV3: 2,
+      included: 1,
+      incomplete: 1,
+      malformed: 2,
+      unsupportedVersion: 2,
+      excludedMode: 1,
     })
-    expect(result.counts.excludedIncompatible).toBe(3)
-    expect(result.metricIds).toEqual(V3_METRIC_IDS)
-    expect(result.windows.all.metrics.time_to_first_word.points).toEqual([])
-    expect(result.windows.all.overall.points.map((point) => point.attemptId)).toEqual([
-      'earlier-v3',
-      'later-v3',
-    ])
-    for (const metric of V3_METRIC_IDS) {
-      expect(result.windows.all.metrics[metric].points.map((point) => point.value)).toEqual([
-        40, 80,
-      ])
-    }
-
-    const earlier = aggregateV2Progress(
-      [
-        progressAttempt('v3', '2026-08-25T12:00:00.000Z', v3Snapshot()),
-        progressAttempt('v2', '2026-08-24T12:00:00.000Z', v2Snapshot()),
-      ],
-      { now: NOW },
-    )
-    expect(earlier.counts).toMatchObject({ selectedCohort: 1, otherSupported: 1 })
-    expect(earlier.windows.all.overall.points.map((point) => point.attemptId)).toEqual(['v2'])
   })
 
-  it('keeps partial metric values but never fabricates an overall or unavailable metric point', () => {
+  it('keeps unavailable metrics out of their series without inventing zeroes', () => {
     const result = aggregateV3Progress(
-      [
-        progressAttempt(
-          'partial',
-          '2026-08-25T12:00:00.000Z',
-          v3Snapshot({ unavailableMetric: 'energy' }),
-        ),
-      ],
+      [progressAttempt('neutral', '2026-09-04T12:00:00.000Z', v3Snapshot({ unavailableMetric: 'energy' }))],
       { now: NOW },
     )
-
-    expect(result.windows.all.attemptCount).toBe(1)
-    expect(result.windows.all.overall.points).toEqual([])
-    expect(result.windows.all.metrics.energy.points).toEqual([])
-    expect(result.windows.all.metrics.grammar.points).toHaveLength(1)
-  })
-
-  it('applies the requested mode without admitting another mode into the selected series', () => {
-    const result = aggregateV3Progress(
-      [
-        progressAttempt('practice', '2026-08-25T12:00:00.000Z', v3Snapshot({ mode: 'practice' })),
-        progressAttempt('interview', '2026-08-24T12:00:00.000Z', v3Snapshot({ mode: 'interview' })),
-      ],
-      { now: NOW, mode: 'interview' },
-    )
-
-    expect(result.counts).toMatchObject({ validV3: 2, selectedCohort: 1, excludedMode: 1 })
-    expect(result.windows.all.overall.points.map((point) => point.attemptId)).toEqual(['interview'])
-  })
-
-  it('retains the historical first-word series when v3.score.1 is the selected cohort', () => {
-    const result = aggregateV3Progress(
-      [
-        progressAttempt(
-          'legacy-a',
-          '2026-08-24T12:00:00.000Z',
-          legacyV3Snapshot({ component: 0.4 }),
-        ),
-        progressAttempt(
-          'legacy-b',
-          '2026-08-25T12:00:00.000Z',
-          legacyV3Snapshot({ component: 0.8 }),
-        ),
-      ],
-      { now: NOW },
-    )
-
-    expect(result.cohort?.scoreVersion).toBe('v3.score.1')
-    expect(result.metricIds).toContain('time_to_first_word')
-    expect(
-      result.windows.all.metrics.time_to_first_word.points.map((point) => point.value),
-    ).toEqual([40, 80])
+    expect(result.windows.all.overall.valueCount).toBe(0)
+    expect(result.windows.all.metrics.energy.valueCount).toBe(0)
+    expect(result.windows.all.metrics.pace.valueCount).toBe(1)
   })
 })

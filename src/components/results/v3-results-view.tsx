@@ -23,10 +23,9 @@ import {
   v3TranscriptSegments,
 } from '@/lib/results/v3'
 import {
-  V3_LEGACY_SCORE_PAYLOAD_VERSION,
   V3_METRIC_LABELS,
-  type StoredV3MetricId,
-  type StoredV3ScorePayload,
+  type V3MetricId,
+  type V3ScorePayload,
 } from '@/lib/scoring/v3/contracts'
 import { cn } from '@/lib/utils'
 
@@ -39,7 +38,7 @@ interface V3ResultsViewProps {
   durationMs: number
   audioUrl: string | null
   audioUnavailable?: boolean
-  payload: StoredV3ScorePayload
+  payload: V3ScorePayload
   comparison?: RetryComparison | null
   previousAttempts?: readonly LessonAttemptHistoryItem[]
   curriculumResult?: StructuredLessonResultModel | null
@@ -83,7 +82,7 @@ function DetailRows({
   )
 }
 
-function Finding({ metric, finding }: { metric: StoredV3MetricId; finding: V3MetricFindingView }) {
+function Finding({ metric, finding }: { metric: V3MetricId; finding: V3MetricFindingView }) {
   const suggestionLead =
     metric === 'word_choice' ? 'More precise:' : metric === 'grammar' ? 'Clearer form:' : 'Try:'
   return (
@@ -110,7 +109,7 @@ function MetricDetails({
   metric,
   details,
 }: {
-  metric: StoredV3MetricId
+  metric: V3MetricId
   details: V3MetricDetailView
 }) {
   return (
@@ -259,12 +258,6 @@ export function V3ResultsView({
           {payload.recommendation ? (
             <div className="max-w-reading flex flex-col gap-2">
               <p className="text-foreground text-base">{payload.recommendation.text}</p>
-              {payload.version === V3_LEGACY_SCORE_PAYLOAD_VERSION ? (
-                <p className="text-muted text-xs">
-                  Based on {V3_METRIC_LABELS[payload.recommendation.strongest_metric]} and{' '}
-                  {V3_METRIC_LABELS[payload.recommendation.weakest_metric]}.
-                </p>
-              ) : null}
             </div>
           ) : (
             <p className="text-muted text-sm">

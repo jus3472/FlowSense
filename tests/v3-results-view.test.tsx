@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { V3ResultsView } from '@/components/results/v3-results-view'
 import type { StructuredLessonResultModel } from '@/lib/curriculum/result'
 import { V3_METRIC_IDS, V3_METRIC_LABELS } from '@/lib/scoring/v3/contracts'
-import { legacyV3Snapshot, v3Snapshot } from './helpers/result-snapshots'
+import { v3Snapshot } from './helpers/result-snapshots'
 
 vi.mock('next/link', () => ({
   default: function MockLink({
@@ -469,13 +469,6 @@ describe('V3ResultsView', () => {
         /excluded silence|speech to noise|voiced frame|temporal bin|active-speech timing|configured range/i,
       ),
     ).not.toBeInTheDocument()
-  })
-
-  it('renders a stored v3.score.1 snapshot with its historical first-word metric', () => {
-    render(<V3ResultsView {...props} payload={legacyV3Snapshot()} />)
-
-    expect(screen.getByRole('heading', { name: 'Time to First Word' })).toBeInTheDocument()
-    expect(screen.getByText(/^Based on /)).toBeInTheDocument()
   })
 
   it('shows partial score states without a fabricated overall or recommendation', () => {
