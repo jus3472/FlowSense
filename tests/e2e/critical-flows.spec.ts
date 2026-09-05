@@ -288,6 +288,7 @@ test('opens path overviews from track cards while Progress stays informational',
   for (const viewport of [
     { width: 390, height: 844 },
     { width: 768, height: 1024 },
+    { width: 1024, height: 900 },
     { width: 1280, height: 900 },
   ]) {
     await page.setViewportSize(viewport)
@@ -300,6 +301,7 @@ test('opens path overviews from track cards while Progress stays informational',
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true)
+
   }
 
   await page.goto('/practice')
@@ -445,6 +447,7 @@ test('records once, shows processing and v3 results, retries, compares, filters,
   for (const viewport of [
     { width: 390, height: 844 },
     { width: 768, height: 1024 },
+    { width: 1024, height: 900 },
     { width: 1280, height: 900 },
   ]) {
     await page.setViewportSize(viewport)
@@ -455,6 +458,20 @@ test('records once, shows processing and v3 results, retries, compares, filters,
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true)
+
+    const scorePanels = page.locator('[data-result-layout="score-sections"] > section')
+    const whatYouSaidBox = await scorePanels.nth(0).boundingBox()
+    const howYouSoundedBox = await scorePanels.nth(1).boundingBox()
+    expect(whatYouSaidBox).not.toBeNull()
+    expect(howYouSoundedBox).not.toBeNull()
+    if (!whatYouSaidBox || !howYouSoundedBox) continue
+    if (viewport.width >= 1024) {
+      expect(Math.abs(whatYouSaidBox.y - howYouSoundedBox.y)).toBeLessThan(4)
+      expect(howYouSoundedBox.x).toBeGreaterThan(whatYouSaidBox.x + whatYouSaidBox.width)
+    } else {
+      expect(Math.abs(whatYouSaidBox.x - howYouSoundedBox.x)).toBeLessThan(4)
+      expect(howYouSoundedBox.y).toBeGreaterThan(whatYouSaidBox.y + whatYouSaidBox.height)
+    }
   }
   expect(attemptPosts).toBe(1)
   const firstState = await currentState(page.request)
@@ -515,7 +532,7 @@ test('records once, shows processing and v3 results, retries, compares, filters,
     'done',
   ])
   await expect(page.getByLabel('Previous response comparison')).toContainText('Overall')
-  await expect(page.getByRole('link', { name: 'View previous response' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'View previous response' })).toHaveCount(0)
   await page.goto('/progress')
   await expect(page.getByRole('heading', { name: 'Overall trend' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Recent retries' })).toBeVisible()
@@ -641,6 +658,37 @@ test('structured lessons retry thresholds without reducing durable progress', as
   await expect(
     page.locator(`a[href="/attempts/${failedAttempt.id}"]`).filter({ hasText: '64 / 100' }),
   ).toBeVisible()
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1024, height: 900 },
+    { width: 1280, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport)
+    const summaryBox = await page.getByRole('region', { name: 'Result summary' }).boundingBox()
+    const historyBox = await page.getByRole('region', { name: 'Previous attempts' }).boundingBox()
+    const recordingBox = await page
+      .getByRole('heading', { name: 'Recording' })
+      .locator('..')
+      .boundingBox()
+    expect(summaryBox).not.toBeNull()
+    expect(historyBox).not.toBeNull()
+    expect(recordingBox).not.toBeNull()
+    if (!summaryBox || !historyBox || !recordingBox) continue
+    if (viewport.width >= 1024) {
+      expect(Math.abs(summaryBox.y - historyBox.y)).toBeLessThan(4)
+      expect(historyBox.x).toBeGreaterThan(summaryBox.x + summaryBox.width)
+    } else {
+      expect(Math.abs(summaryBox.x - historyBox.x)).toBeLessThan(4)
+      expect(historyBox.y).toBeGreaterThan(recordingBox.y + recordingBox.height)
+    }
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true)
+  }
 
   await page.goto('/practice/paths/interviews')
   const completedLesson = page.getByRole('link', { name: /Lesson 1.*View Best Result/s }).first()
@@ -867,7 +915,9 @@ test('structured provider-neutral retry counts activity without changing progres
   await expect(page.getByRole('heading', { name: 'Result unavailable' })).toBeVisible()
   await expect(page.getByText('Best: 64')).toBeVisible()
   await expect(page.getByRole('link', { name: 'Try Again' })).toBeVisible()
-  await expect(page.getByText('/ 100', { exact: false })).toHaveCount(0)
+  await expect(
+    page.getByRole('region', { name: 'Result summary' }).getByText('/ 100', { exact: false }),
+  ).toHaveCount(0)
 
   const neutralState = await currentState(request)
   const neutralAttempt = attemptAt(neutralState, 1)

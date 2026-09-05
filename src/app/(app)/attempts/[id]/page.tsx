@@ -257,7 +257,6 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
 
   if (result.kind === 'v3') {
     let comparison = null
-    let previousAttemptId: string | null = null
     if (attempt.retry_of_attempt_id) {
       let chain: readonly RetryAttempt[] | null = null
       try {
@@ -295,7 +294,6 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
       }
       const parent = chain?.[0] ?? null
       if (parent) {
-        previousAttemptId = parent.id
         const parentResult = readAttemptResult({
           id: parent.id,
           promptText: parent.prompt_text,
@@ -352,7 +350,6 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         audioUnavailable={audioUnavailable}
         payload={result.payload}
         comparison={comparison}
-        previousAttemptId={previousAttemptId}
         previousAttempts={previousAttempts}
         curriculumResult={curriculumResult?.status === 'ready' ? curriculumResult.data : null}
       />
@@ -361,9 +358,8 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
 
   if (result.kind === 'v2') {
     // Every ancestor read is user-scoped. A missing, cyclic, or overlong chain
-    // suppresses the link and comparison rather than reconstructing history.
+    // suppresses the comparison rather than reconstructing history.
     let comparison = null
-    let previousAttemptId: string | null = null
     if (attempt.retry_of_attempt_id) {
       let chain: readonly RetryAttempt[] | null = null
       try {
@@ -404,7 +400,6 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
       }
       const parent = chain?.[0] ?? null
       if (parent) {
-        previousAttemptId = parent.id
         const parentResult = readAttemptResult({
           id: parent.id,
           promptText: parent.prompt_text,
@@ -457,7 +452,6 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         audioUrl={audioUrl}
         payload={result.payload}
         comparison={comparison}
-        previousAttemptId={previousAttemptId}
         previousAttempts={previousAttempts}
         curriculumResult={curriculumResult?.status === 'ready' ? curriculumResult.data : null}
       />,

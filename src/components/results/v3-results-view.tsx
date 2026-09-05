@@ -1,4 +1,3 @@
-import type { Route } from 'next'
 import { CurriculumStars } from '@/components/curriculum/stars'
 import { AudioPlayer } from '@/components/record/audio-player'
 import { PreviousAttempts } from '@/components/results/previous-attempts'
@@ -29,6 +28,7 @@ import {
   type StoredV3MetricId,
   type StoredV3ScorePayload,
 } from '@/lib/scoring/v3/contracts'
+import { cn } from '@/lib/utils'
 
 interface V3ResultsViewProps {
   attemptId: string
@@ -41,7 +41,6 @@ interface V3ResultsViewProps {
   audioUnavailable?: boolean
   payload: StoredV3ScorePayload
   comparison?: RetryComparison | null
-  previousAttemptId?: string | null
   previousAttempts?: readonly LessonAttemptHistoryItem[]
   curriculumResult?: StructuredLessonResultModel | null
 }
@@ -161,24 +160,33 @@ export function V3ResultsView({
   audioUnavailable = false,
   payload,
   comparison = null,
-  previousAttemptId = null,
   previousAttempts = [],
   curriculumResult = null,
 }: V3ResultsViewProps) {
   const complete = payload.total_earned_points !== null
   const transcriptSegments = v3TranscriptSegments(transcript, payload, words)
   const sectionViews = v3SectionViews(payload)
+  const hasPreviousAttempts = previousAttempts.length > 0
 
   return (
-    <div className="flex flex-col gap-12 pb-12">
-      <header className="flex flex-col gap-1">
-        <h1 className="prompt-display text-muted text-lg break-words">{promptText}</h1>
-        {additionalContext ? (
-          <p className="text-muted text-xs">Context: {additionalContext}</p>
-        ) : null}
-      </header>
+    <div
+      data-result-layout="responsive"
+      className="grid grid-cols-1 items-start gap-12 pb-12 lg:grid-cols-[minmax(0,3fr)_minmax(18rem,2fr)]"
+    >
+      <section
+        aria-label="Result summary"
+        className={cn(
+          'flex min-w-0 flex-col gap-8 lg:col-start-1 lg:row-start-1',
+          !hasPreviousAttempts && 'lg:col-span-2',
+        )}
+      >
+        <header className="flex flex-col gap-1">
+          <h1 className="prompt-display text-muted text-lg break-words">{promptText}</h1>
+          {additionalContext ? (
+            <p className="text-muted text-xs">Context: {additionalContext}</p>
+          ) : null}
+        </header>
 
-      <section aria-label="Result summary" className="flex flex-col gap-6">
         <div className="flex flex-col gap-6">
           <div className="flex items-baseline gap-2">
             {complete ? (
@@ -243,10 +251,13 @@ export function V3ResultsView({
         ) : null}
       </section>
 
-      <section aria-label="Recommendation" className="flex flex-col gap-3">
+      <section
+        aria-label="Recommendation"
+        className="flex min-w-0 flex-col gap-3 lg:col-span-2 lg:row-start-2"
+      >
         <Card className="sm:p-8">
           {payload.recommendation ? (
-            <div className="flex flex-col gap-2">
+            <div className="max-w-reading flex flex-col gap-2">
               <p className="text-foreground text-base">{payload.recommendation.text}</p>
               {payload.version === V3_LEGACY_SCORE_PAYLOAD_VERSION ? (
                 <p className="text-muted text-xs">
@@ -263,96 +274,112 @@ export function V3ResultsView({
         </Card>
       </section>
 
-      <TranscriptPanel heading="Transcript" segments={transcriptSegments} />
+      <div data-result-region="transcript" className="min-w-0 lg:col-span-2 lg:row-start-3">
+        <TranscriptPanel heading="Transcript" segments={transcriptSegments} />
+      </div>
 
-      {sectionViews.map((section) => {
-        const storedSection = payload.sections[section.id]
-        return (
-          <section
-            key={section.id}
-            aria-labelledby={`${section.id}-heading`}
-            className="flex flex-col"
-          >
-            <Card className="flex flex-col gap-6 sm:p-8">
-              <div className="flex flex-col gap-3">
-                <div className="flex items-baseline justify-between gap-4">
-                  <h2
-                    id={`${section.id}-heading`}
-                    className="prompt-display text-foreground text-lg sm:text-xl"
-                  >
-                    {section.label}
-                  </h2>
-                  <p className="numeric text-muted shrink-0 text-sm">
-                    {scoreLabel(storedSection.earned_points, storedSection.max_points)}
-                  </p>
+      <div
+        data-result-layout="score-sections"
+        className="grid min-w-0 grid-cols-1 items-start gap-8 lg:col-span-2 lg:row-start-4 lg:grid-cols-2"
+      >
+        {sectionViews.map((section) => {
+          const storedSection = payload.sections[section.id]
+          return (
+            <section
+              key={section.id}
+              aria-labelledby={`${section.id}-heading`}
+              className="flex min-w-0 flex-col"
+            >
+              <Card className="flex min-w-0 flex-col gap-6 sm:p-8">
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-baseline justify-between gap-4">
+                    <h2
+                      id={`${section.id}-heading`}
+                      className="prompt-display text-foreground text-lg sm:text-xl"
+                    >
+                      {section.label}
+                    </h2>
+                    <p className="numeric text-muted shrink-0 text-sm">
+                      {scoreLabel(storedSection.earned_points, storedSection.max_points)}
+                    </p>
+                  </div>
+                  <ScoreProgress
+                    label={`${section.label} score`}
+                    value={storedSection.earned_points}
+                    max={storedSection.max_points}
+                    size="section"
+                    emptyText={
+                      storedSection.status === 'not_checked' ? 'Not checked' : 'Unavailable'
+                    }
+                  />
                 </div>
-                <ScoreProgress
-                  label={`${section.label} score`}
-                  value={storedSection.earned_points}
-                  max={storedSection.max_points}
-                  size="section"
-                  emptyText={storedSection.status === 'not_checked' ? 'Not checked' : 'Unavailable'}
-                />
-              </div>
 
-              <div className="divide-border flex flex-col divide-y">
-                {section.metrics.map((metric) => {
-                  const result = v3MetricResult(payload, metric)
-                  const status = v3MetricStatus(result)
-                  const label = V3_METRIC_LABELS[metric]
-                  const summary = v3MetricSummary(metric, result, payload.mode)
-                  const details = v3MetricDetails(metric, result, payload.mode)
-                  const hasDetails = v3MetricHasDetails(metric, result, details)
-                  const progress = (
-                    <ScoreProgress
-                      label={`${label} score`}
-                      value={result.earned_points}
-                      max={result.max_points}
-                      emptyText={result.status === 'not_checked' ? 'Not checked' : 'Unavailable'}
-                    />
-                  )
-                  const cardHeader = (
-                    <span className="flex w-full items-start justify-between gap-4">
-                      <span role="heading" aria-level={3} className="text-foreground font-medium">
-                        {label}
-                      </span>
-                      <span className="numeric text-muted shrink-0 text-sm">{status.score}</span>
-                    </span>
-                  )
-
-                  if (hasDetails) {
-                    return (
-                      <Disclosure
-                        key={metric}
-                        summary={cardHeader}
-                        hint={summary}
-                        summarySupplement={progress}
-                        showLabel={`Show ${label} details`}
-                        hideLabel={`Hide ${label} details`}
-                        variant="row"
-                        buttonClassName="items-start"
-                        contentClassName="border-border border-t"
-                      >
-                        <MetricDetails metric={metric} details={details} />
-                      </Disclosure>
+                <div className="divide-border flex min-w-0 flex-col divide-y">
+                  {section.metrics.map((metric) => {
+                    const result = v3MetricResult(payload, metric)
+                    const status = v3MetricStatus(result)
+                    const label = V3_METRIC_LABELS[metric]
+                    const summary = v3MetricSummary(metric, result, payload.mode)
+                    const details = v3MetricDetails(metric, result, payload.mode)
+                    const hasDetails = v3MetricHasDetails(metric, result, details)
+                    const progress = (
+                      <ScoreProgress
+                        label={`${label} score`}
+                        value={result.earned_points}
+                        max={result.max_points}
+                        emptyText={result.status === 'not_checked' ? 'Not checked' : 'Unavailable'}
+                      />
                     )
-                  }
+                    const cardHeader = (
+                      <span className="flex w-full items-start justify-between gap-4">
+                        <span
+                          role="heading"
+                          aria-level={3}
+                          className="text-foreground min-w-0 font-medium"
+                        >
+                          {label}
+                        </span>
+                        <span className="numeric text-muted shrink-0 text-sm">{status.score}</span>
+                      </span>
+                    )
 
-                  return (
-                    <div key={metric} className="flex flex-col gap-3 py-4">
-                      {cardHeader}
-                      <p className="text-muted text-sm">{summary}</p>
-                      {progress}
-                    </div>
-                  )
-                })}
-              </div>
-            </Card>
-          </section>
-        )
-      })}
+                    if (hasDetails) {
+                      return (
+                        <Disclosure
+                          key={metric}
+                          summary={cardHeader}
+                          hint={summary}
+                          summarySupplement={progress}
+                          showLabel={`Show ${label} details`}
+                          hideLabel={`Hide ${label} details`}
+                          variant="row"
+                          buttonClassName="items-start"
+                          contentClassName="border-border min-w-0 border-t"
+                        >
+                          <MetricDetails metric={metric} details={details} />
+                        </Disclosure>
+                      )
+                    }
 
-      <section aria-labelledby="recording-heading" className="flex flex-col gap-4">
+                    return (
+                      <div key={metric} className="flex min-w-0 flex-col gap-3 py-4">
+                        {cardHeader}
+                        <p className="text-muted text-sm break-words">{summary}</p>
+                        {progress}
+                      </div>
+                    )
+                  })}
+                </div>
+              </Card>
+            </section>
+          )
+        })}
+      </div>
+
+      <section
+        aria-labelledby="recording-heading"
+        className="flex min-w-0 flex-col gap-4 lg:col-start-1 lg:row-start-5"
+      >
         <h2 id="recording-heading" className="prompt-display text-foreground text-xl">
           Recording
         </h2>
@@ -373,37 +400,34 @@ export function V3ResultsView({
                 </li>
               ))}
             </ul>
-            {previousAttemptId ? (
-              <ButtonLink href={`/attempts/${previousAttemptId}` as Route} variant="secondary">
-                View previous response
-              </ButtonLink>
-            ) : null}
           </Card>
-        ) : previousAttemptId ? (
-          <ButtonLink href={`/attempts/${previousAttemptId}` as Route} variant="secondary">
-            View previous response
-          </ButtonLink>
         ) : null}
       </section>
 
-      <PreviousAttempts attempts={previousAttempts} />
+      <PreviousAttempts attempts={previousAttempts} className="lg:col-start-2 lg:row-start-1" />
 
-      {curriculumResult ? (
-        <div className="flex flex-col gap-2">
-          <ButtonLink href={curriculumResult.primaryAction.href} size="lg" fullWidth>
-            {curriculumResult.primaryAction.label}
-          </ButtonLink>
-          {curriculumResult.secondaryAction ? (
-            <ButtonLink href={curriculumResult.secondaryAction.href} variant="secondary" fullWidth>
-              {curriculumResult.secondaryAction.label}
+      <div className="flex min-w-0 flex-col gap-2 lg:col-start-2 lg:row-start-5 lg:pt-12">
+        {curriculumResult ? (
+          <>
+            <ButtonLink href={curriculumResult.primaryAction.href} size="lg" fullWidth>
+              {curriculumResult.primaryAction.label}
             </ButtonLink>
-          ) : null}
-        </div>
-      ) : (
-        <ButtonLink href={`/record?retry=${attemptId}`} size="lg" fullWidth>
-          Try Again
-        </ButtonLink>
-      )}
+            {curriculumResult.secondaryAction ? (
+              <ButtonLink
+                href={curriculumResult.secondaryAction.href}
+                variant="secondary"
+                fullWidth
+              >
+                {curriculumResult.secondaryAction.label}
+              </ButtonLink>
+            ) : null}
+          </>
+        ) : (
+          <ButtonLink href={`/record?retry=${attemptId}`} size="lg" fullWidth>
+            Try Again
+          </ButtonLink>
+        )}
+      </div>
     </div>
   )
 }

@@ -2,6 +2,7 @@ import type { Route } from 'next'
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import type { LessonAttemptHistoryItem } from '@/lib/results/lesson-attempt-history'
+import { cn } from '@/lib/utils'
 
 const DATE_FORMAT = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -28,11 +29,20 @@ function attemptLabel(attempt: LessonAttemptHistoryItem): string {
     : `View attempt scored ${attempt.score} out of 100 from ${time}`
 }
 
-export function PreviousAttempts({ attempts }: { attempts: readonly LessonAttemptHistoryItem[] }) {
+export function PreviousAttempts({
+  attempts,
+  className,
+}: {
+  attempts: readonly LessonAttemptHistoryItem[]
+  className?: string
+}) {
   if (attempts.length === 0) return null
 
   return (
-    <section aria-labelledby="previous-attempts-heading" className="flex min-w-0 flex-col gap-4">
+    <section
+      aria-labelledby="previous-attempts-heading"
+      className={cn('flex min-w-0 flex-col gap-4', className)}
+    >
       <h2 id="previous-attempts-heading" className="prompt-display text-foreground text-xl">
         Previous attempts
       </h2>

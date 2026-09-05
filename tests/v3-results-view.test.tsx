@@ -61,7 +61,7 @@ const curriculumResult: StructuredLessonResultModel = {
 
 describe('V3ResultsView', () => {
   it('shows structured previous attempts near the actions and omits lesson titles', () => {
-    render(
+    const { container } = render(
       <V3ResultsView
         {...props}
         payload={v3Snapshot()}
@@ -82,6 +82,54 @@ describe('V3ResultsView', () => {
     expect(link).toHaveAttribute('href', '/attempts/attempt-0')
     expect(screen.queryByText('Start clearly')).not.toBeInTheDocument()
     expect(history.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    const root = container.querySelector('[data-result-layout="responsive"]')
+    const summary = screen.getByRole('region', { name: 'Result summary' })
+    const historyRegion = screen.getByRole('region', { name: 'Previous attempts' })
+    const scoreSections = container.querySelector('[data-result-layout="score-sections"]')
+    const recommendation = screen.getByRole('region', { name: 'Recommendation' })
+    const transcript = container.querySelector('[data-result-region="transcript"]')
+    const recording = screen.getByRole('heading', { name: 'Recording' }).parentElement
+    const actions = action.parentElement
+
+    expect(root).toHaveClass('grid-cols-1', 'lg:grid-cols-[minmax(0,3fr)_minmax(18rem,2fr)]')
+    expect(summary).toHaveClass('lg:col-start-1', 'lg:row-start-1')
+    expect(historyRegion).toHaveClass('lg:col-start-2', 'lg:row-start-1')
+    expect(recommendation).toHaveClass('lg:col-span-2', 'lg:row-start-2')
+    expect(transcript).toHaveClass('lg:col-span-2', 'lg:row-start-3')
+    expect(scoreSections).toHaveClass('grid-cols-1', 'lg:grid-cols-2', 'items-start')
+    expect(recording).toHaveClass('lg:col-start-1', 'lg:row-start-5')
+    expect(actions).toHaveClass('lg:col-start-2', 'lg:row-start-5')
+    expect(
+      recommendation.compareDocumentPosition(transcript as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('keeps retry comparison context without the removed previous-response link', () => {
+    render(
+      <V3ResultsView
+        {...props}
+        payload={v3Snapshot()}
+        comparison={{
+          rows: [
+            {
+              category: 'overall',
+              label: 'Overall',
+              currentPoints: 84,
+              previousPoints: 78,
+              maxPoints: 100,
+              deltaPoints: 6,
+              withinNoise: false,
+            },
+          ],
+        }}
+      />,
+    )
+
+    expect(screen.getByLabelText('Previous response comparison')).toHaveTextContent(
+      'Overall 78 → 84',
+    )
+    expect(screen.queryByRole('link', { name: 'View previous response' })).not.toBeInTheDocument()
   })
 
   it('renders the required result sections and all ten current metrics in exact order', () => {

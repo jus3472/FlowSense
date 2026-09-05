@@ -68,21 +68,18 @@ vi.mock('@/components/results/v2-results-view', () => ({
     audioUrl,
     payload,
     comparison,
-    previousAttemptId,
     previousAttempts,
     curriculumResult,
   }: {
     audioUrl: string | null
     payload: { fixture: string }
     comparison?: unknown
-    previousAttemptId?: string | null
     previousAttempts?: readonly { attemptId: string }[]
     curriculumResult?: { lesson: { title: string } } | null
   }) => (
     <div
       data-audio={audioUrl ?? 'none'}
       data-comparison={comparison ? 'shown' : 'none'}
-      data-previous={previousAttemptId ?? 'none'}
       data-history={
         previousAttempts && previousAttempts.length > 0
           ? previousAttempts.map((item) => item.attemptId).join(',')
@@ -760,7 +757,7 @@ describe('owned attempt result loading', () => {
       options: { ancestorThrows: true },
       expectedError: THROWN_ERROR,
     },
-  ])('suppresses retry navigation after a $label', async ({ options, expectedError }) => {
+  ])('suppresses retry comparison after a $label', async ({ options, expectedError }) => {
     const setup = client({
       ...options,
       primary: {
@@ -772,7 +769,6 @@ describe('owned attempt result loading', () => {
 
     await renderPage()
 
-    expect(screen.getByTestId('v2-result')).toHaveAttribute('data-previous', 'none')
     expect(screen.getByTestId('v2-result')).toHaveAttribute('data-comparison', 'none')
     expect(mocks.logAttemptDiagnostic).toHaveBeenCalledExactlyOnceWith(
       'load_retry_ancestor',
@@ -819,6 +815,6 @@ describe('owned attempt result loading', () => {
       .filter((filter) => filter.column === 'id')
       .map((filter) => filter.value)
     expect(queriedIds).toEqual([ATTEMPT_ID, PARENT_ID, GRANDPARENT_ID])
-    expect(screen.getByTestId('v2-result')).toHaveAttribute('data-previous', PARENT_ID)
+    expect(screen.getByTestId('v2-result')).toHaveAttribute('data-comparison', 'shown')
   })
 })

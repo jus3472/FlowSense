@@ -8,7 +8,7 @@ import type { PracticeActivitySummary } from '@/lib/activity/server'
 export function AppHeader({ activity }: { activity: PracticeActivitySummary | null }) {
   return (
     <header className="border-border bg-background border-b">
-      <div className="max-w-page mx-auto grid min-h-16 w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-2 px-4 py-2 sm:grid-cols-[max-content_minmax(0,1fr)_max-content_max-content] sm:px-8 lg:px-12">
+      <div className="max-w-wide mx-auto grid min-h-16 w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-2 px-4 py-2 sm:grid-cols-[max-content_minmax(0,1fr)_max-content_max-content] sm:px-8 lg:px-12">
         <Link
           href="/home"
           className="rounded-input col-start-1 row-start-1 flex min-h-11 min-w-max items-center whitespace-nowrap"

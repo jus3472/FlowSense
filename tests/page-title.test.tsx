@@ -66,4 +66,14 @@ describe('shared page surfaces', () => {
       'rounded-card',
     )
   })
+
+  it('uses the shared wide canvas for authenticated app chrome', () => {
+    const styles = readFileSync('src/app/globals.css', 'utf8')
+    const layout = readFileSync('src/app/(app)/layout.tsx', 'utf8')
+    const header = readFileSync('src/components/layout/app-header.tsx', 'utf8')
+
+    expect(styles).toContain('--container-wide: 1200px')
+    expect(layout).toContain('className="max-w-wide')
+    expect(header).toContain('className="max-w-wide')
+  })
 })

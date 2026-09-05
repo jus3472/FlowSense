@@ -60,4 +60,28 @@ describe('PreviousAttempts', () => {
     const { container } = render(<PreviousAttempts attempts={[]} />)
     expect(container).toBeEmptyDOMElement()
   })
+
+  it('accepts responsive placement from the result layout without changing link behavior', () => {
+    render(
+      <PreviousAttempts
+        className="lg:col-start-2 lg:row-start-1"
+        attempts={[
+          {
+            attemptId: 'attempt-1',
+            score: 91,
+            finishedAt: '2026-09-04T20:42:00.000Z',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByRole('region', { name: 'Previous attempts' })).toHaveClass(
+      'lg:col-start-2',
+      'lg:row-start-1',
+    )
+    expect(screen.getByRole('link', { name: /View attempt scored 91 out of 100/ })).toHaveAttribute(
+      'href',
+      '/attempts/attempt-1',
+    )
+  })
 })

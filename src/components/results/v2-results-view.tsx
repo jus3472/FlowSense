@@ -1,5 +1,4 @@
 import { AudioPlayer } from '@/components/record/audio-player'
-import type { Route } from 'next'
 import { LessonResultSummary } from '@/components/curriculum/lesson-result-summary'
 import { PreviousAttempts } from '@/components/results/previous-attempts'
 import { TranscriptPanel } from '@/components/results/transcript-panel'
@@ -30,7 +29,6 @@ interface V2ResultsViewProps {
   audioUrl: string | null
   payload: V2ScorePayload
   comparison?: RetryComparison | null
-  previousAttemptId?: string | null
   previousAttempts?: readonly LessonAttemptHistoryItem[]
   curriculumResult?: StructuredLessonResultModel | null
 }
@@ -44,7 +42,6 @@ export function V2ResultsView({
   audioUrl,
   payload,
   comparison = null,
-  previousAttemptId = null,
   previousAttempts = [],
   curriculumResult = null,
 }: V2ResultsViewProps) {
@@ -151,25 +148,16 @@ export function V2ResultsView({
         )}
       </Card>
 
-      {comparison || previousAttemptId ? (
+      {comparison ? (
         <Card className="flex flex-col gap-3" aria-label="Previous response comparison">
-          {comparison ? <p className="text-foreground font-medium">Previous response</p> : null}
-          {comparison ? (
-            <ul className="text-muted flex flex-col gap-2 text-sm">
-              {comparison.rows.map((row) => (
-                <li key={row.category}>
-                  {row.label} {row.previousPoints} → {row.currentPoints}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-muted text-sm">Open the previous response to review it.</p>
-          )}
-          {previousAttemptId ? (
-            <ButtonLink href={`/attempts/${previousAttemptId}` as Route} variant="secondary">
-              View previous response
-            </ButtonLink>
-          ) : null}
+          <p className="text-foreground font-medium">Previous response</p>
+          <ul className="text-muted flex flex-col gap-2 text-sm">
+            {comparison.rows.map((row) => (
+              <li key={row.category}>
+                {row.label} {row.previousPoints} → {row.currentPoints}
+              </li>
+            ))}
+          </ul>
         </Card>
       ) : null}
 

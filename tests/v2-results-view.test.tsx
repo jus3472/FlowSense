@@ -239,7 +239,7 @@ describe('V2ResultsView', () => {
     expect(screen.getByText('Focus next on fluency.')).toBeInTheDocument()
   })
 
-  it('renders neutral previous-to-current rows and a separate previous-response link', () => {
+  it('renders neutral previous-to-current rows without separate previous-response navigation', () => {
     render(
       <V2ResultsView
         {...props}
@@ -257,25 +257,12 @@ describe('V2ResultsView', () => {
             },
           ],
         }}
-        previousAttemptId="attempt-0"
       />,
     )
     expect(screen.getByText('Previous response')).toBeInTheDocument()
     expect(screen.getByText('Fluency 15 → 20')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'View previous response' })).toHaveAttribute(
-      'href',
-      '/attempts/attempt-0',
-    )
+    expect(screen.queryByRole('link', { name: 'View previous response' })).not.toBeInTheDocument()
     expect(screen.queryByText(/improv|worse|better/i)).not.toBeInTheDocument()
-  })
-
-  it('keeps a previous-response link when the parent cannot be compared', () => {
-    render(<V2ResultsView {...props} payload={payload()} previousAttemptId="attempt-0" />)
-    expect(screen.getByText('Open the previous response to review it.')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'View previous response' })).toHaveAttribute(
-      'href',
-      '/attempts/attempt-0',
-    )
   })
 
   it('shows no comparison navigation when no valid parent exists', () => {
@@ -302,7 +289,6 @@ describe('V2ResultsView', () => {
             },
           ],
         }}
-        previousAttemptId="attempt-0"
       />,
     )
 
@@ -315,7 +301,7 @@ describe('V2ResultsView', () => {
     expect(screen.getByText('I took a walk.')).toBeInTheDocument()
     expect(screen.getByLabelText('Play Your answer')).toBeInTheDocument()
     expect(screen.getByText('Clarity 16 → 20')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'View previous response' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'View previous response' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Try Again' })).not.toBeInTheDocument()
   })
 })

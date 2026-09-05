@@ -140,6 +140,7 @@
   --container-column: 680px;
   --container-reading: 840px;
   --container-page: 1080px;
+  --container-wide: 1200px;
 
   --animate-skeleton: skeleton 1.6s ease-in-out infinite;
   /* The score bar fills once, quickly, and never bounces. */
