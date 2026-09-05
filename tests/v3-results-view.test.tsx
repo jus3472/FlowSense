@@ -61,7 +61,8 @@ const curriculumResult: StructuredLessonResultModel = {
 
 describe('V3ResultsView', () => {
   it('renders the required result sections and all ten current metrics in exact order', () => {
-    const { container } = render(<V3ResultsView {...props} payload={v3Snapshot()} />)
+    const payload = v3Snapshot()
+    const { container } = render(<V3ResultsView {...props} payload={payload} />)
     const headings = Array.from(container.querySelectorAll('h1, h2')).map((heading) =>
       heading.textContent?.trim(),
     )
@@ -91,6 +92,30 @@ describe('V3ResultsView', () => {
       '/record?retry=attempt-1',
     )
     expect(screen.queryByText('Review evidence')).not.toBeInTheDocument()
+
+    const overallProgress = screen.getByRole('progressbar', { name: 'Overall score' })
+    expect(overallProgress).toHaveAttribute('aria-valuemin', '0')
+    expect(overallProgress).toHaveAttribute('aria-valuemax', '100')
+    expect(overallProgress).toHaveAttribute('aria-valuenow', String(payload.total_earned_points))
+    expect(overallProgress.firstElementChild).toHaveStyle({
+      width: `${((payload.total_earned_points ?? 0) / payload.total_max_points) * 100}%`,
+    })
+
+    const whatYouSaid = payload.sections.what_you_said
+    expect(screen.getByRole('progressbar', { name: 'What You Said score' })).toHaveAttribute(
+      'aria-valuenow',
+      String(whatYouSaid.earned_points),
+    )
+    const answered = whatYouSaid.metrics.answered_prompt
+    const answeredProgress = screen.getByRole('progressbar', {
+      name: 'Answered the Prompt score',
+    })
+    expect(answeredProgress).toHaveAttribute('aria-valuemax', String(answered.max_points))
+    expect(answeredProgress).toHaveAttribute('aria-valuenow', String(answered.earned_points))
+    expect(answeredProgress.firstElementChild).toHaveStyle({
+      width: `${((answered.earned_points ?? 0) / answered.max_points) * 100}%`,
+    })
+    expect(screen.getAllByRole('progressbar')).toHaveLength(13)
   })
 
   it('shows a useful collapsed summary and an accessible disclosure that opens and closes', () => {
@@ -377,6 +402,19 @@ describe('V3ResultsView', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       'Audio playback is unavailable for this response.',
     )
+
+    for (const [label, emptyText] of [
+      ['Overall score', 'Unavailable'],
+      ['What You Said score', 'Not checked'],
+      ['How You Sounded score', 'Unavailable'],
+      ['Grammar score', 'Not checked'],
+      ['Energy score', 'Unavailable'],
+    ] as const) {
+      const progress = screen.getByRole('progressbar', { name: label })
+      expect(progress).toHaveAttribute('aria-valuetext', emptyText)
+      expect(progress).not.toHaveAttribute('aria-valuenow')
+      expect(progress).toBeEmptyDOMElement()
+    }
   })
 
   it('keeps deduction evidence clickable and uses the cleaned structured result hierarchy', () => {

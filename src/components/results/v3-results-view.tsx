@@ -5,6 +5,7 @@ import { TranscriptPanel } from '@/components/results/transcript-panel'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Disclosure } from '@/components/ui/disclosure'
+import { ScoreProgress } from '@/components/ui/score-progress'
 import type { StructuredLessonResultModel } from '@/lib/curriculum/result'
 import type { RetryComparison } from '@/lib/results/retry-comparison'
 import {
@@ -40,8 +41,8 @@ interface V3ResultsViewProps {
   curriculumResult?: StructuredLessonResultModel | null
 }
 
-function sectionScore(value: number | null): string {
-  return value === null ? 'Unavailable / 50' : `${value} / 50`
+function scoreLabel(value: number | null, max: number): string {
+  return value === null ? `Unavailable / ${max}` : `${value} / ${max}`
 }
 
 function lessonStateTitle(result: StructuredLessonResultModel): string {
@@ -160,76 +161,92 @@ export function V3ResultsView({
   const complete = payload.total_earned_points !== null
   const transcriptSegments = v3TranscriptSegments(transcript, payload)
   const sectionViews = v3SectionViews(payload)
+  const whatYouSaid = payload.sections.what_you_said.earned_points
+  const howYouSounded = payload.sections.how_you_sounded.earned_points
 
   return (
-    <div className="flex flex-col gap-8 pb-12">
+    <div className="flex flex-col gap-12 pb-12">
       <header className="flex flex-col gap-1">
-        <h1 className="prompt-display text-foreground text-2xl break-words">{promptText}</h1>
+        <h1 className="prompt-display text-muted text-lg break-words">{promptText}</h1>
         {additionalContext ? (
           <p className="text-muted text-xs">Context: {additionalContext}</p>
         ) : null}
       </header>
 
-      <section aria-label="Result summary" className="flex flex-col gap-4">
-        <Card className="flex flex-col gap-4">
-          <div>
+      <section aria-label="Result summary" className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6">
+          <div className="flex items-baseline gap-2">
             {complete ? (
-              <p className="numeric text-foreground text-4xl font-semibold">
+              <p className="numeric text-foreground text-4xl font-normal">
                 {payload.total_earned_points}
-                <span className="text-muted text-xl"> / 100</span>
+                <span className="text-muted text-lg"> / {payload.total_max_points}</span>
               </p>
             ) : (
               <p className="text-foreground text-xl font-semibold">Overall unavailable</p>
             )}
           </div>
 
-          {curriculumResult ? (
-            <div className="border-border flex flex-col gap-3 border-t pt-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-foreground text-lg font-semibold">
-                    {lessonStateTitle(curriculumResult)}
-                  </h2>
-                </div>
-                {curriculumResult.currentStars > 0 ? (
-                  <CurriculumStars stars={curriculumResult.currentStars} />
-                ) : null}
+          <ScoreProgress
+            label="Overall score"
+            value={payload.total_earned_points}
+            max={payload.total_max_points}
+            size="overall"
+          />
+
+          {whatYouSaid !== null && howYouSounded !== null ? (
+            <p className="text-muted text-base">
+              <span className="numeric">{whatYouSaid}</span> for What You Said,{' '}
+              <span className="numeric">{howYouSounded}</span> for How You Sounded
+            </p>
+          ) : null}
+        </div>
+
+        {curriculumResult ? (
+          <Card className="flex flex-col gap-3 sm:p-8">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-foreground text-lg font-semibold">
+                  {lessonStateTitle(curriculumResult)}
+                </h2>
               </div>
-
-              {curriculumResult.state === 'neutral' ? (
-                <p className="text-muted text-sm">
-                  Some checks could not be completed, so this attempt does not affect your lesson
-                  progress.
-                </p>
-              ) : null}
-
-              {curriculumResult.bestScore !== null ? (
-                <div className="flex flex-wrap items-center gap-3 text-sm">
-                  <span className="text-foreground">
-                    Best: <span className="numeric">{curriculumResult.bestScore}</span>
-                  </span>
-                  <CurriculumStars stars={curriculumResult.bestStars} />
-                  {curriculumResult.personalBest ? (
-                    <span className="text-accent font-medium">Personal best</span>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {curriculumResult.state === 'not_passed' ? (
-                <p className="text-muted text-sm">Need 70 to continue.</p>
-              ) : null}
-              {curriculumResult.state === 'passed' ? (
-                curriculumResult.pathComplete ? (
-                  <p className="text-foreground font-medium">Path complete</p>
-                ) : null
+              {curriculumResult.currentStars > 0 ? (
+                <CurriculumStars stars={curriculumResult.currentStars} />
               ) : null}
             </div>
-          ) : null}
-        </Card>
+
+            {curriculumResult.state === 'neutral' ? (
+              <p className="text-muted text-sm">
+                Some checks could not be completed, so this attempt does not affect your lesson
+                progress.
+              </p>
+            ) : null}
+
+            {curriculumResult.bestScore !== null ? (
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <span className="text-foreground">
+                  Best: <span className="numeric">{curriculumResult.bestScore}</span>
+                </span>
+                <CurriculumStars stars={curriculumResult.bestStars} />
+                {curriculumResult.personalBest ? (
+                  <span className="text-accent font-medium">Personal best</span>
+                ) : null}
+              </div>
+            ) : null}
+
+            {curriculumResult.state === 'not_passed' ? (
+              <p className="text-muted text-sm">Need 70 to continue.</p>
+            ) : null}
+            {curriculumResult.state === 'passed' ? (
+              curriculumResult.pathComplete ? (
+                <p className="text-foreground font-medium">Path complete</p>
+              ) : null
+            ) : null}
+          </Card>
+        ) : null}
       </section>
 
       <section aria-label="Recommendation" className="flex flex-col gap-3">
-        <Card>
+        <Card className="sm:p-8">
           {payload.recommendation ? (
             <div className="flex flex-col gap-2">
               <p className="text-foreground text-base">{payload.recommendation.text}</p>
@@ -256,64 +273,89 @@ export function V3ResultsView({
           <section
             key={section.id}
             aria-labelledby={`${section.id}-heading`}
-            className="flex flex-col gap-4"
+            className="flex flex-col"
           >
-            <div className="flex items-baseline justify-between gap-4">
-              <h2 id={`${section.id}-heading`} className="text-foreground text-xl font-semibold">
-                {section.label}
-              </h2>
-              <p className="numeric text-muted text-sm">
-                {sectionScore(storedSection.earned_points)}
-              </p>
-            </div>
+            <Card className="flex flex-col gap-6 sm:p-8">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-baseline justify-between gap-4">
+                  <h2
+                    id={`${section.id}-heading`}
+                    className="prompt-display text-foreground text-lg sm:text-xl"
+                  >
+                    {section.label}
+                  </h2>
+                  <p className="numeric text-muted shrink-0 text-sm">
+                    {scoreLabel(storedSection.earned_points, storedSection.max_points)}
+                  </p>
+                </div>
+                <ScoreProgress
+                  label={`${section.label} score`}
+                  value={storedSection.earned_points}
+                  max={storedSection.max_points}
+                  size="section"
+                  emptyText={storedSection.status === 'not_checked' ? 'Not checked' : 'Unavailable'}
+                />
+              </div>
 
-            <div className="flex flex-col gap-3">
-              {section.metrics.map((metric) => {
-                const result = v3MetricResult(payload, metric)
-                const status = v3MetricStatus(result)
-                const label = V3_METRIC_LABELS[metric]
-                const summary = v3MetricSummary(metric, result, payload.mode)
-                const details = v3MetricDetails(metric, result, payload.mode)
-                const hasDetails = v3MetricHasDetails(metric, result, details)
-                const cardHeader = (
-                  <span className="flex w-full items-start justify-between gap-4">
-                    <span role="heading" aria-level={3} className="text-foreground font-medium">
-                      {label}
-                    </span>
-                    <span className="numeric text-muted shrink-0 text-sm">{status.score}</span>
-                  </span>
-                )
-
-                if (hasDetails) {
-                  return (
-                    <Disclosure
-                      key={metric}
-                      summary={cardHeader}
-                      hint={summary}
-                      showLabel={`Show ${label} details`}
-                      hideLabel={`Hide ${label} details`}
-                      buttonClassName="items-start py-6"
-                      contentClassName="border-border border-t pt-6"
-                    >
-                      <MetricDetails metric={metric} details={details} />
-                    </Disclosure>
+              <div className="divide-border flex flex-col divide-y">
+                {section.metrics.map((metric) => {
+                  const result = v3MetricResult(payload, metric)
+                  const status = v3MetricStatus(result)
+                  const label = V3_METRIC_LABELS[metric]
+                  const summary = v3MetricSummary(metric, result, payload.mode)
+                  const details = v3MetricDetails(metric, result, payload.mode)
+                  const hasDetails = v3MetricHasDetails(metric, result, details)
+                  const progress = (
+                    <ScoreProgress
+                      label={`${label} score`}
+                      value={result.earned_points}
+                      max={result.max_points}
+                      emptyText={result.status === 'not_checked' ? 'Not checked' : 'Unavailable'}
+                    />
                   )
-                }
+                  const cardHeader = (
+                    <span className="flex w-full items-start justify-between gap-4">
+                      <span role="heading" aria-level={3} className="text-foreground font-medium">
+                        {label}
+                      </span>
+                      <span className="numeric text-muted shrink-0 text-sm">{status.score}</span>
+                    </span>
+                  )
 
-                return (
-                  <Card key={metric}>
-                    {cardHeader}
-                    <p className="text-muted mt-2 text-sm">{summary}</p>
-                  </Card>
-                )
-              })}
-            </div>
+                  if (hasDetails) {
+                    return (
+                      <Disclosure
+                        key={metric}
+                        summary={cardHeader}
+                        hint={summary}
+                        summarySupplement={progress}
+                        showLabel={`Show ${label} details`}
+                        hideLabel={`Hide ${label} details`}
+                        variant="row"
+                        buttonClassName="items-start"
+                        contentClassName="border-border border-t"
+                      >
+                        <MetricDetails metric={metric} details={details} />
+                      </Disclosure>
+                    )
+                  }
+
+                  return (
+                    <div key={metric} className="flex flex-col gap-3 py-4">
+                      {cardHeader}
+                      <p className="text-muted text-sm">{summary}</p>
+                      {progress}
+                    </div>
+                  )
+                })}
+              </div>
+            </Card>
           </section>
         )
       })}
 
       <section aria-labelledby="recording-heading" className="flex flex-col gap-4">
-        <h2 id="recording-heading" className="text-foreground text-xl font-semibold">
+        <h2 id="recording-heading" className="prompt-display text-foreground text-xl">
           Recording
         </h2>
         {audioUrl ? <AudioPlayer src={audioUrl} durationMs={durationMs} /> : null}

@@ -24,8 +24,8 @@ export function TranscriptPanel({
 
   return (
     <section className="flex flex-col gap-3">
-      {heading ? <h2 className="text-foreground text-xl font-semibold">{heading}</h2> : null}
-      <div className="bg-surface rounded-card p-8">
+      {heading ? <h2 className="prompt-display text-foreground text-xl">{heading}</h2> : null}
+      <div className="bg-surface rounded-card p-6 sm:p-8">
         <p className="text-foreground text-lg leading-loose">
           {segments.map((segment, index) => {
             if (segment.type === 'text') return <span key={index}>{segment.text}</span>

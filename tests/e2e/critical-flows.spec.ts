@@ -332,6 +332,10 @@ test('records once, shows processing and v3 results, retries, compares, filters,
   await expect(page.getByRole('heading', { name: 'Recommendation' })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'What You Said' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'How You Sounded' })).toBeVisible()
+  const overallProgress = page.getByRole('progressbar', { name: 'Overall score' })
+  await expect(overallProgress).toHaveAttribute('aria-valuemin', '0')
+  await expect(overallProgress).toHaveAttribute('aria-valuemax', '100')
+  await expect(overallProgress).toHaveAttribute('aria-valuenow', /\d+/)
   for (const metric of [
     'Answered the Prompt',
     'Specificity',
@@ -345,7 +349,12 @@ test('records once, shows processing and v3 results, retries, compares, filters,
     'Energy',
   ]) {
     await expect(page.getByRole('heading', { name: metric })).toBeVisible()
+    await expect(page.getByRole('progressbar', { name: `${metric} score` })).toHaveAttribute(
+      'aria-valuenow',
+      /\d+/,
+    )
   }
+  await expect(page.getByRole('progressbar')).toHaveCount(13)
   await expect(page.getByRole('heading', { name: 'Time to First Word' })).toHaveCount(0)
   await expect(page.getByText('Review evidence', { exact: true })).toHaveCount(0)
   const paceDetails = page.getByRole('button', { name: 'Show Pace details' })
@@ -361,6 +370,20 @@ test('records once, shows processing and v3 results, retries, compares, filters,
     'aria-expanded',
     'false',
   )
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport)
+    await expect(page.getByRole('progressbar', { name: 'Overall score' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'What You Said' })).toBeVisible()
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true)
+  }
   expect(attemptPosts).toBe(1)
   const firstState = await currentState(page.request)
   expect(firstState.uploads).toBe(1)

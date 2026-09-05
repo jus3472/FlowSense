@@ -6,10 +6,12 @@ import { cn } from '@/lib/utils'
 interface DisclosureProps {
   summary: ReactNode
   hint?: ReactNode
+  summarySupplement?: ReactNode
   children: ReactNode
   defaultOpen?: boolean
   showLabel?: string
   hideLabel?: string
+  variant?: 'card' | 'row'
   className?: string
   buttonClassName?: string
   contentClassName?: string
@@ -19,19 +21,22 @@ interface DisclosureProps {
 export function Disclosure({
   summary,
   hint,
+  summarySupplement,
   children,
   defaultOpen = false,
   showLabel,
   hideLabel,
+  variant = 'card',
   className,
   buttonClassName,
   contentClassName,
 }: DisclosureProps) {
   const [open, setOpen] = useState(defaultOpen)
   const id = useId()
+  const row = variant === 'row'
 
   return (
-    <div className={cn('bg-surface rounded-card flex flex-col', className)}>
+    <div className={cn(row ? 'flex flex-col' : 'bg-surface rounded-card flex flex-col', className)}>
       <button
         type="button"
         aria-expanded={open}
@@ -39,7 +44,9 @@ export function Disclosure({
         aria-label={open ? hideLabel : showLabel}
         onClick={() => setOpen((value) => !value)}
         className={cn(
-          'rounded-card flex items-center justify-between gap-4 px-6 pt-6 pb-4 text-left',
+          row
+            ? 'rounded-input flex items-center justify-between gap-4 py-4 text-left'
+            : 'rounded-card flex items-center justify-between gap-4 px-6 pt-6 pb-4 text-left',
           buttonClassName,
         )}
       >
@@ -56,8 +63,17 @@ export function Disclosure({
           <path d="M5.3 7.3 10 12l4.7-4.7-1.4-1.4L10 9.2 6.7 5.9z" />
         </svg>
       </button>
+      {summarySupplement ? (
+        <div className={row ? 'pb-4' : 'px-6 pb-4'}>{summarySupplement}</div>
+      ) : null}
       {open ? (
-        <div id={id} className={cn('flex flex-col gap-4 px-6 pt-3 pb-6', contentClassName)}>
+        <div
+          id={id}
+          className={cn(
+            row ? 'flex flex-col gap-4 py-4' : 'flex flex-col gap-4 px-6 pt-3 pb-6',
+            contentClassName,
+          )}
+        >
           {children}
         </div>
       ) : null}
