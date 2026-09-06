@@ -216,16 +216,18 @@ export function buildCurriculumPathProgress({
   for (const [index, item] of ordered.entries()) {
     const stored = progressByLesson.get(item.lesson.id) ?? null
     const unlocked = index === 0 || lessons[index - 1]?.passed === true
-    if (!unlocked && (stored !== null || neutralLessonIds.has(item.lesson.id))) {
+    if (!unlocked && stored !== null) {
       return invalidProgress(
         'unreachable_progress',
-        'A locked lesson cannot contain structured progress or attempt evidence.',
+        'A locked lesson cannot contain structured progress.',
       )
     }
 
     const bestScore = stored?.bestScore ?? null
-    const attemptStatus =
-      stored !== null ? 'scored' : neutralLessonIds.has(item.lesson.id) ? 'neutral' : 'none'
+    // Attempts on a lesson that became locked after deletion remain available
+    // in History, but they cannot make the current Track look attempted.
+    const hasNeutralEvidence = unlocked && neutralLessonIds.has(item.lesson.id)
+    const attemptStatus = stored !== null ? 'scored' : hasNeutralEvidence ? 'neutral' : 'none'
     lessons.push({
       lesson: item.lesson,
       state: lessonStateFor({ unlocked, bestScore }),

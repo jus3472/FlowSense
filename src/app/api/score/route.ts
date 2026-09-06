@@ -1,10 +1,7 @@
 import { NextResponse } from 'next/server'
 import { apiError } from '@/lib/api/responses'
 import { recordPracticeActivityDay } from '@/lib/activity/server'
-import {
-  ATTEMPT_FAILURE_CODES,
-  canRunScoring,
-} from '@/lib/attempts/lifecycle'
+import { ATTEMPT_FAILURE_CODES, canRunScoring } from '@/lib/attempts/lifecycle'
 import {
   authenticatedAttemptContext,
   logAttemptDiagnostic,
@@ -269,6 +266,7 @@ export async function POST(request: Request) {
       }
 
       await recordPracticeActivityDay(admin, userId, {
+        attemptId,
         status: 'done',
         durationMs: attempt.duration_ms,
         transcript: attempt.transcript,

@@ -9,6 +9,7 @@ import type { Database } from '@/lib/types/database'
 const ACTIVITY_PAGE_SIZE = 366
 
 export interface PracticeActivityAttempt {
+  attemptId: string
   status: unknown
   durationMs: unknown
   transcript: unknown
@@ -23,9 +24,7 @@ export interface PracticeActivitySummary extends ActivityStreak {
 }
 
 export type RecordPracticeActivityOutcome =
-  | { status: 'recorded'; localDate: string; timezone: string }
-  | { status: 'skipped'; reason: string }
-  | { status: 'failure' }
+  { status: 'recorded' } | { status: 'skipped'; reason: string } | { status: 'failure' }
 
 export type PracticeActivityLoadOutcome =
   | { status: 'ready'; data: PracticeActivitySummary }
@@ -70,29 +69,24 @@ export async function recordPracticeActivityDay(
   admin: SupabaseClient<Database>,
   userId: string,
   attempt: PracticeActivityAttempt,
-  completedAt: Date = new Date(),
 ): Promise<RecordPracticeActivityOutcome> {
   const classification = classifySpeakingActivity(attempt)
   if (!isSpeakingActivity(classification)) {
     return { status: 'skipped', reason: classification.reason }
   }
 
-  const timezone = await readTimezone(admin, userId)
-  const localDate = localDateKey(completedAt, timezone)
   try {
-    const { error } = await admin.from('practice_activity_days').upsert(
-      {
-        user_id: userId,
-        local_date: localDate,
-        timezone,
-      },
-      { onConflict: 'user_id,local_date', ignoreDuplicates: true },
-    )
+    const { data, error } = await admin.rpc('record_practice_activity_for_attempt', {
+      target_user_id: userId,
+      target_attempt_id: attempt.attemptId,
+    })
     if (error) {
       logActivityFailure('record_day', error)
       return { status: 'failure' }
     }
-    return { status: 'recorded', localDate, timezone }
+    return data
+      ? { status: 'recorded' }
+      : { status: 'skipped', reason: 'attempt_missing_or_invalid' }
   } catch (error) {
     logActivityFailure('record_day', error)
     return { status: 'failure' }

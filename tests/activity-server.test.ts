@@ -41,6 +41,10 @@ function setupClient(options: SetupOptions = {}) {
   }
   const client = {
     from: vi.fn((table: string) => (table === 'profiles' ? profile : activity)),
+    rpc: vi.fn(async () => ({
+      data: options.activityError ? null : true,
+      error: options.activityError ?? null,
+    })),
   }
   return { client, profile, activity, upserts }
 }
@@ -56,6 +60,7 @@ function attempt(overrides: Record<string, unknown> = {}) {
         ? sectionScores.total_earned_points
         : null
   return {
+    attemptId: '10000000-0000-4000-8000-000000000001',
     status: 'done',
     durationMs: 30_000,
     transcript: 'A complete speaking response.',
@@ -81,25 +86,12 @@ describe('recordPracticeActivityDay', () => {
     const setup = setupClient({ timezone: 'America/New_York' })
 
     await expect(
-      recordPracticeActivityDay(
-        setup.client as never,
-        'user-1',
-        input,
-        new Date('2026-08-28T03:30:00.000Z'),
-      ),
-    ).resolves.toEqual({
-      status: 'recorded',
-      localDate: '2026-08-27',
-      timezone: 'America/New_York',
+      recordPracticeActivityDay(setup.client as never, 'user-1', input),
+    ).resolves.toEqual({ status: 'recorded' })
+    expect(setup.client.rpc).toHaveBeenCalledWith('record_practice_activity_for_attempt', {
+      target_user_id: 'user-1',
+      target_attempt_id: input.attemptId,
     })
-    expect(setup.activity.upsert).toHaveBeenCalledWith(
-      {
-        user_id: 'user-1',
-        local_date: '2026-08-27',
-        timezone: 'America/New_York',
-      },
-      { onConflict: 'user_id,local_date', ignoreDuplicates: true },
-    )
   })
 
   it.each([
@@ -116,19 +108,15 @@ describe('recordPracticeActivityDay', () => {
       attempt(overrides),
     )
     expect(result.status).toBe('skipped')
-    expect(setup.activity.upsert).not.toHaveBeenCalled()
+    expect(setup.client.rpc).not.toHaveBeenCalled()
   })
 
-  it('uses UTC when no profile timezone is available', async () => {
-    const setup = setupClient({ profileError: { code: 'PGRST500' } })
-    vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const result = await recordPracticeActivityDay(
-      setup.client as never,
-      'user-1',
-      attempt(),
-      new Date('2026-08-28T23:30:00.000Z'),
-    )
-    expect(result).toMatchObject({ status: 'recorded', localDate: '2026-08-28', timezone: 'UTC' })
+  it('skips a row when deletion wins before the lock-aware ledger write', async () => {
+    const setup = setupClient()
+    setup.client.rpc.mockResolvedValueOnce({ data: false, error: null })
+    await expect(
+      recordPracticeActivityDay(setup.client as never, 'user-1', attempt()),
+    ).resolves.toEqual({ status: 'skipped', reason: 'attempt_missing_or_invalid' })
   })
 
   it('keeps a completed attempt successful when the ledger insert fails', async () => {

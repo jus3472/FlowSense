@@ -28,7 +28,7 @@ function adminClient(
     metrics: unknown
     status: string
     failure_code: string | null
-  } = {
+  } | null = {
     id: ATTEMPT_ID,
     audio_path: null,
     metrics: null,
@@ -41,6 +41,17 @@ function adminClient(
     error: null,
   },
   storageStillExists = storageError !== null,
+  deletionReceipt: {
+    deleted: boolean
+    lesson_id: string | null
+    best_attempt_id: string | null
+    path_slug: string | null
+  } = {
+    deleted: true,
+    lesson_id: null,
+    best_attempt_id: null,
+    path_slug: null,
+  },
 ) {
   const readQuery = {
     select: vi.fn(),
@@ -52,16 +63,6 @@ function adminClient(
   }
   readQuery.select.mockReturnValue(readQuery)
   readQuery.eq.mockReturnValue(readQuery)
-
-  const deleteQuery = {
-    delete: vi.fn(),
-    eq: vi.fn(),
-    select: vi.fn(),
-    maybeSingle: vi.fn(async () => deleteResult),
-  }
-  deleteQuery.delete.mockReturnValue(deleteQuery)
-  deleteQuery.eq.mockReturnValue(deleteQuery)
-  deleteQuery.select.mockReturnValue(deleteQuery)
 
   const claimQuery = {
     update: vi.fn(),
@@ -76,17 +77,16 @@ function adminClient(
   claimQuery.select.mockReturnValue(claimQuery)
 
   const needsClaim =
+    attempt !== null &&
     (attempt.status === 'failed' || attempt.status === 'timed_out') &&
     attempt.failure_code !== ATTEMPT_FAILURE_CODES.deletionInProgress
   const queries: object[] = [readQuery]
   if (needsClaim) queries.push(claimQuery)
-  if (
-    (!storageError || !storageStillExists) &&
-    !['uploading', 'transcribing', 'scoring'].includes(attempt.status)
-  ) {
-    queries.push(deleteQuery)
-  }
   const from = vi.fn().mockImplementation(() => queries.shift())
+  const rpc = vi.fn(async () => ({
+    data: deleteResult.data ? [deletionReceipt] : null,
+    error: deleteResult.error,
+  }))
   const remove = vi.fn(async () => ({ error: storageError }))
   const list = vi.fn(async () => ({
     data: storageStillExists ? [{ name: `${ATTEMPT_ID}.webm` }] : [],
@@ -94,9 +94,10 @@ function adminClient(
   }))
   const storageFrom = vi.fn(() => ({ list, remove }))
   return {
-    admin: { from, storage: { from: storageFrom } },
+    admin: { from, rpc, storage: { from: storageFrom } },
+    readQuery,
     claimQuery,
-    deleteQuery,
+    rpc,
     list,
     remove,
   }
@@ -119,8 +120,64 @@ describe('attempt deletion cache invalidation', () => {
     })
 
     expect(response.status).toBe(200)
-    expect(setup.deleteQuery.maybeSingle).toHaveBeenCalledOnce()
-    expect(mocks.revalidatePath.mock.calls).toEqual([['/home'], ['/history'], ['/progress']])
+    expect(setup.rpc).toHaveBeenCalledWith('delete_owned_attempt_and_rebuild', {
+      target_user_id: USER_ID,
+      target_attempt_id: ATTEMPT_ID,
+    })
+    expect(mocks.revalidatePath.mock.calls).toEqual([
+      ['/home'],
+      ['/history'],
+      ['/progress'],
+      ['/practice'],
+    ])
+  })
+
+  it('treats an owned-scope miss as an idempotent delete without touching Storage or data', async () => {
+    const setup = adminClient({ data: { id: ATTEMPT_ID }, error: null }, null)
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+
+    const response = await DELETE(new Request('http://localhost'), {
+      params: Promise.resolve({ id: ATTEMPT_ID }),
+    })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ ok: true, redirectTo: '/history' })
+    expect(setup.readQuery.eq).toHaveBeenCalledWith('user_id', USER_ID)
+    expect(setup.remove).not.toHaveBeenCalled()
+    expect(setup.rpc).not.toHaveBeenCalled()
+  })
+
+  it('returns the best surviving structured result and revalidates its Track', async () => {
+    const setup = adminClient(
+      { data: { id: ATTEMPT_ID }, error: null },
+      {
+        id: ATTEMPT_ID,
+        audio_path: null,
+        metrics: null,
+        status: 'done',
+        failure_code: null,
+      },
+      null,
+      { data: { id: ATTEMPT_ID }, error: null },
+      false,
+      {
+        deleted: true,
+        lesson_id: 'lesson-1',
+        best_attempt_id: 'best-survivor',
+        path_slug: 'conversations',
+      },
+    )
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+
+    const response = await DELETE(new Request('http://localhost'), {
+      params: Promise.resolve({ id: ATTEMPT_ID }),
+    })
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      redirectTo: '/attempts/best-survivor',
+    })
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/practice/paths/conversations')
   })
 
   it('does not invalidate cached routes when the row deletion fails', async () => {
@@ -167,7 +224,7 @@ describe('attempt deletion cache invalidation', () => {
     )
     expect(setup.remove).toHaveBeenCalledWith([storagePath])
     expect(setup.remove.mock.invocationCallOrder[0]).toBeLessThan(
-      setup.deleteQuery.delete.mock.invocationCallOrder[0]!,
+      setup.rpc.mock.invocationCallOrder[0]!,
     )
   })
 
@@ -196,7 +253,7 @@ describe('attempt deletion cache invalidation', () => {
     expect(setup.claimQuery.update).toHaveBeenCalledWith({
       failure_code: ATTEMPT_FAILURE_CODES.deletionInProgress,
     })
-    expect(setup.deleteQuery.delete).not.toHaveBeenCalled()
+    expect(setup.rpc).not.toHaveBeenCalled()
     expect(mocks.revalidatePath).not.toHaveBeenCalled()
   })
 
@@ -221,7 +278,34 @@ describe('attempt deletion cache invalidation', () => {
     expect(response.status).toBe(409)
     expect(setup.claimQuery.update).not.toHaveBeenCalled()
     expect(setup.remove).not.toHaveBeenCalled()
-    expect(setup.deleteQuery.delete).not.toHaveBeenCalled()
+    expect(setup.rpc).not.toHaveBeenCalled()
+  })
+
+  it('fails closed for an invalid immutable upload claim when audio_path is null', async () => {
+    const setup = adminClient(
+      { data: { id: ATTEMPT_ID }, error: null },
+      {
+        id: ATTEMPT_ID,
+        audio_path: null,
+        status: 'failed',
+        failure_code: ATTEMPT_FAILURE_CODES.clientUploadAbandoned,
+        metrics: {
+          upload: {
+            storage_path: `another-user/${ATTEMPT_ID}.webm`,
+            mime_type: 'audio/webm;codecs=opus',
+          },
+        },
+      },
+    )
+    mocks.authenticatedAttemptContext.mockResolvedValue({ userId: USER_ID, admin: setup.admin })
+
+    const response = await DELETE(new Request('http://localhost'), {
+      params: Promise.resolve({ id: ATTEMPT_ID }),
+    })
+
+    expect(response.status).toBe(409)
+    expect(setup.remove).not.toHaveBeenCalled()
+    expect(setup.rpc).not.toHaveBeenCalled()
   })
 
   it.each(['uploading', 'transcribing', 'scoring'])(
@@ -248,7 +332,7 @@ describe('attempt deletion cache invalidation', () => {
 
       expect(response.status).toBe(409)
       expect(setup.remove).not.toHaveBeenCalled()
-      expect(setup.deleteQuery.delete).not.toHaveBeenCalled()
+      expect(setup.rpc).not.toHaveBeenCalled()
       expect(mocks.revalidatePath).not.toHaveBeenCalled()
     },
   )
@@ -277,7 +361,7 @@ describe('attempt deletion cache invalidation', () => {
 
     expect(response.status).toBe(409)
     expect(setup.remove).not.toHaveBeenCalled()
-    expect(setup.deleteQuery.delete).not.toHaveBeenCalled()
+    expect(setup.rpc).not.toHaveBeenCalled()
   })
 
   it('retries cleanup idempotently when an earlier delete left its claim in place', async () => {
@@ -303,7 +387,7 @@ describe('attempt deletion cache invalidation', () => {
     expect(response.status).toBe(200)
     expect(setup.claimQuery.update).not.toHaveBeenCalled()
     expect(setup.remove).toHaveBeenCalledWith([storagePath])
-    expect(setup.deleteQuery.delete).toHaveBeenCalledOnce()
+    expect(setup.rpc).toHaveBeenCalledOnce()
   })
 
   it('finishes deleting a claimed row when Storage reports an already-absent object', async () => {
@@ -334,6 +418,6 @@ describe('attempt deletion cache invalidation', () => {
       limit: 100,
       search: `${ATTEMPT_ID}.webm`,
     })
-    expect(setup.deleteQuery.delete).toHaveBeenCalledOnce()
+    expect(setup.rpc).toHaveBeenCalledOnce()
   })
 })

@@ -16,6 +16,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh }),
 }))
 vi.mock('@/actions/auth', () => ({ logOut: vi.fn() }))
+vi.mock('@/actions/account', () => ({ deleteAccount: vi.fn(), resetProgress: vi.fn() }))
 vi.mock('@/actions/profile', () => ({ updateProfile: vi.fn() }))
 vi.mock('@/actions/onboarding', () => ({ saveFocusAreas: vi.fn() }))
 

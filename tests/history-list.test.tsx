@@ -116,6 +116,9 @@ describe('HistoryList', () => {
 
     const dialog = await screen.findByRole('alertdialog', { name: 'Delete this response?' })
     expect(dialog).toHaveAttribute('aria-modal', 'true')
+    expect(dialog).toHaveAccessibleDescription(
+      'This response, its recording, and its score will be permanently deleted. Your Progress, streak, stars, and lesson unlocks may change.',
+    )
     const coveredLink = screen.getByText('Describe a place you know well.').closest('a')
     expect(coveredLink).toHaveAttribute('aria-hidden', 'true')
     expect(coveredLink).toHaveAttribute('tabindex', '-1')
@@ -188,8 +191,8 @@ describe('HistoryList', () => {
   it('keeps dialog controls focusable while busy, then announces success and focuses a remaining row', async () => {
     let finishDelete: (() => void) | undefined
     vi.mocked(deleteAttempt).mockReturnValueOnce(
-      new Promise<void>((resolve) => {
-        finishDelete = resolve
+      new Promise((resolve) => {
+        finishDelete = () => resolve({ redirectTo: '/history' })
       }),
     )
     render(
@@ -233,7 +236,7 @@ describe('HistoryList', () => {
   })
 
   it('focuses the History container after deleting the final visible row', async () => {
-    vi.mocked(deleteAttempt).mockResolvedValueOnce()
+    vi.mocked(deleteAttempt).mockResolvedValueOnce({ redirectTo: '/history' })
     render(<HistoryList {...timeContext} entries={entries} focusPhrase="with less filler" />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))

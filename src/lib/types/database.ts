@@ -240,9 +240,35 @@ export type Database = {
     }
     Views: { [_ in never]: never }
     Functions: {
+      assert_my_data_deletion_safe: {
+        Args: Record<never, never>
+        Returns: undefined
+      }
+      delete_owned_attempt_and_rebuild: {
+        Args: { target_user_id: string; target_attempt_id: string }
+        Returns: {
+          deleted: boolean
+          lesson_id: string | null
+          best_attempt_id: string | null
+          path_slug: string | null
+        }[]
+      }
       replace_profile_path_preferences: {
         Args: { path_ids: string[] }
         Returns: undefined
+      }
+      record_practice_activity_for_attempt: {
+        Args: { target_user_id: string; target_attempt_id: string }
+        Returns: boolean
+      }
+      reset_my_progress: {
+        Args: Record<never, never>
+        Returns: {
+          attempts_deleted: number
+          lesson_progress_deleted: number
+          activity_days_deleted: number
+          recording_claims: Json
+        }[]
       }
     }
     Enums: { [_ in never]: never }

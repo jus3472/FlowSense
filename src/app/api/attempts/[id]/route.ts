@@ -20,10 +20,19 @@ import {
 import { parseCaptureMetrics } from '@/lib/recording/capture-payload'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { isUuid } from '@/lib/practice/session'
+import { deletedAttemptDestination, parseAttemptDeletionReceipt } from '@/lib/results/deletion'
 import type { AttemptMetrics } from '@/lib/types/metrics'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function hasStoredUploadPath(metrics: unknown): boolean {
+  return (
+    isRecord(metrics) &&
+    isRecord(metrics.upload) &&
+    Object.prototype.hasOwnProperty.call(metrics.upload, 'storage_path')
+  )
 }
 
 async function recordingExists(
@@ -198,7 +207,13 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     logAttemptDiagnostic('load_delete_attempt', 'attempt_read_failed', id, readError)
     return apiError('The response could not be deleted.', 500)
   }
-  if (!attempt) return apiError('That attempt does not exist.', 404)
+  if (!attempt) {
+    revalidatePath('/home')
+    revalidatePath('/history')
+    revalidatePath('/progress')
+    revalidatePath('/practice')
+    return NextResponse.json({ ok: true, redirectTo: '/history' })
+  }
   if (isActiveAttemptStatus(attempt.status)) {
     return apiError('That response is still processing and cannot be deleted yet.', 409)
   }
@@ -215,7 +230,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
         attemptId: attempt.id,
         metrics: attempt.metrics,
       })
-  if (attempt.audio_path && !ownedAudio) {
+  if ((attempt.audio_path !== null || hasStoredUploadPath(attempt.metrics)) && !ownedAudio) {
     logAttemptDiagnostic('delete_recording', ATTEMPT_FAILURE_CODES.recordingPathInvalid, id)
     return apiError('The saved recording path could not be verified.', 409)
   }
@@ -228,35 +243,32 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
   if (ownedAudio) {
     const { error } = await admin.storage.from(RECORDINGS_BUCKET).remove([ownedAudio.storagePath])
-    if (error) {
-      // Bulk deletion is intended to be idempotent. If Storage reports an
-      // error after another delete already removed this exact object, finishing
-      // the claimed row deletion is still safe.
-      const presence = await recordingExists(admin, userId, ownedAudio.storagePath)
-      if (presence.failed || presence.exists) {
-        logAttemptDiagnostic('delete_recording', 'recording_delete_failed', id, error)
-        return apiError('The response could not be deleted.', 500)
-      }
+    // Storage deletion is idempotent. Always verify absence so a false-success
+    // response cannot commit the database deletion while leaving a known object.
+    const presence = await recordingExists(admin, userId, ownedAudio.storagePath)
+    if (presence.failed || presence.exists) {
+      logAttemptDiagnostic('delete_recording', 'recording_delete_failed', id, error)
+      return apiError('The response could not be deleted.', 500)
     }
   }
 
-  let deleteQuery = admin
-    .from('attempts')
-    .delete()
-    .eq('id', id)
-    .eq('user_id', userId)
-    .eq('status', claim.attemptStatus)
-  if (claim.attemptStatus !== 'done') {
-    deleteQuery = deleteQuery.eq('failure_code', ATTEMPT_FAILURE_CODES.deletionInProgress)
-  }
-  const { data, error } = await deleteQuery.select('id').maybeSingle()
-  if (error || !data) {
-    logAttemptDiagnostic('delete_attempt', 'attempt_delete_failed', id, error)
-    return apiError('The response could not be deleted.', error ? 500 : 409)
+  const { data, error } = await admin.rpc('delete_owned_attempt_and_rebuild', {
+    target_user_id: userId,
+    target_attempt_id: id,
+  })
+  const receipt = parseAttemptDeletionReceipt(data)
+  if (error || receipt === null) {
+    logAttemptDiagnostic('delete_attempt', 'attempt_delete_rebuild_failed', id, error)
+    return apiError('The response could not be deleted.', 500)
   }
 
   revalidatePath('/home')
   revalidatePath('/history')
   revalidatePath('/progress')
-  return NextResponse.json({ ok: true })
+  revalidatePath('/practice')
+  if (receipt.pathSlug) revalidatePath(`/practice/paths/${receipt.pathSlug}`)
+  return NextResponse.json({
+    ok: true,
+    redirectTo: deletedAttemptDestination(receipt),
+  })
 }

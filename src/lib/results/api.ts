@@ -1,3 +1,4 @@
+import type { Route } from 'next'
 import { fetchWithTimeout } from '@/lib/net/fetch-with-timeout'
 
 async function readError(response: Response, fallback: string): Promise<string> {
@@ -13,11 +14,31 @@ async function readError(response: Response, fallback: string): Promise<string> 
   return `${fallback} The server answered ${response.status}.`
 }
 
-export async function deleteAttempt(attemptId: string): Promise<void> {
+export interface DeleteAttemptOutcome {
+  redirectTo: Route
+}
+
+function isDeleteAttemptOutcome(value: unknown): value is DeleteAttemptOutcome {
+  if (!value || typeof value !== 'object' || !('redirectTo' in value)) return false
+  const redirectTo = (value as { redirectTo?: unknown }).redirectTo
+  return (
+    typeof redirectTo === 'string' &&
+    (redirectTo === '/history' ||
+      redirectTo.startsWith('/attempts/') ||
+      redirectTo.startsWith('/practice/paths/'))
+  )
+}
+
+export async function deleteAttempt(attemptId: string): Promise<DeleteAttemptOutcome> {
   const response = await fetchWithTimeout(
     `/api/attempts/${attemptId}`,
     { method: 'DELETE' },
     { label: 'Deleting the response' },
   )
   if (!response.ok) throw new Error(await readError(response, 'It could not be deleted.'))
+  const body: unknown = await response.json()
+  if (!isDeleteAttemptOutcome(body)) {
+    throw new Error('The response was deleted, but the next page could not be opened.')
+  }
+  return body
 }

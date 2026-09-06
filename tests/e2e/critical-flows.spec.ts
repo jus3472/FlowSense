@@ -1006,15 +1006,15 @@ test('structured lessons retry thresholds without reducing durable progress', as
     has: page.locator(`a[href="/attempts/${attempt92.id}"]`),
   })
   await bestHistoryRow.getByRole('button', { name: 'Delete response' }).click()
-  await bestHistoryRow.getByRole('button', { name: 'Confirm delete' }).click()
+  await page.getByRole('button', { name: 'Confirm delete' }).click()
   await expect(page.locator(`a[href="/attempts/${attempt92.id}"]`)).toHaveCount(0)
   await expect(page.locator(`a[href="/attempts/${failedAttempt.id}"]`)).toBeVisible()
 
   const deletionState = await currentState(request)
   expect(deletionState.practiceActivityDays).toHaveLength(1)
   expect(lessonBest(deletionState, failedAttempt.lesson_id)).toMatchObject({
-    best_score: 92,
-    best_attempt_id: null,
+    best_score: 86,
+    best_attempt_id: attempt86.id,
   })
   await page.goto('/home')
   await expect(
@@ -1022,7 +1022,7 @@ test('structured lessons retry thresholds without reducing durable progress', as
   ).toBeVisible()
   await expect(page.getByText('Beginner · Lesson 2 of 10', { exact: true })).toBeVisible()
   await expect(page.getByText('Beginner lesson 2', { exact: true })).toHaveCount(0)
-  await expect(page.getByText('3 / 90 stars', { exact: true })).toBeVisible()
+  await expect(page.getByText('2 / 90 stars', { exact: true })).toBeVisible()
 
   await reset(request, true, { pathSlug: 'interviews', passedLessons: 9 })
   await page.goto('/practice/paths/interviews/lessons/interviews-beginner-10-skill-10')
@@ -1181,6 +1181,48 @@ test('Settings omits track controls and preserves prior path progress', async ({
   expect(state.lessonProgress).toHaveLength(1)
   expect(state.lessonProgress[0]?.best_score).toBe(74)
   expect(state.profile.display_name).toBe('River')
+})
+
+test('Settings deletion controls fit the requested responsive widths', async ({ page }) => {
+  await logIn(page)
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport)
+    await page.goto('/settings')
+
+    for (const action of [
+      { trigger: 'Reset progress', dialog: 'Reset all progress?', label: 'Type RESET to continue' },
+      {
+        trigger: 'Delete account',
+        dialog: 'Delete your FlowSense account?',
+        label: 'Type DELETE to continue',
+      },
+    ]) {
+      await page.getByRole('button', { name: action.trigger }).click()
+      const dialog = page.getByRole('alertdialog', { name: action.dialog })
+      await expect(dialog).toBeVisible()
+      await expect(page.getByLabel(action.label)).toBeFocused()
+      const box = await dialog.boundingBox()
+      expect(box).not.toBeNull()
+      if (box) {
+        expect(box.x).toBeGreaterThanOrEqual(0)
+        expect(box.x + box.width).toBeLessThanOrEqual(viewport.width)
+        expect(box.y).toBeGreaterThanOrEqual(0)
+        expect(box.y + box.height).toBeLessThanOrEqual(viewport.height)
+      }
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true)
+      await page.keyboard.press('Escape')
+      await expect(dialog).toHaveCount(0)
+    }
+  }
 })
 
 test('Home follows the newest completed structured Track', async ({ page, request, context }) => {

@@ -14,6 +14,8 @@ const USERS = {
   signedUpAfterCurriculum: '40000000-0000-4000-8000-000000000008',
   hardeningSignup: '90000000-0000-4000-8000-000000000009',
   progression: 'a0000000-0000-4000-8000-00000000000a',
+  deletion: 'b0000000-0000-4000-8000-00000000000b',
+  deletionOther: 'c0000000-0000-4000-8000-00000000000c',
 }
 const UPLOAD_ATTEMPTS = {
   owner: '50000000-0000-4000-8000-000000000005',
@@ -375,6 +377,14 @@ async function assertGrantHardening(label) {
           on_update: true,
         },
         {
+          tgname: 'attempts_lock_owner_mutation',
+          table_name: 'attempts',
+          function_name: 'lock_attempt_owner_mutation',
+          before: true,
+          on_insert: true,
+          on_update: true,
+        },
+        {
           tgname: 'attempts_raise_lesson_progress',
           table_name: 'attempts',
           function_name: 'raise_lesson_progress_from_attempt',
@@ -418,7 +428,13 @@ async function assertGrantHardening(label) {
     `${label}: final trigger inventory changed`,
   )
 
-  const browserFunctions = new Set(['replace_profile_path_preferences', 'is_valid_iana_timezone'])
+  const browserFunctions = new Set([
+    'replace_profile_path_preferences',
+    'is_valid_iana_timezone',
+    'can_write_owned_recording',
+    'assert_my_data_deletion_safe',
+    'reset_my_progress',
+  ])
   const functionNames = [
     'handle_new_user',
     'replace_profile_path_preferences',
@@ -429,6 +445,14 @@ async function assertGrantHardening(label) {
     'enforce_practice_chapter_identity',
     'enforce_practice_lesson_identity',
     'is_valid_iana_timezone',
+    'is_valid_current_activity_attempt',
+    'lock_attempt_owner_mutation',
+    'can_write_owned_recording',
+    'rebuild_owned_lesson_progress',
+    'record_practice_activity_for_attempt',
+    'delete_owned_attempt_and_rebuild',
+    'assert_my_data_deletion_safe',
+    'reset_my_progress',
   ]
   const functionAccess = await client.query(
     `select p.proname as function_name, target.role_name,
@@ -2841,7 +2865,8 @@ async function runPreCurriculumUpgrade(migrations) {
   const curriculum = migrations.slice(9, 12)
   const phase5 = migrations.slice(12, 13)
   const hardening = migrations.slice(13, 14)
-  const v3Progression = migrations.slice(14)
+  const v3Progression = migrations.slice(14, 17)
+  const userDataDeletion = migrations.slice(17)
   assert(
     preCurriculum.at(-1)?.name === 'note_feedback_write_boundary',
     'pre-curriculum boundary must include all nine production migrations',
@@ -2868,6 +2893,11 @@ async function runPreCurriculumUpgrade(migrations) {
         'current_v3_score_2_progression',
       ]),
     'expected both compatibility migrations and the current-only cleanup',
+  )
+  assert(
+    JSON.stringify(userDataDeletion.map(({ name }) => name)) ===
+      JSON.stringify(['user_data_deletion']),
+    'expected exactly one user-data deletion migration',
   )
 
   await applyAll(preCurriculum)
@@ -3045,6 +3075,7 @@ async function runPreCurriculumUpgrade(migrations) {
   await assertActivitySecurity('pre-curriculum')
   await applyAll(hardening)
   await applyAll(v3Progression)
+  await applyAll(userDataDeletion)
   await assertCurriculumSecurity('pre-curriculum')
   await assertV3Progression('pre-curriculum')
   await assertGrantHardening('pre-curriculum')
@@ -3056,7 +3087,8 @@ async function runPrePhase5Upgrade(migrations) {
   const prePhase5 = migrations.slice(0, 12)
   const phase5 = migrations.slice(12, 13)
   const hardening = migrations.slice(13, 14)
-  const v3Progression = migrations.slice(14)
+  const v3Progression = migrations.slice(14, 17)
+  const userDataDeletion = migrations.slice(17)
   assert(
     prePhase5.at(-1)?.name === 'path_preferences_backfill',
     'pre-Phase-5 boundary must include the curriculum preference backfill',
@@ -3078,6 +3110,11 @@ async function runPrePhase5Upgrade(migrations) {
         'current_v3_score_2_progression',
       ]),
     'pre-Phase-5 upgrade must end with compatibility and current-only progression',
+  )
+  assert(
+    JSON.stringify(userDataDeletion.map(({ name }) => name)) ===
+      JSON.stringify(['user_data_deletion']),
+    'pre-Phase-5 upgrade must end with user-data deletion support',
   )
 
   await applyAll(prePhase5)
@@ -3146,6 +3183,7 @@ async function runPrePhase5Upgrade(migrations) {
   await assertActivitySecurity('pre-Phase-5')
   await applyAll(hardening)
   await applyAll(v3Progression)
+  await applyAll(userDataDeletion)
   await assertCurriculumSecurity('pre-Phase-5')
   await assertV3Progression('pre-Phase-5')
   await assertGrantHardening('pre-Phase-5')
@@ -3156,7 +3194,8 @@ async function runGrantHardeningUpgrade(migrations) {
   await bootstrapSupabaseSurface()
   const currentProduction = migrations.slice(0, 13)
   const hardening = migrations.slice(13, 14)
-  const v3Progression = migrations.slice(14)
+  const v3Progression = migrations.slice(14, 17)
+  const userDataDeletion = migrations.slice(17)
   assert(
     currentProduction.at(-1)?.name === 'practice_activity',
     'grant-hardening upgrade must start from the exact 13-migration state',
@@ -3174,6 +3213,11 @@ async function runGrantHardeningUpgrade(migrations) {
         'current_v3_score_2_progression',
       ]),
     'grant-hardening upgrade must be followed by compatibility and current-only progression',
+  )
+  assert(
+    JSON.stringify(userDataDeletion.map(({ name }) => name)) ===
+      JSON.stringify(['user_data_deletion']),
+    'grant-hardening upgrade must end with user-data deletion support',
   )
 
   await seedAuthUser(USERS.missingProfile, 'Hardening Upgrade General')
@@ -3236,6 +3280,7 @@ async function runGrantHardeningUpgrade(migrations) {
     JSON.stringify(progressAfterReplay.rows) === JSON.stringify(progressBeforeReplay.rows),
     'grant-hardening upgrade: current cleanup replay was not idempotent',
   )
+  await applyAll(userDataDeletion)
   const replayedV3 = await client.query(
     `select best_score, best_attempt_id from public.lesson_progress
      where user_id = $1 and lesson_id = $2`,
@@ -3417,12 +3462,358 @@ async function runCurrentBoundaryUpgrade(migrations, boundaryName, label) {
   console.log(`pass ${label}`)
 }
 
+async function runUserDataDeletionOperations(migrations) {
+  await bootstrapSupabaseSurface()
+  await applyAll(migrations)
+  await seedAuthUser(USERS.deletion, 'Deletion Owner')
+  await seedAuthUser(USERS.deletionOther, 'Deletion Other')
+
+  const lessons = await client.query(`
+    select lesson.id, lesson.prompt_id, path.mode, chapter.level as difficulty
+    from public.practice_lessons as lesson
+    join public.practice_chapters as chapter on chapter.id = lesson.chapter_id
+    join public.practice_paths as path on path.id = chapter.path_id
+    where path.slug = 'general-speaking'
+    order by chapter.position, lesson.position
+    limit 3
+  `)
+  assert(lessons.rowCount === 3, 'deletion: lesson fixtures are missing')
+  const [first, second, third] = lessons.rows
+
+  const insertScored = async (userId, lesson, score, finishedAt, retryOf = null) =>
+    client.query(
+      `insert into public.attempts (
+         user_id, prompt_id, lesson_id, prompt_text, practice_mode, prompt_source,
+         prompt_difficulty, rubric_version, retry_of_attempt_id, status, finished_at,
+         duration_ms, transcript, score, section_scores
+       ) values ($1, $2, $3, 'Deletion fixture', $4, 'library', $5, 'v3', $6,
+         'done', $7, 30000, 'A complete speaking response.', $8, $9::jsonb)
+       returning id`,
+      [
+        userId,
+        lesson.prompt_id,
+        lesson.id,
+        lesson.mode,
+        lesson.difficulty,
+        retryOf,
+        finishedAt,
+        score,
+        JSON.stringify(structuredV3ScorePayload(lesson.mode, score)),
+      ],
+    )
+
+  const attempt72 = await insertScored(USERS.deletion, first, 72, '2026-09-05T12:00:00Z')
+  const attempt88 = await insertScored(USERS.deletion, first, 88, '2026-09-05T12:01:00Z')
+  const attempt81 = await insertScored(USERS.deletion, first, 81, '2026-09-05T12:02:00Z')
+  const attempt85 = await insertScored(USERS.deletion, second, 85, '2026-09-05T12:03:00Z')
+  const attempt90 = await insertScored(USERS.deletion, third, 90, '2026-09-05T12:04:00Z')
+  const otherAttempt = await insertScored(USERS.deletionOther, first, 91, '2026-09-06T12:00:00Z')
+  const neutralAttempt = await insertScored(USERS.deletion, first, null, '2026-09-05T12:05:00Z')
+  await client.query('update public.attempts set section_scores = $1::jsonb where id = $2', [
+    JSON.stringify(neutralV3ScorePayload(first.mode, 80)),
+    neutralAttempt.rows[0].id,
+  ])
+  const malformedNeutral = await insertScored(USERS.deletion, first, null, '2026-09-05T12:06:00Z')
+  const malformedNeutralPayload = neutralV3ScorePayload(first.mode, 80)
+  malformedNeutralPayload.total_max_points = 99
+  await client.query('update public.attempts set section_scores = $1::jsonb where id = $2', [
+    JSON.stringify(malformedNeutralPayload),
+    malformedNeutral.rows[0].id,
+  ])
+  const terminalAttempts = await client.query(
+    `insert into public.attempts (
+       user_id, prompt_id, prompt_text, practice_mode, prompt_source,
+       prompt_difficulty, rubric_version, status, failure_code, finished_at
+     ) values
+       ($1, $2, 'Failed deletion fixture', $3, 'library', $4, 'v3',
+        'failed', 'recording_failed', '2026-09-05T12:07:00Z'),
+       ($1, $2, 'Timed out deletion fixture', $3, 'library', $4, 'v3',
+        'timed_out', 'recording_timed_out', '2026-09-05T12:08:00Z')
+     returning id, status`,
+    [USERS.deletion, first.prompt_id, first.mode, first.difficulty],
+  )
+  await client.query(
+    `insert into public.note_feedback (user_id, attempt_id, note_type, quote)
+     values ($1, $2, 'answered', null)`,
+    [USERS.deletion, attempt81.rows[0].id],
+  )
+
+  await client.query('set role service_role')
+  for (const attemptId of [
+    attempt72.rows[0].id,
+    attempt88.rows[0].id,
+    attempt81.rows[0].id,
+    attempt85.rows[0].id,
+    attempt90.rows[0].id,
+    otherAttempt.rows[0].id,
+    neutralAttempt.rows[0].id,
+  ]) {
+    const userId = attemptId === otherAttempt.rows[0].id ? USERS.deletionOther : USERS.deletion
+    const recorded = await client.query(
+      'select public.record_practice_activity_for_attempt($1, $2) as recorded',
+      [userId, attemptId],
+    )
+    assert(recorded.rows[0]?.recorded === true, 'deletion: activity recording failed')
+  }
+  const malformedActivity = await client.query(
+    'select public.record_practice_activity_for_attempt($1, $2) as recorded',
+    [USERS.deletion, malformedNeutral.rows[0].id],
+  )
+  assert(
+    malformedActivity.rows[0]?.recorded === false,
+    'deletion: malformed neutral result counted as activity',
+  )
+
+  for (const terminal of terminalAttempts.rows) {
+    const terminalDelete = await client.query(
+      'select * from public.delete_owned_attempt_and_rebuild($1, $2)',
+      [USERS.deletion, terminal.id],
+    )
+    assert(terminalDelete.rows[0]?.deleted === true, `deletion: ${terminal.status} row remained`)
+  }
+
+  const wrongOwner = await client.query(
+    'select * from public.delete_owned_attempt_and_rebuild($1, $2)',
+    [USERS.deletion, otherAttempt.rows[0].id],
+  )
+  assert(wrongOwner.rows[0]?.deleted === false, 'deletion: ownership boundary deleted a row')
+
+  const nonBest = await client.query(
+    'select * from public.delete_owned_attempt_and_rebuild($1, $2)',
+    [USERS.deletion, attempt81.rows[0].id],
+  )
+  assert(
+    nonBest.rows[0]?.deleted === true && nonBest.rows[0]?.best_attempt_id === attempt88.rows[0].id,
+    'deletion: non-best deletion changed the redirect best',
+  )
+  const deletedFeedback = await client.query(
+    'select count(*)::integer as count from public.note_feedback where attempt_id = $1',
+    [attempt81.rows[0].id],
+  )
+  assert(deletedFeedback.rows[0]?.count === 0, 'deletion: attempt feedback did not cascade')
+  const promoted = await client.query(
+    'select * from public.delete_owned_attempt_and_rebuild($1, $2)',
+    [USERS.deletion, attempt88.rows[0].id],
+  )
+  assert(
+    promoted.rows[0]?.best_attempt_id === attempt72.rows[0].id,
+    'deletion: next surviving best was not promoted',
+  )
+  const promotedProgress = await client.query(
+    `select best_score, best_attempt_id from public.lesson_progress
+     where user_id = $1 and lesson_id = $2`,
+    [USERS.deletion, first.id],
+  )
+  assert(
+    promotedProgress.rows[0]?.best_score === 72 &&
+      promotedProgress.rows[0]?.best_attempt_id === attempt72.rows[0].id,
+    'deletion: durable best did not move downward to the surviving attempt',
+  )
+
+  const lastScored = await client.query(
+    'select * from public.delete_owned_attempt_and_rebuild($1, $2)',
+    [USERS.deletion, attempt72.rows[0].id],
+  )
+  assert(
+    lastScored.rows[0]?.best_attempt_id === neutralAttempt.rows[0].id,
+    'deletion: provider-neutral same-lesson survivor was not selected for redirect',
+  )
+  const relocked = await client.query(
+    `select lesson_id from public.lesson_progress
+     where user_id = $1 and lesson_id = any($2::uuid[])`,
+    [USERS.deletion, [first.id, second.id, third.id]],
+  )
+  assert(relocked.rowCount === 0, 'deletion: downstream progression was not re-locked')
+  const laterAttempts = await client.query(
+    'select id from public.attempts where id = any($1::uuid[])',
+    [[attempt85.rows[0].id, attempt90.rows[0].id]],
+  )
+  assert(laterAttempts.rowCount === 2, 'deletion: later attempts were incorrectly deleted')
+  const retainedDay = await client.query(
+    'select local_date from public.practice_activity_days where user_id = $1',
+    [USERS.deletion],
+  )
+  assert(retainedDay.rowCount === 1, 'deletion: shared activity day was removed')
+
+  await client.query('select * from public.delete_owned_attempt_and_rebuild($1, $2)', [
+    USERS.deletionOther,
+    otherAttempt.rows[0].id,
+  ])
+  const removedOnlyDay = await client.query(
+    'select local_date from public.practice_activity_days where user_id = $1',
+    [USERS.deletionOther],
+  )
+  assert(removedOnlyDay.rowCount === 0, 'deletion: unsupported activity day remained')
+
+  await client.query('reset role')
+  const repass = await insertScored(USERS.deletion, first, 95, '2026-09-07T12:00:00Z')
+  const restored = await client.query(
+    `select lesson_id, best_score from public.lesson_progress
+     where user_id = $1 and lesson_id = any($2::uuid[])
+     order by lesson_id`,
+    [USERS.deletion, [first.id, second.id, third.id]],
+  )
+  assert(
+    restored.rowCount === 3 &&
+      restored.rows.some((row) => row.lesson_id === first.id && row.best_score === 95) &&
+      restored.rows.some((row) => row.lesson_id === second.id && row.best_score === 85) &&
+      restored.rows.some((row) => row.lesson_id === third.id && row.best_score === 90),
+    'deletion: a new prerequisite pass did not restore surviving downstream progress',
+  )
+
+  const retry = await insertScored(
+    USERS.deletion,
+    first,
+    80,
+    '2026-09-07T12:01:00Z',
+    repass.rows[0].id,
+  )
+  await client.query('set role service_role')
+  await client.query('select * from public.delete_owned_attempt_and_rebuild($1, $2)', [
+    USERS.deletion,
+    repass.rows[0].id,
+  ])
+  const repairedRetry = await client.query(
+    'select retry_of_attempt_id from public.attempts where id = $1',
+    [retry.rows[0].id],
+  )
+  assert(
+    repairedRetry.rows[0]?.retry_of_attempt_id === null,
+    'deletion: surviving retry parent was not repaired',
+  )
+
+  const finalizedRecordingPath = `${USERS.deletion}/${retry.rows[0].id}.webm`
+  await client.query(
+    `update public.attempts
+     set audio_path = $1,
+       metrics = jsonb_build_object(
+         'upload', jsonb_build_object(
+           'storage_path', $1::text,
+           'mime_type', 'audio/webm;codecs=opus'
+         )
+       )
+     where id = $2`,
+    [finalizedRecordingPath, retry.rows[0].id],
+  )
+  const uploadOnly = await client.query(
+    `insert into public.attempts (
+       user_id, prompt_id, prompt_text, practice_mode, prompt_source,
+       prompt_difficulty, rubric_version, status, failure_code, finished_at
+     ) values ($1, $2, 'Upload-only reset fixture', $3, 'library', $4, 'v3',
+       'failed', 'recording_failed', '2026-09-07T12:02:00Z')
+     returning id`,
+    [USERS.deletion, first.prompt_id, first.mode, first.difficulty],
+  )
+  const uploadOnlyPath = `${USERS.deletion}/${uploadOnly.rows[0].id}.webm`
+  await client.query(
+    `update public.attempts
+     set metrics = jsonb_build_object(
+       'upload', jsonb_build_object(
+         'storage_path', $1::text,
+         'mime_type', 'audio/webm;codecs=opus'
+       )
+     )
+     where id = $2`,
+    [uploadOnlyPath, uploadOnly.rows[0].id],
+  )
+
+  await client.query('reset role')
+  await setAuthenticatedUser(USERS.deletion)
+  const resetReceipt = await client.query('select * from public.reset_my_progress()')
+  assert(resetReceipt.rows[0]?.attempts_deleted >= 1, 'reset: attempt count was not returned')
+  const resetClaims = resetReceipt.rows[0]?.recording_claims
+  assert(
+    Array.isArray(resetClaims) &&
+      resetClaims.length === Number(resetReceipt.rows[0]?.attempts_deleted) &&
+      resetClaims.some((claim) => claim.audio_path === finalizedRecordingPath) &&
+      resetClaims.some(
+        (claim) =>
+          claim.audio_path === null && claim.metrics?.upload?.storage_path === uploadOnlyPath,
+      ),
+    'reset: exact finalized and upload-only recording claims were not returned',
+  )
+  await client.query('reset role')
+  const resetState = await client.query(
+    `select
+       (select count(*)::integer from public.attempts where user_id = $1) as attempts,
+       (select count(*)::integer from public.lesson_progress where user_id = $1) as progress,
+       (select count(*)::integer from public.practice_activity_days where user_id = $1) as activity,
+       (select count(*)::integer from public.note_feedback where user_id = $1) as feedback,
+       (select count(*)::integer from public.profiles where id = $1) as profiles,
+       (select count(*)::integer from public.profile_path_preferences where user_id = $1) as preferences,
+       (select count(*)::integer from auth.users where id = $1) as auth_users`,
+    [USERS.deletion],
+  )
+  assert(
+    JSON.stringify(resetState.rows[0]) ===
+      JSON.stringify({
+        attempts: 0,
+        progress: 0,
+        activity: 0,
+        feedback: 0,
+        profiles: 1,
+        preferences: 1,
+        auth_users: 1,
+      }),
+    'reset: fresh-user data boundary changed',
+  )
+  await setAuthenticatedUser(USERS.deletion)
+  const repeatedReset = await client.query('select * from public.reset_my_progress()')
+  assert(
+    repeatedReset.rows[0]?.attempts_deleted === '0' ||
+      repeatedReset.rows[0]?.attempts_deleted === 0n ||
+      repeatedReset.rows[0]?.attempts_deleted === 0,
+    'reset: repeated reset was not idempotent',
+  )
+  await resetRole()
+
+  const otherStillExists = await client.query(
+    'select count(*)::integer as count from auth.users where id = $1',
+    [USERS.deletionOther],
+  )
+  assert(otherStillExists.rows[0]?.count === 1, 'reset: another user was affected')
+
+  const cascadeAttempt = await insertScored(USERS.deletionOther, first, 93, '2026-09-08T12:00:00Z')
+  await client.query(
+    `insert into public.note_feedback (user_id, attempt_id, note_type, quote)
+     values ($1, $2, 'answered', null)`,
+    [USERS.deletionOther, cascadeAttempt.rows[0].id],
+  )
+  await client.query(
+    `insert into public.practice_activity_days (user_id, local_date, timezone)
+     values ($1, '2026-09-08', 'UTC')
+     on conflict (user_id, local_date) do nothing`,
+    [USERS.deletionOther],
+  )
+  await client.query('delete from auth.users where id = $1', [USERS.deletionOther])
+  const cascadeState = await client.query(
+    `select
+       (select count(*)::integer from public.attempts where user_id = $1) as attempts,
+       (select count(*)::integer from public.lesson_progress where user_id = $1) as progress,
+       (select count(*)::integer from public.practice_activity_days where user_id = $1) as activity,
+       (select count(*)::integer from public.note_feedback where user_id = $1) as feedback,
+       (select count(*)::integer from public.profiles where id = $1) as profiles,
+       (select count(*)::integer from public.profile_path_preferences where user_id = $1) as preferences`,
+    [USERS.deletionOther],
+  )
+  assert(
+    Object.values(cascadeState.rows[0]).every((count) => count === 0),
+    'deletion: Auth deletion did not cascade through every audited application table',
+  )
+  const resetOwnerStillExists = await client.query(
+    'select count(*)::integer as count from auth.users where id = $1',
+    [USERS.deletion],
+  )
+  assert(resetOwnerStillExists.rows[0]?.count === 1, 'deletion: another Auth user was affected')
+  console.log('pass user-data deletion operations')
+}
+
 try {
   await client.connect()
   const migrations = loadMigrations()
   assert(
-    migrations.length === 17,
-    'Expected nine production, three curriculum, one Phase 5, one hardening, two compatibility migrations, and one current-only cleanup.',
+    migrations.length === 18,
+    'Expected nine production, three curriculum, one Phase 5, one hardening, two compatibility migrations, one current-only cleanup, and one user-data deletion migration.',
   )
   await runFresh(migrations)
   await runUpgrade(migrations)
@@ -3435,6 +3826,7 @@ try {
     'v3_progression_compatibility',
     'v3.score.1 intermediate upgrade',
   )
+  await runUserDataDeletionOperations(migrations)
   await runCurrentBoundaryUpgrade(
     migrations,
     'v3_score_2_progression_compatibility',

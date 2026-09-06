@@ -54,7 +54,7 @@ describe('migration tooling', () => {
     })
   })
 
-  it('models the audited Production ledger and all three pending files exactly', () => {
+  it('models the audited Production ledger and all four pending files exactly', () => {
     const migrations = loadMigrations()
     const productionIndex = migrations.findIndex(
       (migration) => migration.name === 'curriculum_grant_hardening',
@@ -69,6 +69,7 @@ describe('migration tooling', () => {
         '20260903000100_v3_progression_compatibility.sql',
         '20260904000100_v3_score_2_progression_compatibility.sql',
         '20260905000100_current_v3_score_2_progression.sql',
+        '20260906000100_user_data_deletion.sql',
       ],
       unexpected: [],
     })

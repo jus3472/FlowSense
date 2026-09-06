@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { LogoutForm } from '@/components/settings/logout-form'
 import { SettingsForm } from '@/components/settings/settings-form'
+import { DataAndAccountActions } from '@/components/settings/data-account-actions'
 import { RetryButton } from '@/components/system/retry-button'
 import { ErrorState } from '@/components/ui/error-state'
 import { Card } from '@/components/ui/card'
@@ -66,6 +67,19 @@ export default async function SettingsPage({
           Account
         </h2>
         <LogoutForm failed={query.logout === 'failed'} />
+      </section>
+
+      <section
+        aria-labelledby="data-account-heading"
+        className="border-border flex flex-col gap-6 border-t pt-8"
+      >
+        <div className="flex flex-col gap-1">
+          <h2 id="data-account-heading" className="text-foreground text-lg font-medium">
+            Data &amp; account
+          </h2>
+          <p className="text-muted text-sm">Manage your practice history or your account.</p>
+        </div>
+        <DataAndAccountActions />
       </section>
     </PageShell>
   )

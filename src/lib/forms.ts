@@ -29,3 +29,13 @@ export const initialProfileFormState: ProfileFormState = {
   message: null,
   displayNameError: null,
 }
+
+export interface DestructiveActionFormState {
+  status: 'idle' | 'success' | 'error'
+  message: string | null
+}
+
+export const initialDestructiveActionFormState: DestructiveActionFormState = {
+  status: 'idle',
+  message: null,
+}

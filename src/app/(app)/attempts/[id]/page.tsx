@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
 import { notFound, redirect } from 'next/navigation'
 import { AudioPlayer } from '@/components/record/audio-player'
+import { DeleteResponseControl } from '@/components/results/delete-response-control'
 import { V3ResultsView } from '@/components/results/v3-results-view'
 import { RetryButton } from '@/components/system/retry-button'
 import { ButtonLink } from '@/components/ui/button'
@@ -59,7 +60,7 @@ function resultLoadError() {
   )
 }
 
-function resultWithAudioStatus(content: ReactNode, audioUnavailable: boolean) {
+function resultWithAudioStatus(content: ReactNode, audioUnavailable: boolean, attemptId: string) {
   return (
     <div className="max-w-column mx-auto flex w-full flex-col gap-4">
       {audioUnavailable ? (
@@ -68,6 +69,9 @@ function resultWithAudioStatus(content: ReactNode, audioUnavailable: boolean) {
         </p>
       ) : null}
       {content}
+      <div className="border-border flex border-t pt-4">
+        <DeleteResponseControl attemptId={attemptId} />
+      </div>
     </div>
   )
 }
@@ -103,7 +107,7 @@ function abandonedUploadResult(promptText: string, retryHref: ReturnType<typeof 
       <Card>
         <EmptyState
           title="Recording not saved"
-          description="This recording did not finish saving. Try the same prompt again, or delete this entry from History."
+          description="This recording did not finish saving. Try the same prompt again or delete this response."
         />
       </Card>
       <div className="flex flex-col gap-3">
@@ -168,7 +172,11 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     metrics: attempt.metrics,
   })
   if (attempt.failure_code === ATTEMPT_FAILURE_CODES.clientUploadAbandoned) {
-    return abandonedUploadResult(attempt.prompt_text, retryHref)
+    return resultWithAudioStatus(
+      abandonedUploadResult(attempt.prompt_text, retryHref),
+      false,
+      attempt.id,
+    )
   }
 
   let audioUrl: string | null = null
@@ -248,6 +256,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         ) : null}
       </div>,
       audioUnavailable,
+      attempt.id,
     )
   }
 
@@ -388,21 +397,26 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     ])
 
     return (
-      <V3ResultsView
-        attemptId={attempt.id}
-        promptText={attempt.prompt_text}
-        additionalContext={additionalContext}
-        transcript={attempt.transcript ?? ''}
-        words={storedTranscriptWords(attempt.metrics)}
-        durationMs={durationMs}
-        audioUrl={audioUrl}
-        audioUnavailable={audioUnavailable}
-        payload={result.payload}
-        comparison={comparison}
-        previousAttempts={previousAttempts}
-        timezone={timezone}
-        curriculumResult={curriculumResult?.status === 'ready' ? curriculumResult.data : null}
-      />
+      <div className="flex flex-col gap-4">
+        <V3ResultsView
+          attemptId={attempt.id}
+          promptText={attempt.prompt_text}
+          additionalContext={additionalContext}
+          transcript={attempt.transcript ?? ''}
+          words={storedTranscriptWords(attempt.metrics)}
+          durationMs={durationMs}
+          audioUrl={audioUrl}
+          audioUnavailable={audioUnavailable}
+          payload={result.payload}
+          comparison={comparison}
+          previousAttempts={previousAttempts}
+          timezone={timezone}
+          curriculumResult={curriculumResult?.status === 'ready' ? curriculumResult.data : null}
+        />
+        <div className="border-border flex border-t pt-4">
+          <DeleteResponseControl attemptId={attempt.id} />
+        </div>
+      </div>
     )
   }
 
@@ -423,5 +437,6 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
       ) : null}
     </div>,
     audioUnavailable,
+    attempt.id,
   )
 }

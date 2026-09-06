@@ -2,7 +2,7 @@ import Link from 'next/link'
 import type { ComponentProps, ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
-type Variant = 'primary' | 'secondary' | 'ghost'
+type Variant = 'primary' | 'secondary' | 'ghost' | 'destructive'
 type Size = 'md' | 'lg'
 
 const BASE =
@@ -17,6 +17,7 @@ const VARIANTS: Record<Variant, string> = {
   primary: 'bg-accent text-accent-fg hover:brightness-90 dark:hover:brightness-110',
   secondary: 'border-border bg-surface text-foreground border hover:bg-surface-sunken',
   ghost: 'text-foreground hover:bg-surface-sunken',
+  destructive: 'bg-negative text-accent-fg hover:brightness-90 dark:hover:brightness-110',
 }
 
 /** Both sizes clear the 44px minimum tap target. */

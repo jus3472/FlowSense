@@ -55,20 +55,6 @@ function TrashIcon() {
   )
 }
 
-function CloseIcon() {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      aria-hidden="true"
-      className="size-4"
-      fill="none"
-      stroke="currentColor"
-    >
-      <path d="m6 6 8 8m0-8-8 8" strokeWidth="1.5" />
-    </svg>
-  )
-}
-
 const ICON_BUTTON =
   'text-muted hover:bg-surface-sunken hover:text-foreground flex size-11 items-center justify-center rounded-full transition duration-150 ease-out disabled:pointer-events-none disabled:opacity-60 aria-disabled:pointer-events-none aria-disabled:opacity-60'
 
@@ -310,46 +296,7 @@ export function HistoryList({
                   </span>
                 </Link>
 
-                {confirming === entry.id ? (
-                  <div
-                    role="alertdialog"
-                    aria-modal="true"
-                    aria-labelledby={`delete-confirmation-${entry.id}`}
-                    aria-busy={busy === entry.id || undefined}
-                    onKeyDown={trapConfirmationFocus}
-                    className="border-negative bg-negative-soft rounded-card absolute inset-0 z-10 flex items-center justify-between gap-4 border px-6"
-                  >
-                    <p id={`delete-confirmation-${entry.id}`} className="text-foreground text-sm">
-                      Delete this response?
-                    </p>
-                    <span className="flex shrink-0 items-center gap-1">
-                      <button
-                        ref={confirmDeleteButtonRef}
-                        type="button"
-                        aria-label="Confirm delete"
-                        aria-disabled={busy === entry.id || undefined}
-                        title="Delete response"
-                        onClick={() => void remove(entry.id)}
-                        className={ICON_BUTTON}
-                      >
-                        <TrashIcon />
-                      </button>
-                      <button
-                        ref={cancelDeleteButtonRef}
-                        type="button"
-                        aria-label="Cancel delete"
-                        aria-disabled={busy === entry.id || undefined}
-                        title="Cancel"
-                        onClick={() => {
-                          if (busy !== entry.id) dismissConfirmation(entry.id, true)
-                        }}
-                        className={ICON_BUTTON}
-                      >
-                        <CloseIcon />
-                      </button>
-                    </span>
-                  </div>
-                ) : (
+                {confirming === entry.id ? null : (
                   <button
                     ref={(node) => {
                       if (node) {
@@ -375,6 +322,62 @@ export function HistoryList({
           </ul>
         </section>
       ))}
+
+      {confirming ? (
+        <div className="bg-foreground/20 fixed inset-0 z-50 flex items-center justify-center p-4">
+          <Card
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby={`delete-confirmation-${confirming}`}
+            aria-describedby={`delete-confirmation-description-${confirming}`}
+            aria-busy={busy === confirming || undefined}
+            onKeyDown={trapConfirmationFocus}
+            className="shadow-float max-w-form flex w-full flex-col gap-6"
+          >
+            <div className="flex flex-col gap-2">
+              <h2
+                id={`delete-confirmation-${confirming}`}
+                className="text-foreground text-lg font-semibold"
+              >
+                Delete this response?
+              </h2>
+              <p
+                id={`delete-confirmation-description-${confirming}`}
+                className="text-muted text-sm"
+              >
+                This response, its recording, and its score will be permanently deleted. Your
+                Progress, streak, stars, and lesson unlocks may change.
+              </p>
+            </div>
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                ref={cancelDeleteButtonRef}
+                type="button"
+                aria-label="Cancel delete"
+                aria-disabled={busy === confirming || undefined}
+                onClick={() => {
+                  if (busy !== confirming) dismissConfirmation(confirming, true)
+                }}
+                className={buttonClasses({ variant: 'secondary' })}
+              >
+                Cancel
+              </button>
+              <button
+                ref={confirmDeleteButtonRef}
+                type="button"
+                aria-label="Confirm delete"
+                aria-disabled={busy === confirming || undefined}
+                onClick={() => void remove(confirming)}
+                className={buttonClasses({
+                  variant: 'destructive',
+                })}
+              >
+                {busy === confirming ? 'Deleting response' : 'Delete response'}
+              </button>
+            </div>
+          </Card>
+        </div>
+      ) : null}
 
       {hasPrevious || hasNext ? (
         <nav aria-label="History pages" className="flex items-center justify-between gap-3">

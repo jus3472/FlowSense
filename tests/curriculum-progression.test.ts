@@ -364,6 +364,22 @@ describe('neutral and permanent progress', () => {
     expect(result.lessons[1]?.state).toBe('available')
   })
 
+  it('ignores preserved neutral evidence when an earlier deletion relocks the lesson', () => {
+    const path = makePath()
+    const laterLessonId = path.chapters[0]?.lessons[2]?.id
+    if (!laterLessonId) throw new Error('Missing later test lesson.')
+
+    const result = build(path, [], [{ lessonId: laterLessonId }])
+
+    expect(result.lessons[0]).toMatchObject({ state: 'available', attempted: false })
+    expect(result.lessons[2]).toMatchObject({
+      state: 'locked',
+      bestScore: null,
+      attempted: false,
+      attemptStatus: 'none',
+    })
+  })
+
   it('preserves permanent score, stars, and unlocks after the best attempt link is deleted', () => {
     const path = makePath()
     const result = build(path, [progressRow(path, 0, 86, null)])

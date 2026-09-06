@@ -922,6 +922,85 @@ const server = createServer(async (req, res) => {
   if (url.pathname.startsWith('/rest/v1/')) {
     const table = url.pathname.split('/').at(-1)
     const select = url.searchParams.get('select')
+    if (table === 'delete_owned_attempt_and_rebuild' && req.method === 'POST') {
+      const input = await body(req)
+      const attemptIndex = state.attempts.findIndex(
+        (attempt) =>
+          attempt.id === input.target_attempt_id &&
+          attempt.user_id === input.target_user_id &&
+          ['done', 'failed', 'timed_out'].includes(attempt.status),
+      )
+      if (attemptIndex === -1) {
+        return json(res, 200, [
+          { deleted: false, lesson_id: null, best_attempt_id: null, path_slug: null },
+        ])
+      }
+
+      const [deletedAttempt] = state.attempts.splice(attemptIndex, 1)
+      for (const attempt of state.attempts) {
+        if (attempt.retry_of_attempt_id === deletedAttempt.id) attempt.retry_of_attempt_id = null
+      }
+
+      let pathSlug = null
+      let bestAttempt = null
+      if (deletedAttempt.lesson_id) {
+        const lesson = PRACTICE_LESSONS.find((item) => item.id === deletedAttempt.lesson_id)
+        const chapter = PRACTICE_CHAPTERS.find((item) => item.id === lesson?.chapter_id)
+        pathSlug = PRACTICE_PATHS.find((item) => item.id === chapter?.path_id)?.slug ?? null
+        bestAttempt = state.attempts
+          .filter(
+            (attempt) =>
+              attempt.user_id === deletedAttempt.user_id &&
+              attempt.lesson_id === deletedAttempt.lesson_id &&
+              validV3ScorePayload(attempt, attempt.section_scores),
+          )
+          .sort(
+            (left, right) =>
+              right.score - left.score ||
+              String(right.finished_at).localeCompare(String(left.finished_at)) ||
+              right.id.localeCompare(left.id),
+          )[0]
+
+        const progressIndex = state.lessonProgress.findIndex(
+          (progress) =>
+            progress.user_id === deletedAttempt.user_id &&
+            progress.lesson_id === deletedAttempt.lesson_id,
+        )
+        if (bestAttempt && progressIndex >= 0) {
+          Object.assign(state.lessonProgress[progressIndex], {
+            best_score: bestAttempt.score,
+            best_attempt_id: bestAttempt.id,
+            updated_at: timestamp(),
+          })
+        } else if (progressIndex >= 0) {
+          state.lessonProgress.splice(progressIndex, 1)
+        }
+      }
+
+      const timezone = state.profile.timezone || 'UTC'
+      const deletedDay = earnedLocalDate(deletedAttempt.finished_at, timezone)
+      const dayStillSupported = state.attempts.some(
+        (attempt) =>
+          attempt.user_id === deletedAttempt.user_id &&
+          attempt.status === 'done' &&
+          validV3ScorePayload(attempt, attempt.section_scores) &&
+          earnedLocalDate(attempt.finished_at, timezone) === deletedDay,
+      )
+      if (!dayStillSupported) {
+        state.practiceActivityDays = state.practiceActivityDays.filter(
+          (day) => !(day.user_id === deletedAttempt.user_id && day.local_date === deletedDay),
+        )
+      }
+
+      return json(res, 200, [
+        {
+          deleted: true,
+          lesson_id: deletedAttempt.lesson_id ?? null,
+          best_attempt_id: bestAttempt?.id ?? null,
+          path_slug: pathSlug,
+        },
+      ])
+    }
     if (table === 'replace_profile_path_preferences' && req.method === 'POST') {
       const input = await body(req)
       const pathIds = Array.isArray(input.path_ids) ? input.path_ids : []
