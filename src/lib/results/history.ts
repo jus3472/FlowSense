@@ -1,9 +1,9 @@
 import type { Route } from 'next'
 import { ATTEMPT_FAILURE_CODES, type AttemptStatus } from '@/lib/attempts/lifecycle'
 import type { ChapterLevel, PathSlug, Stars } from '@/lib/curriculum/contracts'
-import { dayKey } from '@/lib/streak'
 import type { PracticeMode, PromptSource } from '@/lib/practice/contracts'
 import type { HistoryResultKind } from '@/lib/results/history-result'
+import { localDateKey, safeTimezone } from '@/lib/timezone'
 
 export interface HistoryEntry {
   id: string
@@ -37,46 +37,52 @@ export interface HistoryGroup {
   entries: HistoryEntry[]
 }
 
-const DATE_FORMAT = new Intl.DateTimeFormat('en-US', {
-  weekday: 'long',
-  month: 'long',
-  day: 'numeric',
-})
+function previousDateKey(key: string): string {
+  const [year, month, day] = key.split('-').map(Number)
+  return new Date(Date.UTC(year!, month! - 1, day! - 1)).toISOString().slice(0, 10)
+}
 
-const TIME_FORMAT = new Intl.DateTimeFormat('en-US', {
-  hour: 'numeric',
-  minute: '2-digit',
-})
-
-export function dayLabel(iso: string, now: Date = new Date()): string {
+export function dayLabel(iso: string, now: Date, timezone: string): string {
   const date = new Date(iso)
-  const today = dayKey(now)
-  const yesterday = dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
-  const key = dayKey(date)
+  const safe = safeTimezone(timezone)
+  const today = localDateKey(now, safe)
+  const yesterday = previousDateKey(today)
+  const key = localDateKey(date, safe)
 
   if (key === today) return 'Today'
   if (key === yesterday) return 'Yesterday'
-  return DATE_FORMAT.format(date)
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: safe,
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  }).format(date)
 }
 
-export function timeLabel(iso: string): string {
-  return TIME_FORMAT.format(new Date(iso))
+export function timeLabel(iso: string, timezone: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: safeTimezone(timezone),
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(iso))
 }
 
 /** Newest first, grouped into days. */
 export function groupByDay(
   entries: readonly HistoryEntry[],
-  now: Date = new Date(),
+  now: Date,
+  timezone: string,
 ): HistoryGroup[] {
   const groups = new Map<string, HistoryGroup>()
+  const safe = safeTimezone(timezone)
 
   for (const entry of [...entries].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   )) {
-    const key = dayKey(new Date(entry.createdAt))
+    const key = localDateKey(new Date(entry.createdAt), safe)
     const existing = groups.get(key)
     if (existing) existing.entries.push(entry)
-    else groups.set(key, { key, label: dayLabel(entry.createdAt, now), entries: [entry] })
+    else groups.set(key, { key, label: dayLabel(entry.createdAt, now, safe), entries: [entry] })
   }
 
   return [...groups.values()]

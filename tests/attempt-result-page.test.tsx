@@ -18,8 +18,8 @@ vi.mock('@/lib/results/attempt-result', () => ({ readAttemptResult: mocks.readAt
 vi.mock('@/lib/curriculum/result-server', () => ({ loadStructuredLessonResultForUser: mocks.loadStructuredLessonResultForUser }))
 vi.mock('@/lib/results/lesson-attempt-history', () => ({ loadLessonAttemptHistoryForUser: mocks.loadLessonAttemptHistoryForUser }))
 vi.mock('@/components/results/v3-results-view', () => ({
-  V3ResultsView: ({ payload, previousAttempts }: { payload: { fixture: string }; previousAttempts: readonly { attemptId: string }[] }) => (
-    <div data-history={previousAttempts.map((item) => item.attemptId).join(',')} data-testid="v3-result">{payload.fixture}</div>
+  V3ResultsView: ({ payload, previousAttempts, timezone }: { payload: { fixture: string }; previousAttempts: readonly { attemptId: string }[]; timezone: string }) => (
+    <div data-history={previousAttempts.map((item) => item.attemptId).join(',')} data-timezone={timezone} data-testid="v3-result">{payload.fixture}</div>
   ),
 }))
 vi.mock('@/components/record/audio-player', () => ({ AudioPlayer: ({ src }: { src: string }) => <div data-testid="audio">{src}</div> }))
@@ -64,12 +64,14 @@ function attempt(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function clientFor(row: ReturnType<typeof attempt>) {
-  const query = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: vi.fn().mockResolvedValue({ data: row, error: null }) }
+function clientFor(row: ReturnType<typeof attempt>, timezone = 'America/New_York') {
+  const attemptQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: vi.fn().mockResolvedValue({ data: row, error: null }) }
+  const profileQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: vi.fn().mockResolvedValue({ data: { timezone }, error: null }) }
   return {
     auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: USER_ID } } }) },
-    from: vi.fn().mockReturnValue(query),
+    from: vi.fn((table: string) => (table === 'profiles' ? profileQuery : attemptQuery)),
     storage: { from: vi.fn().mockReturnValue({ createSignedUrl: vi.fn().mockResolvedValue({ data: { signedUrl: 'https://audio.test' }, error: null }) }) },
+    profileQuery,
   }
 }
 
@@ -90,12 +92,16 @@ describe('attempt result page', () => {
 
   it('renders an exact current result and structured lesson history', async () => {
     const row = attempt({ lesson_id: '70000000-0000-4000-8000-000000000007' })
-    mocks.createClient.mockResolvedValue(clientFor(row))
+    const client = clientFor(row)
+    mocks.createClient.mockResolvedValue(client)
     mocks.readAttemptResult.mockReturnValue({ kind: 'v3', payload: { fixture: 'Current result', mode: 'practice', rubric_version: 'v3', total_earned_points: 80 } })
     mocks.loadLessonAttemptHistoryForUser.mockResolvedValue({ status: 'ready', data: [{ attemptId: 'prior', score: 70, finishedAt: '2026-08-01T00:00:00Z' }] })
     render(await AttemptPage({ params: Promise.resolve({ id: ATTEMPT_ID }) }))
     expect(screen.getByTestId('v3-result')).toHaveTextContent('Current result')
     expect(screen.getByTestId('v3-result')).toHaveAttribute('data-history', 'prior')
+    expect(screen.getByTestId('v3-result')).toHaveAttribute('data-timezone', 'America/New_York')
+    expect(client.from).toHaveBeenCalledWith('profiles')
+    expect(client.profileQuery.select).toHaveBeenCalledWith('timezone')
   })
 
   it.each(['failed', 'timed_out'] as const)('keeps a resultless %s recording playable and retryable', async (status) => {

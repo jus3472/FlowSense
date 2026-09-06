@@ -1,11 +1,20 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type BrowserContext,
+  type Page,
+} from '@playwright/test'
 import { MIN_PROCESSABLE_RECORDING_MS } from '../../src/lib/recording/capture-readiness'
 
 const MOCK = 'http://127.0.0.1:54321'
 const APP = 'http://127.0.0.1:3100'
+const HYDRATION_DIAGNOSTIC =
+  /hydration failed|hydration mismatch|didn't match|react\.dev\/errors\/418|minified react error #418/i
 
 interface E2EAttempt {
   id: string
+  created_at: string
   user_id: string
   lesson_id: string | null
   prompt_id: string | null
@@ -115,6 +124,60 @@ async function logIn(page: Page) {
   await page.getByLabel('Password').fill('safe-test-password')
   await page.locator('form').getByRole('button', { name: 'Log in' }).click()
   await expect(page).toHaveURL(/\/home$/)
+}
+
+function captureHydrationDiagnostics(page: Page): string[] {
+  const diagnostics: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error' && HYDRATION_DIAGNOSTIC.test(message.text())) {
+      diagnostics.push(message.text())
+    }
+  })
+  page.on('pageerror', (error) => {
+    if (HYDRATION_DIAGNOSTIC.test(error.message)) diagnostics.push(error.message)
+  })
+  return diagnostics
+}
+
+async function verifyHistoryHydration(
+  page: Page,
+  context: BrowserContext,
+  request: APIRequestContext,
+) {
+  await context.grantPermissions(['microphone'], { origin: APP })
+  await processingMocks(page)
+  await logIn(page)
+
+  await page.goto('/practice/interview')
+  await page.getByRole('link', { name: 'Choose this prompt' }).first().click()
+  await recordOne(page)
+  const state = await currentState(request)
+  const attempt = attemptAt(state, 0)
+  const expectedTime = new Intl.DateTimeFormat('en-US', {
+    timeZone: state.profile.timezone ?? 'UTC',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(attempt.created_at))
+  const diagnostics = captureHydrationDiagnostics(page)
+
+  const assertHistory = async () => {
+    const row = page.locator(`a[href="/attempts/${attempt.id}"]`)
+    await expect(row).toBeVisible()
+    await expect(row.getByRole('time')).toHaveText(expectedTime)
+    await expect(row.getByRole('time')).toHaveAttribute('datetime', attempt.created_at)
+  }
+
+  await page.goto('/history')
+  await assertHistory()
+  await page.reload()
+  await assertHistory()
+  await page.goto('/home')
+  await page.getByRole('link', { name: 'History' }).click()
+  await assertHistory()
+  expect(diagnostics).toEqual([])
+
+  await page.locator(`a[href="/attempts/${attempt.id}"]`).click()
+  await expect(page).toHaveURL(new RegExp(`/attempts/${attempt.id}$`))
 }
 
 async function processingMocks(
@@ -383,6 +446,22 @@ test('history and progress start empty after an isolated reset', async ({ page }
   await expect(page.getByRole('heading', { name: 'Progress', level: 1 })).toHaveCount(1)
   await expect(page.getByRole('region', { name: 'Track progress' })).toBeVisible()
   await expect(page.getByText('No practice results yet')).toBeVisible()
+})
+
+test('history hydrates cleanly when server and browser timezones differ', async ({
+  page,
+  context,
+  request,
+}) => {
+  await verifyHistoryHydration(page, context, request)
+})
+
+test('@mobile History hydrates cleanly at a narrow viewport', async ({
+  page,
+  context,
+  request,
+}) => {
+  await verifyHistoryHydration(page, context, request)
 })
 
 test('records once, shows processing and v3 results, retries, compares, filters, and deletes', async ({

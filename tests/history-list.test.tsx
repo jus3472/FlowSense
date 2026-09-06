@@ -2,6 +2,8 @@
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { AnchorHTMLAttributes, ReactNode } from 'react'
+import { hydrateRoot, type Root } from 'react-dom/client'
+import { renderToString } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { HistoryList } from '@/components/history/history-list'
 import { deleteAttempt } from '@/lib/results/api'
@@ -34,7 +36,7 @@ vi.mock('@/lib/results/api', () => ({
 const entries: HistoryEntry[] = [
   {
     id: 'attempt-1',
-    createdAt: new Date(2026, 7, 25, 9, 5).toISOString(),
+    createdAt: '2026-08-25T13:05:00.000Z',
     promptText: 'Describe a place you know well.',
     score: 82,
     practiceMode: null,
@@ -42,6 +44,11 @@ const entries: HistoryEntry[] = [
     retryOfAttemptId: null,
   },
 ]
+
+const timeContext = {
+  renderedAt: '2026-08-25T16:00:00.000Z',
+  timezone: 'America/New_York',
+} as const
 
 describe('HistoryList', () => {
   beforeEach(() => {
@@ -51,14 +58,48 @@ describe('HistoryList', () => {
   })
 
   it('shows the response time in each history row', () => {
-    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+    render(<HistoryList {...timeContext} entries={entries} focusPhrase="with less filler" />)
 
     expect(screen.getByText(/9:05\sAM/)).toBeInTheDocument()
     expect(screen.getByText('General')).toBeInTheDocument()
   })
 
+  it('hydrates the serialized initial date when local midnight passes', async () => {
+    vi.useFakeTimers()
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const container = document.createElement('div')
+    document.body.append(container)
+    let root: Root | undefined
+    const initial = (
+      <HistoryList
+        entries={[{ ...entries[0]!, createdAt: '2026-09-05T03:30:00.000Z' }]}
+        focusPhrase="with less filler"
+        renderedAt="2026-09-05T03:49:00.000Z"
+        timezone="America/New_York"
+      />
+    )
+
+    try {
+      vi.setSystemTime('2026-09-05T03:49:00.000Z')
+      container.innerHTML = renderToString(initial)
+      vi.setSystemTime('2026-09-05T04:01:00.000Z')
+
+      await act(async () => {
+        root = hydrateRoot(container, initial)
+      })
+
+      expect(container).toHaveTextContent('Today')
+      expect(consoleError).not.toHaveBeenCalled()
+    } finally {
+      await act(async () => root?.unmount())
+      container.remove()
+      consoleError.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it('moves focus to confirm delete when confirmation opens', async () => {
-    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+    render(<HistoryList {...timeContext} entries={entries} focusPhrase="with less filler" />)
 
     const deleteButton = screen.getByRole('button', { name: 'Delete response' })
     fireEvent.click(deleteButton)
@@ -69,7 +110,7 @@ describe('HistoryList', () => {
   })
 
   it('exposes a named modal alert dialog and hides the covered row controls', async () => {
-    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+    render(<HistoryList {...timeContext} entries={entries} focusPhrase="with less filler" />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))
 
@@ -83,7 +124,7 @@ describe('HistoryList', () => {
   })
 
   it('cycles Tab and Shift+Tab within Confirm and Cancel', async () => {
-    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+    render(<HistoryList {...timeContext} entries={entries} focusPhrase="with less filler" />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))
     const dialog = await screen.findByRole('alertdialog', { name: 'Delete this response?' })
@@ -102,7 +143,7 @@ describe('HistoryList', () => {
   })
 
   it('dismisses delete confirmation on cancel and restores focus to delete', async () => {
-    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+    render(<HistoryList {...timeContext} entries={entries} focusPhrase="with less filler" />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel delete' }))
@@ -114,7 +155,7 @@ describe('HistoryList', () => {
   })
 
   it('dismisses delete confirmation on Escape and restores focus to delete', async () => {
-    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+    render(<HistoryList {...timeContext} entries={entries} focusPhrase="with less filler" />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))
     await screen.findByText('Delete this response?')
@@ -130,7 +171,7 @@ describe('HistoryList', () => {
 
   it('restores focus to delete when deletion fails', async () => {
     vi.mocked(deleteAttempt).mockRejectedValueOnce(new Error('It could not be deleted.'))
-    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+    render(<HistoryList {...timeContext} entries={entries} focusPhrase="with less filler" />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Confirm delete' }))
@@ -153,6 +194,7 @@ describe('HistoryList', () => {
     )
     render(
       <HistoryList
+        {...timeContext}
         entries={[
           entries[0]!,
           {
@@ -192,7 +234,7 @@ describe('HistoryList', () => {
 
   it('focuses the History container after deleting the final visible row', async () => {
     vi.mocked(deleteAttempt).mockResolvedValueOnce()
-    render(<HistoryList entries={entries} focusPhrase="with less filler" />)
+    render(<HistoryList {...timeContext} entries={entries} focusPhrase="with less filler" />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Confirm delete' }))
@@ -210,6 +252,7 @@ describe('HistoryList', () => {
 
     render(
       <HistoryList
+        {...timeContext}
         entries={[
           {
             id: 'attempt-100',
@@ -254,7 +297,7 @@ describe('HistoryList', () => {
         retryOfAttemptId: 'prior',
       },
     ]
-    render(<HistoryList entries={modeEntries} focusPhrase="with less filler" />)
+    render(<HistoryList {...timeContext} entries={modeEntries} focusPhrase="with less filler" />)
 
     expect(screen.getByText('General Practice · Library prompt')).toBeInTheDocument()
     expect(screen.getByText('Interview')).toBeInTheDocument()
@@ -266,6 +309,7 @@ describe('HistoryList', () => {
   it('shows structured lesson, stars, pass, checkpoint, and retry context', () => {
     render(
       <HistoryList
+        {...timeContext}
         entries={[
           {
             ...entries[0]!,
@@ -304,6 +348,7 @@ describe('HistoryList', () => {
   it('shows a structured below-threshold response as not passed', () => {
     render(
       <HistoryList
+        {...timeContext}
         entries={[
           {
             ...entries[0]!,
@@ -332,6 +377,7 @@ describe('HistoryList', () => {
   it('uses the metadata selector and explains an empty filter', () => {
     render(
       <HistoryList
+        {...timeContext}
         entries={[]}
         focusPhrase="with less filler"
         hasAnyEntries
@@ -349,6 +395,7 @@ describe('HistoryList', () => {
   it('links complete and partial rows through the canonical attempt route', () => {
     render(
       <HistoryList
+        {...timeContext}
         entries={[
           entries[0]!,
           {
@@ -376,6 +423,7 @@ describe('HistoryList', () => {
   it('keeps the active filters while paging through bounded history', () => {
     render(
       <HistoryList
+        {...timeContext}
         entries={entries}
         focusPhrase="with less filler"
         query={{ metadata: 'custom', page: 2 }}
@@ -397,6 +445,7 @@ describe('HistoryList', () => {
   it('uses a graceful prompt fallback without rendering score-trend UI', () => {
     render(
       <HistoryList
+        {...timeContext}
         entries={[
           { ...entries[0]!, id: 'missing', promptText: null },
           { ...entries[0]!, id: 'blank', promptText: '   ' },
@@ -414,6 +463,7 @@ describe('HistoryList', () => {
   it('keeps unsupported and partial responses visible with factual labels', () => {
     render(
       <HistoryList
+        {...timeContext}
         entries={[
           { ...entries[0]!, id: 'unsupported', resultKind: 'unsupported', score: null },
           { ...entries[0]!, id: 'partial', resultKind: 'partial', score: null },

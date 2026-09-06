@@ -9,6 +9,7 @@ import { focusPhrase, sanitizeFocusAreas } from '@/lib/focus-areas'
 import { historyHref, parseHistoryQuery, type HistorySearchParams } from '@/lib/results/history'
 import { loadHistoryPage, safeHistoryErrorCode } from '@/lib/results/history-server'
 import { createClient } from '@/lib/supabase/server'
+import { safeTimezone } from '@/lib/timezone'
 
 export const metadata: Metadata = {
   title: 'History',
@@ -31,11 +32,12 @@ export default async function HistoryPage({
   if (!user) redirect('/login')
 
   const [profileResult, historyResult] = await Promise.all([
-    supabase.from('profiles').select('focus_areas').eq('id', user.id).maybeSingle(),
+    supabase.from('profiles').select('focus_areas, timezone').eq('id', user.id).maybeSingle(),
     loadHistoryPage(supabase, user.id, parsed.query),
   ])
 
   const phrase = focusPhrase(sanitizeFocusAreas(profileResult.data?.focus_areas ?? []))
+  const timezone = safeTimezone(profileResult.data?.timezone)
   if (profileResult.error) {
     console.error('[history] profile preferences failed', {
       code: safeHistoryErrorCode(profileResult.error),
@@ -65,6 +67,8 @@ export default async function HistoryPage({
       <HistoryList
         entries={historyResult.data.entries}
         focusPhrase={phrase}
+        renderedAt={new Date().toISOString()}
+        timezone={timezone}
         query={parsed.query}
         hasAnyEntries={historyResult.data.hasAnyEntries}
         hasPrevious={historyResult.data.hasPrevious}

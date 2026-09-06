@@ -27,6 +27,7 @@ import {
   type V3MetricId,
   type V3ScorePayload,
 } from '@/lib/scoring/v3/contracts'
+import { UTC_TIMEZONE } from '@/lib/timezone'
 import { cn } from '@/lib/utils'
 
 interface V3ResultsViewProps {
@@ -41,6 +42,7 @@ interface V3ResultsViewProps {
   payload: V3ScorePayload
   comparison?: RetryComparison | null
   previousAttempts?: readonly LessonAttemptHistoryItem[]
+  timezone?: string
   curriculumResult?: StructuredLessonResultModel | null
 }
 
@@ -160,6 +162,7 @@ export function V3ResultsView({
   payload,
   comparison = null,
   previousAttempts = [],
+  timezone = UTC_TIMEZONE,
   curriculumResult = null,
 }: V3ResultsViewProps) {
   const complete = payload.total_earned_points !== null
@@ -397,7 +400,11 @@ export function V3ResultsView({
         ) : null}
       </section>
 
-      <PreviousAttempts attempts={previousAttempts} className="lg:col-start-2 lg:row-start-1" />
+      <PreviousAttempts
+        attempts={previousAttempts}
+        timezone={timezone}
+        className="lg:col-start-2 lg:row-start-1"
+      />
 
       <div className="flex min-w-0 flex-col gap-2 lg:col-start-2 lg:row-start-5 lg:pt-12">
         {curriculumResult ? (

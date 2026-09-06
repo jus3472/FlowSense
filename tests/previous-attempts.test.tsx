@@ -23,6 +23,7 @@ describe('PreviousAttempts', () => {
   it('renders compact immutable result links with scores, timestamps, and useful names', () => {
     render(
       <PreviousAttempts
+        timezone="America/Los_Angeles"
         attempts={[
           {
             attemptId: 'newer-attempt',
@@ -44,20 +45,22 @@ describe('PreviousAttempts', () => {
     expect(screen.getAllByRole('time')).toHaveLength(2)
 
     const scored = screen.getByRole('link', {
-      name: /View attempt scored 84 out of 100 from September 4, 2026 at/i,
+      name: 'View attempt scored 84 out of 100 from September 4, 2026 at 1:42 PM',
     })
     expect(scored).toHaveAttribute('href', '/attempts/newer-attempt')
     expect(scored).toHaveClass('min-h-11', 'focus-visible:bg-surface-sunken')
+    expect(screen.getByText('Sep 4, 2026 · 1:42 PM')).toBeInTheDocument()
 
     const unavailable = screen.getByRole('link', {
-      name: /View unavailable attempt from September 3, 2026 at/i,
+      name: 'View unavailable attempt from September 3, 2026 at 11:15 AM',
     })
     expect(unavailable).toHaveAttribute('href', '/attempts/older-unavailable')
+    expect(screen.getByText('Sep 3, 2026 · 11:15 AM')).toBeInTheDocument()
     expect(screen.queryByText(/lesson/i)).not.toBeInTheDocument()
   })
 
   it('hides the section when there are no other attempts', () => {
-    const { container } = render(<PreviousAttempts attempts={[]} />)
+    const { container } = render(<PreviousAttempts attempts={[]} timezone="America/New_York" />)
     expect(container).toBeEmptyDOMElement()
   })
 
@@ -65,6 +68,7 @@ describe('PreviousAttempts', () => {
     render(
       <PreviousAttempts
         className="lg:col-start-2 lg:row-start-1"
+        timezone="America/Los_Angeles"
         attempts={[
           {
             attemptId: 'attempt-1',

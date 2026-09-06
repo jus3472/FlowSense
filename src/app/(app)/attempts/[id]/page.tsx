@@ -25,6 +25,7 @@ import { readAttemptResult, storedTranscriptWords } from '@/lib/results/attempt-
 import { loadLessonAttemptHistoryForUser } from '@/lib/results/lesson-attempt-history'
 import { compareV3RetryResults, loadRetryAncestorChain } from '@/lib/results/retry-comparison'
 import { createClient } from '@/lib/supabase/server'
+import { safeTimezone, UTC_TIMEZONE } from '@/lib/timezone'
 import type { AttemptRow } from '@/lib/types/database'
 
 export const metadata: Metadata = {
@@ -270,6 +271,35 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     return history.data
   }
 
+  const loadResultTimezone = async () => {
+    if (!attempt.lesson_id) return UTC_TIMEZONE
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('timezone')
+        .eq('id', user.id)
+        .maybeSingle()
+      if (error) {
+        logAttemptDiagnostic(
+          'load_result_timezone',
+          'profile_timezone_read_failed',
+          attempt.id,
+          error,
+        )
+        return UTC_TIMEZONE
+      }
+      return safeTimezone(data?.timezone)
+    } catch (error) {
+      logAttemptDiagnostic(
+        'load_result_timezone',
+        'profile_timezone_read_failed',
+        attempt.id,
+        error,
+      )
+      return UTC_TIMEZONE
+    }
+  }
+
   if (result.kind === 'v3') {
     let comparison = null
     if (attempt.retry_of_attempt_id) {
@@ -338,6 +368,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
             .additional_context
         : null
     const previousAttemptsPromise = loadPreviousAttempts()
+    const timezonePromise = loadResultTimezone()
     const curriculumResult = attempt.lesson_id
       ? await loadStructuredLessonResultForUser(supabase, user.id, {
           lessonId: attempt.lesson_id,
@@ -351,7 +382,10 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
           snapshotScore: result.payload.total_earned_points,
         })
       : null
-    const previousAttempts = await previousAttemptsPromise
+    const [previousAttempts, timezone] = await Promise.all([
+      previousAttemptsPromise,
+      timezonePromise,
+    ])
 
     return (
       <V3ResultsView
@@ -366,6 +400,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
         payload={result.payload}
         comparison={comparison}
         previousAttempts={previousAttempts}
+        timezone={timezone}
         curriculumResult={curriculumResult?.status === 'ready' ? curriculumResult.data : null}
       />
     )

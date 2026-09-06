@@ -75,6 +75,8 @@ const ICON_BUTTON =
 export function HistoryList({
   entries: initial,
   focusPhrase,
+  renderedAt,
+  timezone,
   query = DEFAULT_HISTORY_QUERY,
   hasAnyEntries = initial.length > 0,
   hasPrevious = false,
@@ -82,6 +84,8 @@ export function HistoryList({
 }: {
   entries: HistoryEntry[]
   focusPhrase: string
+  renderedAt: string
+  timezone: string
   query?: HistoryQuery
   hasAnyEntries?: boolean
   hasPrevious?: boolean
@@ -101,7 +105,7 @@ export function HistoryList({
   const focusAfterDeleteRef = useRef<{ targetId: string | null } | null>(null)
 
   const entries = initial.filter((entry) => !removedIds.has(entry.id))
-  const groups = groupByDay(entries)
+  const groups = groupByDay(entries, new Date(renderedAt), timezone)
 
   const dismissConfirmation = useCallback((id: string, returnFocus: boolean) => {
     if (returnFocus) focusAfterDismissRef.current = id
@@ -280,7 +284,7 @@ export function HistoryList({
                       dateTime={entry.createdAt}
                       className="numeric text-muted mt-1 block text-xs"
                     >
-                      {timeLabel(entry.createdAt)}
+                      {timeLabel(entry.createdAt, timezone)}
                     </time>
                   </div>
                   <span className="flex shrink-0 flex-col items-end gap-1 text-right">

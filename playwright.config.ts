@@ -1,11 +1,13 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const appEnv = {
+  LANG: 'C',
   NEXT_PUBLIC_SUPABASE_URL: 'http://127.0.0.1:54321',
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'e2e-fake-publishable-key',
   SUPABASE_SECRET_KEY: 'e2e-fake-secret-key',
   DEEPGRAM_API_KEY: 'e2e-never-used',
   DEEPSEEK_API_KEY: 'e2e-never-used',
+  TZ: 'UTC',
 }
 
 export default defineConfig({
@@ -41,12 +43,23 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
+        timezoneId: 'America/New_York',
         launchOptions: {
           args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
         },
       },
       grepInvert: /@mobile/,
     },
-    { name: 'mobile-chromium', use: { ...devices['Pixel 7'] }, grep: /@mobile/ },
+    {
+      name: 'mobile-chromium',
+      use: {
+        ...devices['Pixel 7'],
+        timezoneId: 'Asia/Tokyo',
+        launchOptions: {
+          args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+        },
+      },
+      grep: /@mobile/,
+    },
   ],
 })
