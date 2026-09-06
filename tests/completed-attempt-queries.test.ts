@@ -9,7 +9,9 @@ describe('completed attempt query boundaries', () => {
   it('requires done status for Progress and removes the temporary lifecycle seam', () => {
     const progress = source('src/lib/progress/server.ts')
 
-    expect(progress).toContain('retry_of_attempt_id, status')
+    expect(progress).toContain(
+      "'id, finished_at, prompt_text, retry_of_attempt_id, score, section_scores, practice_mode, prompt_source, rubric_version, status'",
+    )
     expect(progress.match(/\.eq\('status', 'done'\)/g)).toHaveLength(1)
     expect(progress).not.toContain('Task B')
   })

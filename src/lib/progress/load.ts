@@ -1,56 +1,74 @@
-import type { ProgressRetryAttemptInput } from '@/lib/progress/retries'
+import {
+  PRACTICE_MODES,
+  PROMPT_SOURCES,
+  type PracticeMode,
+  type PromptSource,
+} from '@/lib/practice/contracts'
+import type { ProgressAttemptInput } from '@/lib/progress/v3-aggregation'
 
 export type ProgressAttemptRowsOutcome =
-  | { status: 'ready'; attempts: readonly ProgressRetryAttemptInput[]; truncated: boolean }
+  | { status: 'ready'; attempts: readonly ProgressAttemptInput[] }
   | { status: 'failure'; reason: 'query' | 'invalid_response' }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function parseAttemptRow(value: unknown): ProgressRetryAttemptInput | null {
+function validScore(value: unknown): value is number | null {
+  return (
+    value === null ||
+    (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 100)
+  )
+}
+
+function parseAttemptRow(value: unknown): ProgressAttemptInput | null {
   if (!isRecord(value)) return null
-  if (value.status !== 'done') return null
-  if (typeof value.id !== 'string' || value.id.length === 0) return null
-  if (typeof value.created_at !== 'string') return null
-  if (value.retry_of_attempt_id !== null && typeof value.retry_of_attempt_id !== 'string') {
+  if (
+    value.status !== 'done' ||
+    typeof value.id !== 'string' ||
+    value.id.length === 0 ||
+    typeof value.finished_at !== 'string' ||
+    !Number.isFinite(Date.parse(value.finished_at)) ||
+    typeof value.prompt_text !== 'string' ||
+    value.prompt_text.trim().length === 0 ||
+    (value.retry_of_attempt_id !== null && typeof value.retry_of_attempt_id !== 'string') ||
+    !validScore(value.score) ||
+    !(PRACTICE_MODES as readonly unknown[]).includes(value.practice_mode) ||
+    !(PROMPT_SOURCES as readonly unknown[]).includes(value.prompt_source) ||
+    typeof value.rubric_version !== 'string'
+  ) {
     return null
   }
 
   return {
     id: value.id,
-    createdAt: value.created_at,
+    finishedAt: value.finished_at,
+    promptText: value.prompt_text,
     retryOfAttemptId: value.retry_of_attempt_id,
+    score: value.score,
     sectionScores: value.section_scores,
+    practiceMode: value.practice_mode as PracticeMode,
+    promptSource: value.prompt_source as PromptSource,
+    rubricVersion: value.rubric_version,
+    status: 'done',
   }
 }
 
-/**
- * Keeps a legitimate empty query distinct from failure and removes the final
- * lookahead row from a newest-first bounded response.
- */
+/** Distinguishes a legitimate empty page from query and response failures. */
 export function readProgressAttemptRows(
   data: unknown,
   queryFailed: boolean,
-  includedAttemptLimit: number,
 ): ProgressAttemptRowsOutcome {
   if (queryFailed) return { status: 'failure', reason: 'query' }
   if (!Array.isArray(data)) return { status: 'failure', reason: 'invalid_response' }
-  if (!Number.isSafeInteger(includedAttemptLimit) || includedAttemptLimit < 1) {
-    return { status: 'failure', reason: 'invalid_response' }
-  }
 
-  const attempts: ProgressRetryAttemptInput[] = []
+  const attempts: ProgressAttemptInput[] = []
   for (const row of data) {
     const attempt = parseAttemptRow(row)
     if (!attempt) return { status: 'failure', reason: 'invalid_response' }
     attempts.push(attempt)
   }
-  return {
-    status: 'ready',
-    attempts: attempts.slice(0, includedAttemptLimit),
-    truncated: attempts.length > includedAttemptLimit,
-  }
+  return { status: 'ready', attempts }
 }
 
 /** Returns only a bounded diagnostic code, never provider text or row contents. */

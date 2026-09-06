@@ -1,75 +1,119 @@
 import 'server-only'
 
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { readProgressAttemptRows, safeProgressErrorCode } from '@/lib/progress/load'
 import {
-  recentRetryComparisons,
-  type ProgressRetryComparison,
-} from '@/lib/progress/retries'
-import {
   aggregateV3Progress,
+  type ProgressAttemptInput,
+  type ProgressFilter,
   type V3ProgressAggregation,
 } from '@/lib/progress/v3-aggregation'
-import type { PracticeMode } from '@/lib/practice/contracts'
 import { createClient } from '@/lib/supabase/server'
+import { safeTimezone, UTC_TIMEZONE } from '@/lib/timezone'
+import type { Database } from '@/lib/types/database'
 
-/**
- * Maximum completed snapshots included in one dashboard. One extra row is queried
- * as a truncation sentinel so the UI can disclose omitted older responses.
- */
-export const PROGRESS_COMPLETED_ATTEMPT_LIMIT = 200
+export const PROGRESS_QUERY_PAGE_SIZE = 500
 
-export interface ProgressQueryCoverage {
-  completedAttemptLimit: number
-  truncated: boolean
-}
+const PROGRESS_ATTEMPT_COLUMNS =
+  'id, finished_at, prompt_text, retry_of_attempt_id, score, section_scores, practice_mode, prompt_source, rubric_version, status'
 
 export interface ProgressDashboardData {
   progress: V3ProgressAggregation
-  retryComparisons: readonly ProgressRetryComparison[]
-  coverage: ProgressQueryCoverage
+  timezone: string
 }
 
 export type ProgressDashboardLoadResult =
   | { status: 'ready'; data: ProgressDashboardData }
   | { status: 'failure'; reason: 'query' | 'invalid_response' }
 
-/** User-scoped retrieval seam for the progress server component. */
+async function loadProgressAttempts(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  now: Date,
+  filter: ProgressFilter,
+): Promise<
+  | { status: 'ready'; attempts: readonly ProgressAttemptInput[] }
+  | { status: 'failure'; reason: 'query' | 'invalid_response'; error?: unknown }
+> {
+  const attempts: ProgressAttemptInput[] = []
+  for (let from = 0; ; from += PROGRESS_QUERY_PAGE_SIZE) {
+    let query = supabase
+      .from('attempts')
+      .select(PROGRESS_ATTEMPT_COLUMNS)
+      .eq('user_id', userId)
+      .eq('status', 'done')
+      .eq('rubric_version', 'v3')
+      .in('prompt_source', ['library', 'custom'])
+      .lte('finished_at', now.toISOString())
+
+    if (filter !== 'all') query = query.eq('practice_mode', filter)
+
+    const { data, error } = await query
+      .order('finished_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + PROGRESS_QUERY_PAGE_SIZE - 1)
+    const page = readProgressAttemptRows(data, error !== null)
+    if (page.status === 'failure') return { ...page, error }
+
+    attempts.push(...page.attempts)
+    if (page.attempts.length < PROGRESS_QUERY_PAGE_SIZE) break
+  }
+  return { status: 'ready', attempts }
+}
+
+async function loadProgressTimezone(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+): Promise<string> {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('timezone')
+      .eq('id', userId)
+      .maybeSingle()
+    if (error) {
+      console.error('[progress] timezone load failed', {
+        code: safeProgressErrorCode(error),
+      })
+      return UTC_TIMEZONE
+    }
+    return safeTimezone(data?.timezone)
+  } catch (error) {
+    console.error('[progress] timezone load failed', {
+      code: safeProgressErrorCode(error),
+    })
+    return UTC_TIMEZONE
+  }
+}
+
+/** Loads every eligible current result without imposing a product history cap. */
 export async function getProgressDashboardData(
   userId: string,
-  options: { now: Date; mode?: PracticeMode },
+  options: { now: Date; filter?: ProgressFilter },
 ): Promise<ProgressDashboardLoadResult> {
   try {
     const supabase = await createClient()
-    const { data, error } = await supabase
-      .from('attempts')
-      .select('id, created_at, section_scores, retry_of_attempt_id, status')
-      .eq('user_id', userId)
-      .eq('status', 'done')
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-      .limit(PROGRESS_COMPLETED_ATTEMPT_LIMIT + 1)
-
-    const rows = readProgressAttemptRows(data, error !== null, PROGRESS_COMPLETED_ATTEMPT_LIMIT)
-    if (rows.status === 'failure') {
+    const filter = options.filter ?? 'all'
+    const [attemptsResult, timezone] = await Promise.all([
+      loadProgressAttempts(supabase, userId, options.now, filter),
+      loadProgressTimezone(supabase, userId),
+    ])
+    if (attemptsResult.status === 'failure') {
       console.error('[progress] attempt load failed', {
-        reason: rows.reason,
-        code: safeProgressErrorCode(error),
+        reason: attemptsResult.reason,
+        code: safeProgressErrorCode(attemptsResult.error),
       })
-      return rows
+      return { status: 'failure', reason: attemptsResult.reason }
     }
 
     return {
       status: 'ready',
       data: {
-        progress: aggregateV3Progress(rows.attempts, options),
-        retryComparisons: recentRetryComparisons(rows.attempts, {
+        progress: aggregateV3Progress(attemptsResult.attempts, {
           now: options.now,
-          mode: options.mode,
+          filter,
         }),
-        coverage: {
-          completedAttemptLimit: PROGRESS_COMPLETED_ATTEMPT_LIMIT,
-          truncated: rows.truncated,
-        },
+        timezone,
       },
     }
   } catch (error) {

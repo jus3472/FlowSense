@@ -1,44 +1,28 @@
-import type { ProgressSeries } from '@/lib/progress/v3-aggregation'
+import type { Route } from 'next'
 import { PRACTICE_MODES, type PracticeMode } from '@/lib/practice/contracts'
+import type { ProgressFilter } from '@/lib/progress/v3-aggregation'
 
-export type ProgressModeParseResult =
-  { status: 'valid'; mode?: PracticeMode } | { status: 'invalid' }
+export const PROGRESS_FILTERS = ['all', ...PRACTICE_MODES] as const
 
-export function parseProgressMode(value: unknown): ProgressModeParseResult {
-  if (value === undefined) return { status: 'valid' }
+export const PROGRESS_FILTER_LABELS: Readonly<Record<ProgressFilter, string>> = Object.freeze({
+  all: 'All',
+  practice: 'General Speaking',
+  interview: 'Interviews',
+  presentation: 'Presentations',
+  conversation: 'Conversations',
+})
+
+export type ProgressFilterParseResult =
+  { status: 'valid'; filter: ProgressFilter } | { status: 'invalid' }
+
+export function parseProgressFilter(value: unknown): ProgressFilterParseResult {
+  if (value === undefined) return { status: 'valid', filter: 'all' }
   if (typeof value !== 'string' || !(PRACTICE_MODES as readonly string[]).includes(value)) {
     return { status: 'invalid' }
   }
-  return { status: 'valid', mode: value as PracticeMode }
+  return { status: 'valid', filter: value as PracticeMode }
 }
 
-export function selectProgressDimension<Dimension extends string>(
-  dimensions: readonly Dimension[],
-  series: Readonly<Record<Dimension, ProgressSeries>>,
-  descending: boolean,
-): Dimension | null {
-  const comparable = dimensions.map((dimension) => ({ dimension, series: series[dimension] }))
-  const referencePopulation = comparable[0]?.series.points.map((point) => point.attemptId) ?? []
-  if (
-    comparable.some(
-      ({ series: candidate }) =>
-        candidate.state !== 'ready' ||
-        candidate.averageValue === null ||
-        !Number.isFinite(candidate.averageValue) ||
-        candidate.valueCount !== candidate.points.length ||
-        candidate.points.length !== referencePopulation.length ||
-        candidate.points.some((point, index) => point.attemptId !== referencePopulation[index]),
-    )
-  ) {
-    return null
-  }
-  const ranked = comparable.sort((left, right) => {
-    const delta = (right.series.averageValue ?? 0) - (left.series.averageValue ?? 0)
-    return descending ? delta : -delta
-  })
-  const first = ranked[0]
-  const second = ranked[1]
-  return first && (!second || first.series.averageValue !== second.series.averageValue)
-    ? first.dimension
-    : null
+export function progressFilterHref(filter: ProgressFilter): Route {
+  return (filter === 'all' ? '/progress' : `/progress?mode=${filter}`) as Route
 }

@@ -32,14 +32,12 @@ describe('major page titles', () => {
   })
 
   it('keeps the Progress introduction to one primary title', () => {
-    const page = readFileSync('src/app/(app)/progress/page.tsx', 'utf8')
     const dashboard = readFileSync('src/components/progress/progress-dashboard.tsx', 'utf8')
-    const curriculum = readFileSync('src/components/progress/curriculum-progress.tsx', 'utf8')
 
-    expect(page).toContain('<PageTitle>Progress</PageTitle>')
+    expect(dashboard).toContain('<PageTitle>Progress</PageTitle>')
     expect(dashboard).not.toContain('Your progress')
-    expect(curriculum).not.toContain('Path progress')
-    expect(curriculum).not.toContain('Your lesson progress stays with each path.')
+    expect(dashboard).not.toContain('Track progress')
+    expect(dashboard).not.toContain('Path progress')
   })
 })
 

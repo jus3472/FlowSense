@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { PROGRESS_COMPLETED_ATTEMPT_LIMIT, getProgressDashboardData } from '@/lib/progress/server'
 import { v3Snapshot } from './helpers/result-snapshots'
 
 const mocks = vi.hoisted(() => ({ createClient: vi.fn() }))
@@ -7,193 +6,180 @@ const mocks = vi.hoisted(() => ({ createClient: vi.fn() }))
 vi.mock('server-only', () => ({}))
 vi.mock('@/lib/supabase/server', () => ({ createClient: mocks.createClient }))
 
-interface ProgressRow {
-  id: string
-  user_id: string
-  created_at: string
-  section_scores: unknown
-  retry_of_attempt_id: string | null
-  status: string
-}
+import { getProgressDashboardData, PROGRESS_QUERY_PAGE_SIZE } from '@/lib/progress/server'
 
 interface Operation {
   method: string
-  args: unknown[]
+  column?: string
+  value?: unknown
+  from?: number
+  to?: number
 }
 
-class FakeProgressQuery implements PromiseLike<{
-  data: ProgressRow[] | null
-  error: { code: string } | null
-}> {
-  readonly operations: Operation[] = []
-
-  constructor(
-    private readonly rows: readonly ProgressRow[],
-    private readonly error: { code: string } | null = null,
-  ) {}
-
-  private add(method: string, ...args: unknown[]): this {
-    this.operations.push({ method, args })
-    return this
-  }
-
-  select(columns: string): this {
-    return this.add('select', columns)
-  }
-
-  eq(column: string, value: unknown): this {
-    return this.add('eq', column, value)
-  }
-
-  order(column: string, options: { ascending: boolean }): this {
-    return this.add('order', column, options)
-  }
-
-  limit(value: number): this {
-    return this.add('limit', value)
-  }
-
-  then<TResult1 = { data: ProgressRow[] | null; error: { code: string } | null }, TResult2 = never>(
-    onfulfilled?:
-      | ((value: {
-          data: ProgressRow[] | null
-          error: { code: string } | null
-        }) => TResult1 | PromiseLike<TResult1>)
-      | null,
-    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
-  ): Promise<TResult1 | TResult2> {
-    if (this.error) return Promise.resolve({ data: null, error: this.error }).then(onfulfilled)
-
-    let output = [...this.rows]
-    for (const operation of this.operations) {
-      if (operation.method !== 'eq') continue
-      const [column, value] = operation.args
-      output = output.filter((row) => row[column as keyof ProgressRow] === value)
-    }
-    const orders = this.operations.filter((operation) => operation.method === 'order')
-    for (const operation of [...orders].reverse()) {
-      const [column, options] = operation.args as [keyof ProgressRow, { ascending: boolean }]
-      output.sort((left, right) => {
-        const comparison = String(left[column]).localeCompare(String(right[column]))
-        return options.ascending ? comparison : -comparison
-      })
-    }
-    const limit = this.operations.find((operation) => operation.method === 'limit')
-    if (limit) output = output.slice(0, Number(limit.args[0]))
-    return Promise.resolve({ data: output, error: null }).then(onfulfilled, onrejected)
-  }
-}
-
-function row(id: string, over: Partial<ProgressRow> = {}): ProgressRow {
+function attemptRow(id: string) {
+  const snapshot = v3Snapshot()
   return {
     id,
-    user_id: 'user-1',
-    created_at: '2026-08-25T12:00:00.000Z',
-    section_scores: v3Snapshot(),
+    finished_at: '2026-09-04T12:00:00.000Z',
+    prompt_text: `Prompt ${id}`,
     retry_of_attempt_id: null,
+    score: snapshot.total_earned_points,
+    section_scores: snapshot,
+    practice_mode: 'practice',
+    prompt_source: 'library',
+    rubric_version: 'v3',
     status: 'done',
-    ...over,
   }
 }
 
-function useQuery(rows: readonly ProgressRow[], error: { code: string } | null = null) {
-  const query = new FakeProgressQuery(rows, error)
-  const from = vi.fn(() => query)
-  mocks.createClient.mockResolvedValue({ from })
-  return { from, query }
+function setup(rows: readonly ReturnType<typeof attemptRow>[], failFrom?: number) {
+  const operations: Operation[] = []
+  const attemptQuery = () => {
+    const query = {
+      select: vi.fn((_columns: string) => query),
+      eq: vi.fn((column: string, value: unknown) => {
+        operations.push({ method: 'eq', column, value })
+        return query
+      }),
+      in: vi.fn((column: string, value: unknown) => {
+        operations.push({ method: 'in', column, value })
+        return query
+      }),
+      lte: vi.fn((column: string, value: unknown) => {
+        operations.push({ method: 'lte', column, value })
+        return query
+      }),
+      order: vi.fn((column: string, value: unknown) => {
+        operations.push({ method: 'order', column, value })
+        return query
+      }),
+      range: vi.fn(async (from: number, to: number) => {
+        operations.push({ method: 'range', from, to })
+        return from === failFrom
+          ? { data: null, error: { code: 'FAKE_PAGE_FAILURE', message: 'private' } }
+          : { data: rows.slice(from, to + 1), error: null }
+      }),
+    }
+    return query
+  }
+  const profileQuery = {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn().mockResolvedValue({
+      data: { timezone: 'America/Los_Angeles' },
+      error: null,
+    }),
+  }
+  const client = {
+    from: vi.fn((table: string) => (table === 'profiles' ? profileQuery : attemptQuery())),
+  }
+  return { client, operations, profileQuery }
 }
 
 beforeEach(() => {
-  mocks.createClient.mockReset()
-  vi.restoreAllMocks()
+  vi.clearAllMocks()
 })
 
-describe('progress server query window', () => {
-  it('uses one stable bounded query and discloses truncation', async () => {
-    const attempts = Array.from({ length: PROGRESS_COMPLETED_ATTEMPT_LIMIT + 2 }, (_, index) =>
-      row(`attempt-${String(index).padStart(3, '0')}`),
+describe('progress server loading', () => {
+  it('loads full paginated history in finished-at and id order with local timezone', async () => {
+    const rows = Array.from({ length: PROGRESS_QUERY_PAGE_SIZE + 1 }, (_, index) =>
+      attemptRow(`attempt-${String(index).padStart(3, '0')}`),
     )
-    attempts.push(row('other-user', { user_id: 'user-2' }))
-    attempts.push(row('not-done', { status: 'failed' }))
-    const setup = useQuery(attempts)
+    const fake = setup(rows)
+    mocks.createClient.mockResolvedValue(fake.client)
 
     const result = await getProgressDashboardData('user-1', {
-      now: new Date('2026-08-26T12:00:00.000Z'),
+      now: new Date('2026-09-05T12:00:00.000Z'),
+      filter: 'all',
     })
 
-    expect(setup.from).toHaveBeenCalledOnce()
-    expect(setup.query.operations).toEqual([
+    expect(result).toMatchObject({
+      status: 'ready',
+      data: {
+        timezone: 'America/Los_Angeles',
+        progress: { counts: { included: PROGRESS_QUERY_PAGE_SIZE + 1 } },
+      },
+    })
+    expect(fake.operations.filter(({ method }) => method === 'range')).toEqual([
+      { method: 'range', from: 0, to: PROGRESS_QUERY_PAGE_SIZE - 1 },
       {
-        method: 'select',
-        args: ['id, created_at, section_scores, retry_of_attempt_id, status'],
+        method: 'range',
+        from: PROGRESS_QUERY_PAGE_SIZE,
+        to: PROGRESS_QUERY_PAGE_SIZE * 2 - 1,
       },
-      { method: 'eq', args: ['user_id', 'user-1'] },
-      { method: 'eq', args: ['status', 'done'] },
-      { method: 'order', args: ['created_at', { ascending: false }] },
-      { method: 'order', args: ['id', { ascending: false }] },
-      { method: 'limit', args: [PROGRESS_COMPLETED_ATTEMPT_LIMIT + 1] },
     ])
-    expect(result).toMatchObject({
-      status: 'ready',
-      data: {
-        coverage: {
-          completedAttemptLimit: PROGRESS_COMPLETED_ATTEMPT_LIMIT,
-          truncated: true,
-        },
-        progress: { counts: { input: PROGRESS_COMPLETED_ATTEMPT_LIMIT } },
-      },
+    expect(fake.operations).toContainEqual({
+      method: 'order',
+      column: 'finished_at',
+      value: { ascending: true },
     })
-    if (result.status === 'ready') {
-      expect(result.data.progress.windows.all.overall.points.at(0)?.attemptId).toBe('attempt-002')
-      expect(result.data.progress.windows.all.overall.points.at(-1)?.attemptId).toBe('attempt-201')
-    }
+    expect(fake.operations).toContainEqual({
+      method: 'order',
+      column: 'id',
+      value: { ascending: true },
+    })
+    expect(fake.profileQuery.select).toHaveBeenCalledWith('timezone')
   })
 
-  it('preserves a successful empty state without a truncation claim', async () => {
-    useQuery([])
+  it('applies the selected canonical mode before paging', async () => {
+    const fake = setup([attemptRow('attempt')])
+    mocks.createClient.mockResolvedValue(fake.client)
 
-    await expect(
-      getProgressDashboardData('user-1', { now: new Date('2026-08-26T12:00:00.000Z') }),
-    ).resolves.toMatchObject({
-      status: 'ready',
-      data: {
-        coverage: { truncated: false },
-        progress: { counts: { input: 0, included: 0 } },
-      },
+    await getProgressDashboardData('user-1', {
+      now: new Date('2026-09-05T12:00:00.000Z'),
+      filter: 'practice',
     })
-  })
 
-  it('excludes old generations from the current aggregation', async () => {
-    const current = v3Snapshot()
-    useQuery([
-      row('v3', { section_scores: current, created_at: '2026-08-25T12:00:00.000Z' }),
-      row('old', {
-        section_scores: { ...current, version: 'v3.score.1' },
-        created_at: '2026-08-24T12:00:00.000Z',
-      }),
-    ])
-
-    const result = await getProgressDashboardData('user-1', {
-      now: new Date('2026-08-26T12:00:00.000Z'),
+    expect(fake.operations).toContainEqual({ method: 'eq', column: 'user_id', value: 'user-1' })
+    expect(fake.operations).toContainEqual({ method: 'eq', column: 'status', value: 'done' })
+    expect(fake.operations).toContainEqual({ method: 'eq', column: 'rubric_version', value: 'v3' })
+    expect(fake.operations).toContainEqual({
+      method: 'eq',
+      column: 'practice_mode',
+      value: 'practice',
     })
-    expect(result).toMatchObject({
-      status: 'ready',
-      data: {
-        progress: { counts: { included: 1, unsupportedVersion: 1 } },
-      },
+    expect(fake.operations).toContainEqual({
+      method: 'in',
+      column: 'prompt_source',
+      value: ['library', 'custom'],
     })
   })
 
-  it('keeps query errors distinct from empty data', async () => {
-    useQuery([], { code: 'QUERY_FAILED' })
+  it('fails the whole load when a later page fails without logging provider text', async () => {
+    const rows = Array.from({ length: PROGRESS_QUERY_PAGE_SIZE }, (_, index) =>
+      attemptRow(`attempt-${index}`),
+    )
+    const fake = setup(rows, PROGRESS_QUERY_PAGE_SIZE)
+    mocks.createClient.mockResolvedValue(fake.client)
     const logging = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    await expect(
-      getProgressDashboardData('user-1', { now: new Date('2026-08-26T12:00:00.000Z') }),
-    ).resolves.toEqual({ status: 'failure', reason: 'query' })
+    const result = await getProgressDashboardData('user-1', {
+      now: new Date('2026-09-05T12:00:00.000Z'),
+      filter: 'all',
+    })
+
+    expect(result).toEqual({ status: 'failure', reason: 'query' })
     expect(logging).toHaveBeenCalledWith('[progress] attempt load failed', {
       reason: 'query',
-      code: 'QUERY_FAILED',
+      code: 'FAKE_PAGE_FAILURE',
     })
+    expect(JSON.stringify(logging.mock.calls)).not.toContain('private')
+    logging.mockRestore()
+  })
+
+  it('falls back to UTC when the stored timezone is invalid', async () => {
+    const fake = setup([])
+    fake.profileQuery.maybeSingle.mockResolvedValueOnce({
+      data: { timezone: 'Mars/Olympus' },
+      error: null,
+    })
+    mocks.createClient.mockResolvedValue(fake.client)
+
+    const result = await getProgressDashboardData('user-1', {
+      now: new Date('2026-09-05T12:00:00.000Z'),
+      filter: 'all',
+    })
+
+    expect(result).toMatchObject({ status: 'ready', data: { timezone: 'UTC' } })
   })
 })

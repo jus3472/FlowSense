@@ -1,91 +1,113 @@
-import type { PracticeMode } from '@/lib/practice/contracts'
+import { PRACTICE_MODES, type PracticeMode, type PromptSource } from '@/lib/practice/contracts'
 import { decodeStoredSectionSnapshot } from '@/lib/results/snapshot'
 import {
+  HOW_YOU_SOUNDED_METRICS,
   V3_METRIC_IDS,
+  V3_RUBRIC_VERSION,
+  V3_SECTION_IDS,
+  WHAT_YOU_SAID_METRICS,
+  type V3Measurements,
   type V3MetricId,
   type V3PersistedMetricScore,
   type V3ScorePayload,
+  type V3SectionId,
 } from '@/lib/scoring/v3/contracts'
 
-export const RECENT_PROGRESS_WINDOW_DAYS = 7
-export const LONGER_HISTORY_WINDOW_DAYS = 28
 export const MINIMUM_PROGRESS_OBSERVATIONS = 2
+export const COMPACT_PROGRESS_POINT_COUNT = 10
+
+export const PROGRESS_DIMENSION_IDS = [
+  'overall',
+  ...V3_SECTION_IDS,
+  ...WHAT_YOU_SAID_METRICS,
+  ...HOW_YOU_SOUNDED_METRICS,
+] as const
+
+export type ProgressDimensionId = (typeof PROGRESS_DIMENSION_IDS)[number]
+export type ProgressFilter = 'all' | PracticeMode
+export type ProgressSeriesView = 'compact' | 'expanded'
 
 export interface ProgressAttemptInput {
   id: string
-  createdAt: string
+  finishedAt: string
+  promptText: string
+  retryOfAttemptId: string | null
+  score: number | null
   sectionScores: unknown
+  practiceMode: PracticeMode
+  promptSource: PromptSource
+  rubricVersion: string
+  status: 'done'
 }
 
 export interface ProgressPoint {
   attemptId: string
-  createdAt: string
+  finishedAt: string
+  mode: PracticeMode
+  promptText: string
+  retryOfAttemptId: string | null
   value: number
   valueOutOf: 100
+  earnedPoints: number
+  maxPoints: number
+  raw: { component: number; measurements: V3Measurements | null } | null
 }
 
 export interface ProgressSeries {
   points: readonly ProgressPoint[]
-  valueCount: number
-  state: 'ready' | 'insufficient_data'
+  observationCount: number
+  latestValue: number | null
   averageValue: number | null
-}
-
-export interface V3ProgressWindow {
-  attemptCount: number
-  overall: ProgressSeries
-  metrics: Readonly<Record<V3MetricId, ProgressSeries>>
+  state: 'empty' | 'insufficient_data' | 'ready'
 }
 
 export interface V3ProgressAggregation {
-  metricIds: readonly V3MetricId[]
+  filter: ProgressFilter
+  dimensionIds: readonly ProgressDimensionId[]
   counts: {
     input: number
-    validV3: number
     included: number
-    incomplete: number
+    complete: number
+    partial: number
     malformed: number
     unsupportedVersion: number
+    metadataMismatch: number
+    invalidTimestamp: number
     excludedMode: number
   }
-  windows: {
-    all: V3ProgressWindow
-    recent: V3ProgressWindow
-    longerHistory: V3ProgressWindow
-  }
+  overall: ProgressSeries
+  sections: Readonly<Record<V3SectionId, ProgressSeries>>
+  metrics: Readonly<Record<V3MetricId, ProgressSeries>>
 }
 
-interface AcceptedAttempt {
-  id: string
-  createdAt: string
+interface AcceptedAttempt extends ProgressAttemptInput {
   time: number
   payload: V3ScorePayload
-}
-
-function emptySeries(): ProgressSeries {
-  return { points: [], valueCount: 0, state: 'insufficient_data', averageValue: null }
 }
 
 function series(points: readonly ProgressPoint[]): ProgressSeries {
   return {
     points,
-    valueCount: points.length,
-    state: points.length >= MINIMUM_PROGRESS_OBSERVATIONS ? 'ready' : 'insufficient_data',
+    observationCount: points.length,
+    latestValue: points.at(-1)?.value ?? null,
     averageValue:
       points.length === 0
         ? null
         : points.reduce((total, point) => total + point.value, 0) / points.length,
+    state:
+      points.length === 0
+        ? 'empty'
+        : points.length < MINIMUM_PROGRESS_OBSERVATIONS
+          ? 'insufficient_data'
+          : 'ready',
   }
 }
 
-function emptyWindow(): V3ProgressWindow {
-  return {
-    attemptCount: 0,
-    overall: emptySeries(),
-    metrics: Object.fromEntries(
-      V3_METRIC_IDS.map((metric) => [metric, emptySeries()]),
-    ) as Record<V3MetricId, ProgressSeries>,
-  }
+export function performancePoints(
+  value: ProgressSeries,
+  view: ProgressSeriesView,
+): readonly ProgressPoint[] {
+  return view === 'compact' ? value.points.slice(-COMPACT_PROGRESS_POINT_COUNT) : value.points
 }
 
 function metric(payload: V3ScorePayload, id: V3MetricId): V3PersistedMetricScore {
@@ -98,104 +120,160 @@ function metric(payload: V3ScorePayload, id: V3MetricId): V3PersistedMetricScore
       ]
 }
 
-function windowFor(
-  attempts: readonly AcceptedAttempt[],
-  metricIds: readonly V3MetricId[],
-): V3ProgressWindow {
-  if (attempts.length === 0) return emptyWindow()
-  const point = (attempt: AcceptedAttempt, value: number): ProgressPoint => ({
+function point(
+  attempt: AcceptedAttempt,
+  value: number,
+  earnedPoints: number,
+  maxPoints: number,
+  raw: ProgressPoint['raw'],
+): ProgressPoint {
+  return {
     attemptId: attempt.id,
-    createdAt: attempt.createdAt,
+    finishedAt: attempt.finishedAt,
+    mode: attempt.practiceMode,
+    promptText: attempt.promptText,
+    retryOfAttemptId: attempt.retryOfAttemptId,
     value,
     valueOutOf: 100,
-  })
-  return {
-    attemptCount: attempts.length,
-    overall: series(
-      attempts.flatMap((attempt) =>
-        attempt.payload.total_earned_points === null
-          ? []
-          : [point(attempt, attempt.payload.total_earned_points)],
-      ),
-    ),
-    metrics: {
-      ...Object.fromEntries(V3_METRIC_IDS.map((id) => [id, emptySeries()])),
-      ...Object.fromEntries(
-        metricIds.map((id) => [
-          id,
-          series(
-            attempts.flatMap((attempt) => {
-              const result = metric(attempt.payload, id)
-              return result.status === 'scored' && result.component !== null
-                ? [point(attempt, result.component * 100)]
-                : []
-            }),
-          ),
-        ]),
-      ),
-    } as Record<V3MetricId, ProgressSeries>,
+    earnedPoints,
+    maxPoints,
+    raw,
   }
 }
 
-/** Aggregates v3 metrics without mapping any earlier category onto the new ontology. */
+function validScalarScore(value: unknown): value is number | null {
+  return (
+    value === null ||
+    (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 100)
+  )
+}
+
+/**
+ * Aggregates only exact current snapshots. Stored point totals remain context;
+ * cross-mode metric performance always uses the normalized component.
+ */
 export function aggregateV3Progress(
   input: readonly ProgressAttemptInput[],
-  options: { now: Date; mode?: PracticeMode },
+  options: { now: Date; filter?: ProgressFilter },
 ): V3ProgressAggregation {
   const now = options.now.getTime()
   if (!Number.isFinite(now)) throw new Error('Progress aggregation requires a valid current time.')
+  const filter = options.filter ?? 'all'
+  if (filter !== 'all' && !(PRACTICE_MODES as readonly string[]).includes(filter)) {
+    throw new Error('Progress aggregation requires a valid filter.')
+  }
 
-  let validV3 = 0
-  let incomplete = 0
   let malformed = 0
   let unsupportedVersion = 0
+  let metadataMismatch = 0
+  let invalidTimestamp = 0
   let excludedMode = 0
   const accepted: AcceptedAttempt[] = []
 
   for (const item of input) {
-    const time = Date.parse(item.createdAt)
-    if (!item.id || !Number.isFinite(time) || time > now) {
-      malformed += 1
+    const time = Date.parse(item.finishedAt)
+    if (!Number.isFinite(time) || time > now) {
+      invalidTimestamp += 1
       continue
     }
     const snapshot = decodeStoredSectionSnapshot(item.sectionScores)
-    if (snapshot.kind === 'none') incomplete += 1
-    else if (snapshot.kind === 'unsupported_version') unsupportedVersion += 1
-    else if (snapshot.kind === 'malformed') malformed += 1
-    else {
-      validV3 += 1
-      if (options.mode && snapshot.payload.mode !== options.mode) excludedMode += 1
-      else
-        accepted.push({ id: item.id, createdAt: item.createdAt, time, payload: snapshot.payload })
+    if (snapshot.kind === 'unsupported_version') {
+      unsupportedVersion += 1
+      continue
     }
+    if (snapshot.kind !== 'v3') {
+      malformed += 1
+      continue
+    }
+    if (
+      item.status !== 'done' ||
+      !item.id ||
+      !item.promptText.trim() ||
+      item.rubricVersion !== V3_RUBRIC_VERSION ||
+      snapshot.payload.rubric_version !== item.rubricVersion ||
+      !(PRACTICE_MODES as readonly string[]).includes(item.practiceMode) ||
+      snapshot.payload.mode !== item.practiceMode ||
+      (item.promptSource !== 'library' && item.promptSource !== 'custom') ||
+      (item.retryOfAttemptId !== null && typeof item.retryOfAttemptId !== 'string') ||
+      !validScalarScore(item.score) ||
+      item.score !== snapshot.payload.total_earned_points
+    ) {
+      metadataMismatch += 1
+      continue
+    }
+    if (filter !== 'all' && item.practiceMode !== filter) {
+      excludedMode += 1
+      continue
+    }
+    accepted.push({ ...item, time, payload: snapshot.payload })
   }
 
   accepted.sort((left, right) => left.time - right.time || left.id.localeCompare(right.id))
-  const recentStart = now - RECENT_PROGRESS_WINDOW_DAYS * 24 * 60 * 60 * 1_000
-  const longerStart = now - LONGER_HISTORY_WINDOW_DAYS * 24 * 60 * 60 * 1_000
-  const metricIds = V3_METRIC_IDS
+
+  const overallPoints: ProgressPoint[] = []
+  const sectionPoints = Object.fromEntries(
+    V3_SECTION_IDS.map((id) => [id, [] as ProgressPoint[]]),
+  ) as Record<V3SectionId, ProgressPoint[]>
+  const metricPoints = Object.fromEntries(
+    V3_METRIC_IDS.map((id) => [id, [] as ProgressPoint[]]),
+  ) as Record<V3MetricId, ProgressPoint[]>
+
+  for (const attempt of accepted) {
+    const total = attempt.payload.total_earned_points
+    if (total !== null) overallPoints.push(point(attempt, total, total, 100, null))
+
+    for (const sectionId of V3_SECTION_IDS) {
+      const section = attempt.payload.sections[sectionId]
+      if (section.status === 'scored' && section.earned_points !== null) {
+        sectionPoints[sectionId].push(
+          point(
+            attempt,
+            (section.earned_points / section.max_points) * 100,
+            section.earned_points,
+            section.max_points,
+            null,
+          ),
+        )
+      }
+    }
+
+    for (const metricId of V3_METRIC_IDS) {
+      const result = metric(attempt.payload, metricId)
+      if (
+        result.status === 'scored' &&
+        result.component !== null &&
+        result.earned_points !== null
+      ) {
+        metricPoints[metricId].push(
+          point(attempt, result.component * 100, result.earned_points, result.max_points, {
+            component: result.component,
+            measurements: result.measurements,
+          }),
+        )
+      }
+    }
+  }
 
   return {
-    metricIds,
+    filter,
+    dimensionIds: PROGRESS_DIMENSION_IDS,
     counts: {
       input: input.length,
-      validV3,
       included: accepted.length,
-      incomplete,
+      complete: overallPoints.length,
+      partial: accepted.length - overallPoints.length,
       malformed,
       unsupportedVersion,
+      metadataMismatch,
+      invalidTimestamp,
       excludedMode,
     },
-    windows: {
-      all: windowFor(accepted, metricIds),
-      recent: windowFor(
-        accepted.filter((attempt) => attempt.time >= recentStart),
-        metricIds,
-      ),
-      longerHistory: windowFor(
-        accepted.filter((attempt) => attempt.time >= longerStart && attempt.time < recentStart),
-        metricIds,
-      ),
-    },
+    overall: series(overallPoints),
+    sections: Object.fromEntries(
+      V3_SECTION_IDS.map((id) => [id, series(sectionPoints[id])]),
+    ) as Record<V3SectionId, ProgressSeries>,
+    metrics: Object.fromEntries(
+      V3_METRIC_IDS.map((id) => [id, series(metricPoints[id])]),
+    ) as Record<V3MetricId, ProgressSeries>,
   }
 }

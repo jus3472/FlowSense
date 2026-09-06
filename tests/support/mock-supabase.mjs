@@ -525,6 +525,81 @@ function v3ScorePayload(attempt, failure = false, forcedScore = null) {
   }
 }
 
+function seedProgressAttempts() {
+  const fixtures = [
+    { mode: 'practice', score: 52, prompt: 'Explain one useful daily habit.' },
+    { mode: 'interview', score: 58, prompt: 'Describe a difficult decision.' },
+    { mode: 'presentation', score: 61, prompt: 'Open a short project update.' },
+    { mode: 'conversation', score: 64, prompt: 'Tell a friend about your weekend.' },
+    { mode: 'practice', score: 67, prompt: 'Explain how you plan your week.' },
+    { mode: 'interview', score: 70, prompt: 'Describe a difficult decision.', retryOf: 1 },
+    { mode: 'presentation', score: 73, prompt: 'Close a short project update.' },
+    { mode: 'conversation', score: 76, prompt: 'Ask for clarification politely.' },
+    { mode: 'practice', score: 79, prompt: 'Describe a skill you are learning.' },
+    { mode: 'interview', score: 82, prompt: 'Describe a difficult decision.', retryOf: 5 },
+    { mode: 'presentation', score: 85, prompt: 'Explain one chart to an audience.' },
+    { mode: 'conversation', score: 88, prompt: 'Respond to a change of plans.' },
+  ]
+  const ids = fixtures.map((_, index) => uuid('8', index + 1))
+
+  state.attempts = fixtures.map((fixture, index) => {
+    const finishedAt = new Date(RUN_STARTED_AT - (fixtures.length - index) * 60 * 60 * 1_000)
+    const createdAt = new Date(finishedAt.getTime() - 30_000).toISOString()
+    const attempt = {
+      id: ids[index],
+      created_at: createdAt,
+      finished_at: finishedAt.toISOString(),
+      status_changed_at: finishedAt.toISOString(),
+      user_id: USER_ID,
+      lesson_id: null,
+      prompt_id: null,
+      prompt_text: fixture.prompt,
+      duration_ms: 30_000,
+      practice_mode: fixture.mode,
+      prompt_source: 'custom',
+      prompt_difficulty: 'intermediate',
+      rubric_version: 'v3',
+      retry_of_attempt_id: fixture.retryOf === undefined ? null : (ids[fixture.retryOf] ?? null),
+      client_request_id: uuid('9', index + 1),
+      status: 'done',
+      failure_code: null,
+      audio_path: null,
+      transcript: 'This is a deterministic current-format response for progress testing.',
+      score: null,
+      section_scores: null,
+      content_result: null,
+      metrics: {
+        practice: { target_duration_seconds: 30 },
+        upload: {
+          storage_path: `${USER_ID}/${ids[index]}.webm`,
+          mime_type: 'audio/webm',
+        },
+      },
+    }
+    const snapshot = v3ScorePayload(attempt, false, fixture.score)
+    snapshot.sections.how_you_sounded.metrics.pace.measurements = {
+      words_per_minute: 120 + index,
+    }
+    snapshot.sections.how_you_sounded.metrics.paused_time.measurements = {
+      total_unnatural_pause_ms: 900 + index * 100,
+    }
+    snapshot.sections.how_you_sounded.metrics.articulation.measurements = {
+      low_confidence_proportion: index / 100,
+    }
+    snapshot.sections.how_you_sounded.metrics.energy.measurements = {
+      pitch_range_semitones: 4 + index / 10,
+    }
+    attempt.score = snapshot.total_earned_points
+    attempt.section_scores = snapshot
+    attempt.metrics.v3 = {
+      score: snapshot,
+      content: { status: 'checked' },
+      scored_at: finishedAt.toISOString(),
+    }
+    return attempt
+  })
+}
+
 function exactKeys(value, expected) {
   return (
     value !== null &&
@@ -688,6 +763,7 @@ const server = createServer(async (req, res) => {
       state.pathPreferences = [{ user_id: USER_ID, path_id: PRACTICE_PATHS[0].id, rank: 0 }]
     }
     if (input.curriculum) seedLessonProgress(input.curriculum)
+    if (input.progress === true) seedProgressAttempts()
     return json(res, 200, state)
   }
   if (url.pathname === '/__e2e/state' && req.method === 'GET') return json(res, 200, state)

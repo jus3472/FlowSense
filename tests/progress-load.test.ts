@@ -1,121 +1,89 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { readProgressAttemptRows, safeProgressErrorCode } from '@/lib/progress/load'
 import { v3Snapshot } from './helpers/result-snapshots'
 
+function row(overrides: Record<string, unknown> = {}) {
+  const snapshot = v3Snapshot()
+  return {
+    id: 'attempt-1',
+    finished_at: '2026-08-26T12:00:00.000Z',
+    prompt_text: 'Describe one decision.',
+    retry_of_attempt_id: null,
+    score: snapshot.total_earned_points,
+    section_scores: snapshot,
+    practice_mode: 'practice',
+    prompt_source: 'library',
+    rubric_version: 'v3',
+    status: 'done',
+    ...overrides,
+  }
+}
+
 describe('progress data loading boundary', () => {
-  it('distinguishes a valid empty result from a query failure', () => {
-    expect(readProgressAttemptRows([], false, 200)).toEqual({
-      status: 'ready',
-      attempts: [],
-      truncated: false,
-    })
-    expect(readProgressAttemptRows(null, true, 200)).toEqual({
-      status: 'failure',
-      reason: 'query',
-    })
+  it('distinguishes an empty page from query failure', () => {
+    expect(readProgressAttemptRows([], false)).toEqual({ status: 'ready', attempts: [] })
+    expect(readProgressAttemptRows(null, true)).toEqual({ status: 'failure', reason: 'query' })
   })
 
-  it('maps valid rows into a serializable presentation shape', () => {
+  it('maps every authoritative field into a serializable shape', () => {
     const result = readProgressAttemptRows(
-      [
-        {
-          id: 'attempt-1',
-          created_at: '2026-08-26T12:00:00.000Z',
-          retry_of_attempt_id: null,
-          status: 'done',
-          section_scores: v3Snapshot({ notCheckedMetric: 'grammar' }),
-        },
-      ],
+      [row({ prompt_source: 'custom', practice_mode: 'interview' })],
       false,
-      200,
     )
 
-    expect(result.status).toBe('ready')
+    expect(result).toMatchObject({
+      status: 'ready',
+      attempts: [
+        {
+          id: 'attempt-1',
+          finishedAt: '2026-08-26T12:00:00.000Z',
+          promptText: 'Describe one decision.',
+          retryOfAttemptId: null,
+          practiceMode: 'interview',
+          promptSource: 'custom',
+          rubricVersion: 'v3',
+          status: 'done',
+        },
+      ],
+    })
     expect(() => JSON.stringify(result)).not.toThrow()
-    if (result.status === 'ready') {
-      expect(result.truncated).toBe(false)
-      expect(result.attempts[0]).toMatchObject({
-        id: 'attempt-1',
-        retryOfAttemptId: null,
-      })
-    }
   })
 
   it.each([
-    [null],
-    [{}],
-    [{ id: '', created_at: '2026-08-26T12:00:00.000Z', retry_of_attempt_id: null, status: 'done' }],
-    [{ id: 'one', created_at: 42, retry_of_attempt_id: null, status: 'done' }],
-    [
-      {
-        id: 'one',
-        created_at: '2026-08-26T12:00:00.000Z',
-        retry_of_attempt_id: 42,
-        status: 'done',
-      },
-    ],
-  ])('fails closed for an invalid response shape', (data) => {
-    expect(readProgressAttemptRows(data, false, 200)).toEqual({
+    null,
+    {},
+    row({ id: '' }),
+    row({ finished_at: null }),
+    row({ finished_at: 'not-a-time' }),
+    row({ prompt_text: '   ' }),
+    row({ retry_of_attempt_id: 42 }),
+    row({ score: 1.5 }),
+    row({ practice_mode: 'unknown' }),
+    row({ prompt_source: null }),
+    row({ rubric_version: null }),
+    row({ status: 'failed' }),
+    row({ status: 'timed_out' }),
+    row({ status: 'uploading' }),
+    row({ status: 'transcribing' }),
+    row({ status: 'scoring' }),
+  ])('fails closed for an invalid response row %#', (value) => {
+    expect(readProgressAttemptRows([value], false)).toEqual({
       status: 'failure',
       reason: 'invalid_response',
     })
   })
 
-  it.each(['uploading', 'transcribing', 'scoring', 'failed', 'timed_out'])(
-    'rejects a non-completed %s row at the progress parsing boundary',
-    (status) => {
-      expect(
-        readProgressAttemptRows(
-          [
-            {
-              id: 'attempt-1',
-              created_at: '2026-08-26T12:00:00.000Z',
-              retry_of_attempt_id: null,
-              status,
-              section_scores: v3Snapshot(),
-            },
-          ],
-          false,
-          200,
-        ),
-      ).toEqual({ status: 'failure', reason: 'invalid_response' })
-    },
-  )
+  it('returns every parsed row without imposing a business cap', () => {
+    const rows = Array.from({ length: 501 }, (_, index) => row({ id: `attempt-${index}` }))
+    const result = readProgressAttemptRows(rows, false)
+
+    expect(result.status).toBe('ready')
+    if (result.status === 'ready') expect(result.attempts).toHaveLength(501)
+  })
 
   it('allows only bounded diagnostic codes', () => {
     expect(safeProgressErrorCode({ code: '42703', message: 'private details' })).toBe('42703')
     expect(safeProgressErrorCode({ code: 'bad code', message: 'private details' })).toBeUndefined()
     expect(safeProgressErrorCode({ message: 'private details' })).toBeUndefined()
-  })
-
-  it('uses one lookahead row to disclose a bounded completed-attempt window', () => {
-    const rows = ['newest', 'middle', 'oldest'].map((id, index) => ({
-      id,
-      created_at: `2026-08-2${6 - index}T12:00:00.000Z`,
-      retry_of_attempt_id: null,
-      status: 'done',
-      section_scores: v3Snapshot(),
-    }))
-
-    expect(readProgressAttemptRows(rows, false, 2)).toMatchObject({
-      status: 'ready',
-      truncated: true,
-      attempts: [{ id: 'newest' }, { id: 'middle' }],
-    })
-  })
-
-  it('keeps the server query user-scoped and logging free of raw provider messages', () => {
-    const source = readFileSync('src/lib/progress/server.ts', 'utf8')
-
-    expect(source).toContain(".eq('user_id', userId)")
-    expect(source).toContain(".eq('status', 'done')")
-    expect(source).toContain('retry_of_attempt_id, status')
-    expect(source).toContain(".order('created_at', { ascending: false })")
-    expect(source).toContain(".order('id', { ascending: false })")
-    expect(source).toContain('.limit(PROGRESS_COMPLETED_ATTEMPT_LIMIT + 1)')
-    expect(source).toContain('safeProgressErrorCode(error)')
-    expect(source).not.toContain('error.message')
-    expect(source).not.toContain('Task B')
   })
 })

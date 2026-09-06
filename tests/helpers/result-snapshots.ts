@@ -19,6 +19,7 @@ import {
 interface V3SnapshotOptions {
   mode?: PracticeMode
   component?: number
+  components?: Partial<Readonly<Record<V3MetricId, number>>>
   unavailableMetric?: V3MetricId
   notCheckedMetric?: V3MetricId
   evidenceMetric?: V3MetricId
@@ -44,7 +45,7 @@ function v3Evaluation(metric: V3MetricId, options: V3SnapshotOptions): V3MetricE
   return {
     metric,
     status: 'scored',
-    component: options.component ?? 0.8,
+    component: options.components?.[metric] ?? options.component ?? 0.8,
     explanation: `You have visible ${metric} evidence.`,
     measurements: metric === options.evidenceMetric ? (options.measurements ?? {}) : {},
     evidence: metric === options.evidenceMetric ? (options.evidence ?? []) : [],
@@ -76,9 +77,30 @@ export function v3Snapshot(options: V3SnapshotOptions = {}): V3ScorePayload {
 
 export function progressAttempt(
   id: string,
-  createdAt: string,
+  finishedAt: string,
   sectionScores: unknown = v3Snapshot(),
   retryOfAttemptId: string | null = null,
+  overrides: Partial<{
+    promptText: string
+    score: number | null
+    practiceMode: PracticeMode
+    promptSource: 'library' | 'custom'
+    rubricVersion: string
+    status: 'done'
+  }> = {},
 ) {
-  return { id, createdAt, retryOfAttemptId, sectionScores }
+  const snapshot = sectionScores as Partial<V3ScorePayload> | null
+  return {
+    id,
+    finishedAt,
+    promptText: `Prompt ${id}`,
+    retryOfAttemptId,
+    score: snapshot?.total_earned_points ?? null,
+    sectionScores,
+    practiceMode: snapshot?.mode ?? 'practice',
+    promptSource: 'library' as const,
+    rubricVersion: snapshot?.rubric_version ?? 'v3',
+    status: 'done' as const,
+    ...overrides,
+  }
 }

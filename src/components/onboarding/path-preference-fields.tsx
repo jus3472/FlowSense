@@ -41,7 +41,7 @@ export function PathPreferenceFields({
     <div className="flex flex-col gap-8">
       <fieldset className="flex flex-col gap-4">
         <legend className="text-foreground text-sm font-medium">Primary track</legend>
-        <p className="text-muted text-sm">This track appears first in Tracks and Progress.</p>
+        <p className="text-muted text-sm">This track appears first in Tracks.</p>
         <div className="grid gap-3 sm:grid-cols-2">
           {paths.map((path) => {
             const selected = primary === path.slug

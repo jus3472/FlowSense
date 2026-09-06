@@ -15,6 +15,7 @@ const HYDRATION_DIAGNOSTIC =
 interface E2EAttempt {
   id: string
   created_at: string
+  finished_at: string
   user_id: string
   lesson_id: string | null
   prompt_id: string | null
@@ -30,6 +31,7 @@ interface E2EAttempt {
   failure_code: string | null
   score: number | null
   section_scores: {
+    version: string
     sections: {
       what_you_said: { metrics: Record<string, { status: string }> }
       how_you_sounded: { metrics: Record<string, { status: string }> }
@@ -88,6 +90,12 @@ async function blockExternalNetwork(page: Page) {
 async function reset(request: APIRequestContext, onboarded = true, curriculum?: E2ECurriculumSeed) {
   await request.post(`${MOCK}/__e2e/reset`, {
     data: { onboarded, ...(curriculum ? { curriculum } : {}) },
+  })
+}
+
+async function resetWithProgress(request: APIRequestContext) {
+  await request.post(`${MOCK}/__e2e/reset`, {
+    data: { onboarded: true, progress: true },
   })
 }
 
@@ -330,16 +338,8 @@ test('keeps direct standalone practice routes valid without rediscovering them',
   }
 })
 
-test('opens path overviews from track cards while Progress stays informational', async ({
-  page,
-}) => {
+test('opens path overviews from track cards', async ({ page }) => {
   await logIn(page)
-  await page.goto('/progress')
-  await expect(page.getByRole('region', { name: 'Track progress' })).toBeVisible()
-  await expect(page.getByText(/view path/i)).toHaveCount(0)
-  for (const slug of ['general-speaking', 'interviews', 'presentations', 'conversations']) {
-    await expect(page.locator(`a[href="/practice/paths/${slug}"]`)).toHaveCount(0)
-  }
 
   const tracks = [
     ['General Speaking', 'general-speaking'],
@@ -364,7 +364,6 @@ test('opens path overviews from track cards while Progress stays informational',
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true)
-
   }
 
   await page.goto('/practice')
@@ -444,8 +443,140 @@ test('history and progress start empty after an isolated reset', async ({ page }
   await expect(page.getByText('No responses yet')).toBeVisible()
   await page.goto('/progress')
   await expect(page.getByRole('heading', { name: 'Progress', level: 1 })).toHaveCount(1)
-  await expect(page.getByRole('region', { name: 'Track progress' })).toBeVisible()
-  await expect(page.getByText('No practice results yet')).toBeVisible()
+  await expect(page.getByText('No performance history yet')).toBeVisible()
+})
+
+test('Progress shows current performance histories, exact result links, and every mode filter', async ({
+  page,
+  request,
+}) => {
+  await resetWithProgress(request)
+  await logIn(page)
+  await page.goto('/progress')
+
+  const state = await currentState(request)
+  const attempts = [...state.attempts].sort(
+    (left, right) =>
+      Date.parse(left.finished_at) - Date.parse(right.finished_at) ||
+      left.id.localeCompare(right.id),
+  )
+  expect(attempts).toHaveLength(12)
+  expect(attempts.every((attempt) => attempt.rubric_version === 'v3')).toBe(true)
+  expect(attempts.every((attempt) => attempt.section_scores?.version === 'v3.score.2')).toBe(true)
+
+  const filter = page.getByLabel('Show responses')
+  await expect(filter.getByRole('option')).toHaveText([
+    'All',
+    'General Speaking',
+    'Interviews',
+    'Presentations',
+    'Conversations',
+  ])
+  expect(
+    await filter
+      .getByRole('option')
+      .evaluateAll((options) => options.map((option) => option.getAttribute('value'))),
+  ).toEqual(['all', 'practice', 'interview', 'presentation', 'conversation'])
+
+  const overall = page.getByRole('button', { name: 'View Overall Score response history' })
+  await expect(overall).toContainText('12 responses from oldest to latest')
+  await expect(overall.getByRole('img')).toHaveAttribute(
+    'data-values',
+    attempts
+      .slice(-10)
+      .map((attempt) => attempt.score)
+      .join(','),
+  )
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+
+  await overall.click()
+  const overallHistory = page.getByRole('region', { name: 'Overall Score response history' })
+  const overallLinks = overallHistory.getByRole('link')
+  await expect(overallLinks).toHaveCount(attempts.length)
+  expect(
+    await overallLinks.evaluateAll((links) => links.map((link) => link.getAttribute('href'))),
+  ).toEqual(attempts.map((attempt) => `/attempts/${attempt.id}`))
+  await expect(overallHistory.locator('[data-chart-size="expanded"]')).toHaveAttribute(
+    'data-values',
+    attempts.map((attempt) => attempt.score).join(','),
+  )
+  await expect(overallHistory.getByText('Interviews · Retry')).toHaveCount(2)
+  const historyTimes = overallHistory.getByRole('time')
+  await expect(historyTimes).toHaveCount(attempts.length)
+  expect(
+    await historyTimes.evaluateAll((times) => times.map((time) => time.getAttribute('datetime'))),
+  ).toEqual(attempts.map((attempt) => attempt.finished_at))
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+  await page.getByRole('button', { name: 'Hide Overall Score response history' }).click()
+
+  const contentToggle = page.getByRole('button', {
+    name: 'View Answered the Prompt response history',
+  })
+  await contentToggle.focus()
+  await expect(contentToggle).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(
+    page.getByRole('button', { name: 'Hide Answered the Prompt response history' }),
+  ).toHaveAttribute('aria-expanded', 'true')
+  const contentHistory = page.getByRole('region', {
+    name: 'Answered the Prompt response history',
+  })
+  await expect(contentHistory.getByRole('link')).toHaveCount(attempts.length)
+  await page.getByRole('button', { name: 'Hide Answered the Prompt response history' }).click()
+
+  await page.getByRole('button', { name: 'View Pace response history' }).click()
+  const audioHistory = page.getByRole('region', { name: 'Pace response history' })
+  await expect(audioHistory.getByRole('link')).toHaveCount(attempts.length)
+  await expect(audioHistory.getByText('120 WPM')).toBeVisible()
+  await page.getByRole('button', { name: 'Hide Pace response history' }).click()
+
+  for (const [value, mode, count] of [
+    ['practice', 'practice', 3],
+    ['interview', 'interview', 3],
+    ['presentation', 'presentation', 3],
+    ['conversation', 'conversation', 3],
+    ['all', null, 12],
+  ] as const) {
+    await filter.selectOption(value)
+    await expect(page).toHaveURL(mode === null ? `${APP}/progress` : `${APP}/progress?mode=${mode}`)
+    await expect(filter).toHaveValue(value)
+    const selectedAttempts =
+      mode === null ? attempts : attempts.filter((attempt) => attempt.practice_mode === mode)
+    const selectedOverall = page.getByRole('button', {
+      name: 'View Overall Score response history',
+    })
+    await expect(selectedOverall).toContainText(`${count} responses from oldest to latest`)
+    await expect(selectedOverall.getByRole('img')).toHaveAttribute(
+      'data-values',
+      selectedAttempts
+        .slice(-10)
+        .map((attempt) => attempt.score)
+        .join(','),
+    )
+  }
+})
+
+test('@mobile Progress remains usable when a full history is expanded', async ({
+  page,
+  request,
+}) => {
+  await resetWithProgress(request)
+  await logIn(page)
+  await page.goto('/progress')
+
+  await expect(page.getByRole('heading', { name: 'Progress', level: 1 })).toBeVisible()
+  await expect(page.getByLabel('Show responses').getByRole('option')).toHaveCount(5)
+  await page.getByRole('button', { name: 'View Pace response history' }).click()
+  await expect(
+    page.getByRole('region', { name: 'Pace response history' }).getByRole('link'),
+  ).toHaveCount(12)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
 })
 
 test('history hydrates cleanly when server and browser timezones differ', async ({
@@ -613,8 +744,10 @@ test('records once, shows processing and v3 results, retries, compares, filters,
   await expect(page.getByLabel('Previous response comparison')).toContainText('Overall')
   await expect(page.getByRole('link', { name: 'View previous response' })).toHaveCount(0)
   await page.goto('/progress')
-  await expect(page.getByRole('heading', { name: 'Overall trend' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Recent retries' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Performance overview' })).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'View Overall Score response history' }),
+  ).toContainText('2 responses from oldest to latest')
   await page.goto('/history')
   await page.getByLabel('Show responses').selectOption('retry')
   await expect(page.getByText(/Interview · Library prompt · Retry/)).toBeVisible()
@@ -638,7 +771,9 @@ test('records once, shows processing and v3 results, retries, compares, filters,
   await expect(page.locator(`a[href="/attempts/${firstAttempt.id}"]`)).toHaveCount(0)
 
   await page.getByRole('link', { name: 'Progress' }).click()
-  await expect(page.getByRole('heading', { name: 'Recent retries' })).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: 'View Overall Score response history' }),
+  ).toContainText('One response. Add another to see a trend.')
   await page.getByRole('link', { name: 'History' }).click()
   await expect(page.locator(`a[href="/attempts/${retryAttempt.id}"]`)).toHaveCount(0)
   await expect(page.locator(`a[href="/attempts/${firstAttempt.id}"]`)).toBeVisible()
@@ -796,8 +931,8 @@ test('structured lessons retry thresholds without reducing durable progress', as
 
   await page.goto('/progress')
   await expect(page.getByRole('heading', { name: 'Progress', level: 1 })).toHaveCount(1)
-  await expect(page.getByRole('region', { name: 'Track progress' })).toBeVisible()
-  await expect(page.getByText('1 / 30', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Performance overview' })).toBeVisible()
+  await expect(page.getByText(/track progress|lessons passed|stars/i)).toHaveCount(0)
   await page.goto('/history')
   await expect(page.getByText('Give a clear response for beginner lesson 1.')).toHaveCount(2)
   await expect(page.getByText('Beginner · Lesson 1', { exact: true })).toHaveCount(2)
@@ -1041,13 +1176,6 @@ test('Settings omits track controls and preserves prior path progress', async ({
   await expect(
     page.getByRole('region', { name: 'Your other paths' }).getByText('Beginner · 1 / 10 passed'),
   ).toBeVisible()
-
-  await page.goto('/progress')
-  const interviewCard = page
-    .getByRole('region', { name: 'Track progress' })
-    .getByText('Interviews', { exact: true })
-  await expect(interviewCard).toBeVisible()
-  await expect(page.getByText('1 / 30', { exact: true })).toBeVisible()
 
   const state = await currentState(request)
   expect(state.lessonProgress).toHaveLength(1)
