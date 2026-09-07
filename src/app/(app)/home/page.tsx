@@ -1,60 +1,33 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
-import { HomePrimaryPath, HomeSecondaryPaths } from '@/components/home/path-progress'
+import { HomeOverview } from '@/components/curriculum/home-overview'
 import { RetryButton } from '@/components/system/retry-button'
 import { ErrorState } from '@/components/ui/error-state'
 import { PageShell } from '@/components/ui/page-shell'
 import { PageTitle } from '@/components/ui/page-title'
-import { loadCurriculumOverviewForUser } from '@/lib/curriculum/server'
-import { buildHomeCurriculumModel } from '@/lib/home/progression'
-import {
-  loadRecentStructuredLessonId,
-  logRecentStructuredLessonFailure,
-} from '@/lib/home/recent-lesson'
-import { createClient } from '@/lib/supabase/server'
+import { loadAuthenticatedCurriculumOverview } from '@/lib/curriculum/server'
 
 export const metadata: Metadata = {
   title: 'Home',
 }
 
 export default async function HomePage() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const outcome = await loadAuthenticatedCurriculumOverview()
+  if (outcome.status === 'unauthenticated') redirect('/login')
+  const failureDescription =
+    outcome.status === 'failure' &&
+    (outcome.reason === 'invalid_response' || outcome.reason.startsWith('invalid_'))
+      ? 'Your saved path information could not be read. Try loading it again.'
+      : 'The connection to your practice paths failed. Try loading them again.'
 
-  const [curriculumResult, recentLessonResult] = await Promise.all([
-    loadCurriculumOverviewForUser(supabase, user.id),
-    loadRecentStructuredLessonId(supabase, user.id),
-  ])
-  if (recentLessonResult.status === 'failure') {
-    logRecentStructuredLessonFailure(recentLessonResult)
-  }
-  const curriculum =
-    curriculumResult.status === 'ready'
-      ? buildHomeCurriculumModel(
-          curriculumResult.data,
-          recentLessonResult.status === 'ready' ? recentLessonResult.lessonId : null,
-        )
-      : null
+  if (outcome.status === 'ready') return <HomeOverview overview={outcome.data} />
 
   return (
-    <PageShell width="column">
+    <PageShell>
       <PageTitle>Home</PageTitle>
-      {curriculum ? (
-        <>
-          <HomePrimaryPath primary={curriculum.primary} />
-          <HomeSecondaryPaths paths={curriculum.secondary} />
-        </>
-      ) : (
-        <ErrorState
-          title="Your path did not load"
-          description="Your lesson progress is still saved. Try loading it again."
-        >
-          <RetryButton />
-        </ErrorState>
-      )}
+      <ErrorState title="Your practice paths did not load" description={failureDescription}>
+        <RetryButton />
+      </ErrorState>
     </PageShell>
   )
 }

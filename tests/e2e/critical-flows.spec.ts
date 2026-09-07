@@ -257,10 +257,9 @@ test('new user chooses an ordered primary and secondary path during onboarding',
   await page.getByRole('group', { name: 'Additional paths' }).getByText('Presentations').click()
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
   await expect(page).toHaveURL(/\/home$/)
-  await expect(page.getByRole('heading', { name: 'Continue General Speaking' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Your other paths' })).toBeVisible()
-  await expect(page.getByText('Interviews', { exact: true })).toBeVisible()
-  await expect(page.getByText('Presentations', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'View Interviews track' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'View Presentations track' })).toBeVisible()
 
   const state = await currentState(request)
   expect(state.pathPreferences).toEqual([
@@ -315,6 +314,8 @@ test('selects library and custom prompts through real screens', async ({ page })
   await expect(page.getByText('One prompt, 60 seconds')).toHaveCount(0)
 
   await page.goto('/practice')
+  await expect(page).toHaveURL(/\/home$/)
+  await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible()
   await page.getByRole('link', { name: 'Start' }).first().click()
   await expect(page).toHaveURL(/\/practice\/paths\/.*\/record$/)
   await expect(page.getByText('Give a clear response for beginner lesson 1.')).toBeVisible()
@@ -334,7 +335,7 @@ test('keeps direct standalone practice routes valid without rediscovering them',
   ] as const) {
     await page.goto(route)
     await expect(page.getByRole('heading', { name: heading })).toBeVisible()
-    await expect(page.getByRole('link', { name: 'Tracks' }).first()).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Home' }).first()).toBeVisible()
   }
 })
 
@@ -355,7 +356,7 @@ test('opens path overviews from track cards', async ({ page }) => {
     { width: 1280, height: 900 },
   ]) {
     await page.setViewportSize(viewport)
-    await page.goto('/practice')
+    await page.goto('/home')
     for (const [title] of tracks) {
       await expect(page.getByRole('link', { name: `View ${title} track` })).toBeVisible()
     }
@@ -366,7 +367,7 @@ test('opens path overviews from track cards', async ({ page }) => {
     ).toBe(true)
   }
 
-  await page.goto('/practice')
+  await page.goto('/home')
   for (const [title, slug] of tracks) {
     const cardLink = page.getByRole('link', { name: `View ${title} track` })
     const action = cardLink.locator('..').getByRole('link', { name: 'Start' })
@@ -385,7 +386,7 @@ test('opens path overviews from track cards', async ({ page }) => {
   await expect(page).toHaveURL(
     /\/practice\/paths\/general-speaking\/lessons\/general-speaking-beginner-01-skill-1\/record$/,
   )
-  await page.goto('/practice')
+  await page.goto('/home')
 
   const interviews = page.getByRole('link', { name: 'View Interviews track' })
   await interviews.focus()
@@ -394,7 +395,7 @@ test('opens path overviews from track cards', async ({ page }) => {
   await expect(page).toHaveURL(/\/practice\/paths\/interviews$/)
 
   for (const [title, slug] of tracks) {
-    await page.goto('/practice')
+    await page.goto('/home')
     await page.getByRole('link', { name: `View ${title} track` }).click()
     await expect(page).toHaveURL(new RegExp(`/practice/paths/${slug}$`))
     await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible()
@@ -412,7 +413,6 @@ test('keeps the full brand and final navigation within desktop and narrow viewpo
     await expect(brand).toHaveText('FlowSense')
     await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link')).toHaveText([
       'Home',
-      'Tracks',
       'Progress',
       'History',
     ])
@@ -901,9 +901,10 @@ test('structured lessons retry thresholds without reducing durable progress', as
   await expect(
     page.getByRole('img', { name: "1 day streak. Today's practice complete." }),
   ).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Continue Interviews' })).toBeVisible()
-  await expect(page.getByText('Best: 64 · Need 70 to continue', { exact: true })).toBeVisible()
-  await page.getByRole('link', { name: 'Try Again' }).click()
+  await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible()
+  const interviewsCard = page.getByRole('link', { name: 'View Interviews track' }).locator('..')
+  await expect(interviewsCard.getByText('Lesson 1 of 10', { exact: true })).toBeVisible()
+  await interviewsCard.getByRole('link', { name: 'Continue' }).click()
   await expect(page).toHaveURL(/\/record\?retry=/)
 
   await recordOne(page)
@@ -982,10 +983,11 @@ test('structured lessons retry thresholds without reducing durable progress', as
   ).toBeVisible()
 
   await page.goto('/home')
-  await expect(page.getByText('1 / 30 lessons passed', { exact: true })).toBeVisible()
-  await expect(page.getByText('Beginner · Lesson 2 of 10', { exact: true })).toBeVisible()
+  const interviewsHomeCard = page.getByRole('link', { name: 'View Interviews track' }).locator('..')
+  await expect(interviewsHomeCard.getByText('Lesson 2 of 10', { exact: true })).toBeVisible()
   await expect(page.getByText('Beginner lesson 2', { exact: true })).toHaveCount(0)
-  await page.getByRole('link', { name: 'Continue' }).click()
+  await expect(page.getByText(/\d+ \/ 30 lessons passed/)).toHaveCount(0)
+  await interviewsHomeCard.getByRole('link', { name: 'Continue' }).click()
   await expect(page).toHaveURL(/interviews-beginner-02-skill-2\/record$/)
   await expect(page.getByText('Give a clear response for beginner lesson 2.')).toBeVisible()
 
@@ -1080,9 +1082,11 @@ test('structured lessons retry thresholds without reducing durable progress', as
   await expect(
     page.getByRole('img', { name: "1 day streak. Today's practice complete." }),
   ).toBeVisible()
-  await expect(page.getByText('Beginner · Lesson 2 of 10', { exact: true })).toBeVisible()
+  const homeInterviewsCard = page.getByRole('link', { name: 'View Interviews track' }).locator('..')
+  await expect(homeInterviewsCard.getByText('Lesson 2 of 10', { exact: true })).toBeVisible()
+  await expect(homeInterviewsCard.getByRole('img', { name: '0 of 3 stars' })).toBeVisible()
   await expect(page.getByText('Beginner lesson 2', { exact: true })).toHaveCount(0)
-  await expect(page.getByText('2 / 90 stars', { exact: true })).toBeVisible()
+  await expect(page.getByText(/\d+ \/ 90 stars/)).toHaveCount(0)
 
   await reset(request, true, { pathSlug: 'interviews', passedLessons: 9 })
   await page.goto('/practice/paths/interviews/lessons/interviews-beginner-10-skill-10')
@@ -1155,10 +1159,12 @@ test('later checkpoints unlock the next chapter and finish the path', async ({
   await expect(page.getByRole('link', { name: 'Continue' })).toHaveCount(0)
 
   await page.goto('/home')
-  await expect(page.getByRole('heading', { name: 'Interviews' })).toBeVisible()
-  await expect(page.getByText('Path complete', { exact: true })).toBeVisible()
-  await expect(page.getByText('30 / 30 lessons passed', { exact: true })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'View Path' })).toBeVisible()
+  const completedInterviewsCard = page
+    .getByRole('link', { name: 'View Interviews track' })
+    .locator('..')
+  await expect(completedInterviewsCard.getByText('Path complete', { exact: true })).toBeVisible()
+  await expect(page.getByText(/\d+ \/ 30 lessons passed/)).toHaveCount(0)
+  await expect(completedInterviewsCard.getByRole('link', { name: 'View Path' })).toBeVisible()
 })
 
 test('structured provider-neutral retry counts activity without changing progress', async ({
@@ -1206,7 +1212,12 @@ test('structured provider-neutral retry counts activity without changing progres
   await expect(
     page.getByRole('img', { name: "1 day streak. Today's practice complete." }),
   ).toBeVisible()
-  await expect(page.getByText('Best: 64 · Need 70 to continue', { exact: true })).toBeVisible()
+  await expect(
+    page
+      .getByRole('link', { name: 'View Interviews track' })
+      .locator('..')
+      .getByText('Lesson 1 of 10', { exact: true }),
+  ).toBeVisible()
   await page.goto('/practice/paths/interviews/lessons/interviews-beginner-02-skill-2')
   await expect(page.getByRole('heading', { name: 'Lesson locked' })).toBeVisible()
 })
@@ -1217,9 +1228,12 @@ test('Settings omits track controls and preserves prior path progress', async ({
 }) => {
   await reset(request, true, { pathSlug: 'interviews', passedLessons: 1, score: 74 })
   await logIn(page)
-  await expect(page.getByRole('heading', { name: 'Continue General Speaking' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible()
   await expect(
-    page.getByRole('region', { name: 'Your other paths' }).getByText('Beginner · 1 / 10 passed'),
+    page
+      .getByRole('link', { name: 'View Interviews track' })
+      .locator('..')
+      .getByText('Lesson 2 of 10', { exact: true }),
   ).toBeVisible()
 
   await page.goto('/settings')
@@ -1232,9 +1246,11 @@ test('Settings omits track controls and preserves prior path progress', async ({
   await expect(page.getByRole('status')).toHaveText('Saved.')
 
   await page.goto('/home')
-  await expect(page.getByRole('heading', { name: 'Continue General Speaking' })).toBeVisible()
   await expect(
-    page.getByRole('region', { name: 'Your other paths' }).getByText('Beginner · 1 / 10 passed'),
+    page
+      .getByRole('link', { name: 'View Interviews track' })
+      .locator('..')
+      .getByText('Lesson 2 of 10', { exact: true }),
   ).toBeVisible()
 
   const state = await currentState(request)
@@ -1285,25 +1301,39 @@ test('Settings deletion controls fit the requested responsive widths', async ({ 
   }
 })
 
-test('Home follows the newest completed structured Track', async ({ page, request, context }) => {
+test('Home advances each Track from its durable curriculum progress', async ({
+  page,
+  request,
+  context,
+}) => {
   await reset(request)
   await context.grantPermissions(['microphone'], { origin: APP })
   await processingMocks(page, { scores: [74, 74] })
   await logIn(page)
-  await expect(page.getByRole('heading', { name: 'Continue General Speaking' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible()
 
   await page.goto('/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record')
   await recordOne(page)
   await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
   await page.goto('/home')
-  await expect(page.getByRole('heading', { name: 'Continue Interviews' })).toBeVisible()
+  await expect(
+    page
+      .getByRole('link', { name: 'View Interviews track' })
+      .locator('..')
+      .getByText('Lesson 2 of 10', { exact: true }),
+  ).toBeVisible()
 
   await page.goto('/practice/paths/presentations/lessons/presentations-beginner-01-skill-1/record')
   await recordOne(page)
   await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
 
   await page.goto('/home')
-  await expect(page.getByRole('heading', { name: 'Continue Presentations' })).toBeVisible()
+  await expect(
+    page
+      .getByRole('link', { name: 'View Presentations track' })
+      .locator('..')
+      .getByText('Lesson 2 of 10', { exact: true }),
+  ).toBeVisible()
 })
 
 test('@mobile mobile navigation exposes all primary destinations and account menu', async ({
@@ -1312,7 +1342,7 @@ test('@mobile mobile navigation exposes all primary destinations and account men
   await logIn(page)
   await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Home', exact: true })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Tracks', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Tracks', exact: true })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'History' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Progress' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Practice', exact: true })).toHaveCount(0)
@@ -1320,10 +1350,10 @@ test('@mobile mobile navigation exposes all primary destinations and account men
   await expect(page.getByRole('menuitem', { name: 'Settings' })).toBeVisible()
 })
 
-test('@mobile Tracks stays readable through the lesson boundary', async ({ page }) => {
+test('@mobile Home stays readable through the lesson boundary', async ({ page }) => {
   await logIn(page)
-  await page.goto('/practice')
-  await expect(page.getByRole('heading', { name: 'Tracks' })).toBeVisible()
+  await page.goto('/home')
+  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
   await expect(page.getByText('Primary path')).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Interview Practice' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Enter a custom prompt' })).toBeVisible()

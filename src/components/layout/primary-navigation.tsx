@@ -12,12 +12,11 @@ const ITEMS: ReadonlyArray<{
   {
     label: 'Home',
     href: '/home',
-    active: (pathname) => pathname === '/home' || pathname.startsWith('/home/'),
-  },
-  {
-    label: 'Tracks',
-    href: '/practice',
-    active: (pathname) => pathname === '/practice' || pathname.startsWith('/practice/paths/'),
+    active: (pathname) =>
+      pathname === '/home' ||
+      pathname.startsWith('/home/') ||
+      pathname === '/practice' ||
+      pathname.startsWith('/practice/'),
   },
   {
     label: 'Progress',

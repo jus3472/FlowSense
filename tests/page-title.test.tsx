@@ -19,7 +19,7 @@ describe('major page titles', () => {
 
   it.each([
     ['src/app/(app)/home/page.tsx', 'Home'],
-    ['src/components/curriculum/practice-overview.tsx', 'Tracks'],
+    ['src/components/curriculum/home-overview.tsx', 'Home'],
     ['src/app/(app)/history/page.tsx', 'History'],
     ['src/components/progress/progress-dashboard.tsx', 'Progress'],
     ['src/app/(app)/settings/page.tsx', 'Settings'],
@@ -27,7 +27,7 @@ describe('major page titles', () => {
     const source = readFileSync(path, 'utf8')
     expect(source).toContain("import { PageTitle } from '@/components/ui/page-title'")
     expect(source).toContain(
-      `<PageTitle${title === 'Tracks' ? ' id="tracks-heading"' : ''}>${title}</PageTitle>`,
+      `<PageTitle${path.includes('home-overview') ? ' id="home-heading"' : ''}>${title}</PageTitle>`,
     )
   })
 

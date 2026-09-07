@@ -26,7 +26,7 @@ otherwise replace the current application before the candidate is tested.
 5. Confirm Vercel created a staged deployment with target `production`, the expected commit SHA,
    Production environment variables, a generated immutable URL, and no Production domain assigned.
    When creating the candidate with the CLI, use `vercel --prod --skip-domain`.
-6. Smoke-test the immutable URL. Cover authentication, Home, Tracks, Custom Prompt, recording
+6. Smoke-test the immutable URL. Cover authentication, Home track cards, Custom Prompt, recording
    boundaries, results, History, Progress, Settings, browser errors, and Vercel runtime errors.
    Perform a real recording when the release changes recording, scoring, progression, or activity
    behavior.

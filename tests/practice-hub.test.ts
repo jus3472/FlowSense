@@ -4,12 +4,13 @@ import { describe, expect, it } from 'vitest'
 const home = readFileSync('src/app/(app)/home/page.tsx', 'utf8')
 const record = readFileSync('src/app/(app)/record/page.tsx', 'utf8')
 const modePage = readFileSync('src/app/(app)/practice/[mode]/page.tsx', 'utf8')
-const overview = readFileSync('src/components/curriculum/practice-overview.tsx', 'utf8')
+const overview = readFileSync('src/components/curriculum/home-overview.tsx', 'utf8')
+const pathPreferences = readFileSync('src/components/onboarding/path-preference-fields.tsx', 'utf8')
 const recordFlow = readFileSync('src/components/record/record-flow.tsx', 'utf8')
 
 describe('practice hub routes', () => {
-  it('keeps Home focused while Tracks exposes only tracks and Custom Prompt', () => {
-    expect(home).toContain('HomePrimaryPath')
+  it('keeps Home focused on tracks and Custom Prompt', () => {
+    expect(home).toContain('HomeOverview')
     expect(home).not.toContain('HomeOtherPractice')
     expect(home).not.toContain('Latest response')
     expect(overview).not.toContain('Use a standalone prompt outside a track.')
@@ -17,6 +18,10 @@ describe('practice hub routes', () => {
     expect(overview).not.toContain('PRACTICE_MODE_OPTIONS')
     expect(overview).toContain('Custom Prompt')
     expect(overview).toContain('href="/practice/custom"')
+    expect(modePage).toContain('<Link href="/home"')
+    expect(modePage).not.toContain('>Tracks</Link>')
+    expect(pathPreferences).toContain('This track appears first on Home.')
+    expect(pathPreferences).not.toContain('appears first in Tracks')
   })
 
   it('uses the server prompt service for mode browsing and validates its route segment', () => {
@@ -55,6 +60,8 @@ describe('practice hub routes', () => {
     expect(home).not.toContain('loadHomeResponseData')
     expect(home).not.toContain('pickPreferredPracticePrompt')
     expect(home).not.toContain('recordHrefForPrompt')
+    expect(record).not.toContain('href="/practice"')
+    expect(record).toContain('href="/home"')
   })
 
   it('bypasses the removed ready screen and starts the shared recording flow on arrival', () => {

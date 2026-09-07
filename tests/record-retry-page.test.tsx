@@ -224,10 +224,7 @@ describe('record retry route boundary', () => {
     await renderPage({ retry })
 
     expect(screen.getByRole('heading', { name: 'That retry is not available' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Browse practice' })).toHaveAttribute(
-      'href',
-      '/practice',
-    )
+    expect(screen.getByRole('link', { name: 'Browse practice' })).toHaveAttribute('href', '/home')
     expect(setup.retryRead).not.toHaveBeenCalled()
     expect(mocks.pickRecordPrompt).not.toHaveBeenCalled()
     expect(mocks.recordFlow).not.toHaveBeenCalled()

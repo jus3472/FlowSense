@@ -118,7 +118,7 @@ export default async function RecordPage({
         title="That retry is not available"
         description="Choose a prompt to start a new response."
       >
-        <ButtonLink href="/practice" variant="secondary">
+        <ButtonLink href="/home" variant="secondary">
           Browse practice
         </ButtonLink>
       </ErrorState>
@@ -169,7 +169,7 @@ export default async function RecordPage({
           title="That prompt is not available"
           description="Choose another prompt from the practice library."
         >
-          <ButtonLink href="/practice" variant="secondary">
+          <ButtonLink href="/home" variant="secondary">
             Browse practice
           </ButtonLink>
         </ErrorState>
@@ -188,7 +188,7 @@ export default async function RecordPage({
           title="That practice mode is not available"
           description="Choose a supported mode from the practice library."
         >
-          <ButtonLink href="/practice" variant="secondary">
+          <ButtonLink href="/home" variant="secondary">
             Browse practice
           </ButtonLink>
         </ErrorState>

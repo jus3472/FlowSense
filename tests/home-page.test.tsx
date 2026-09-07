@@ -1,125 +1,80 @@
 // @vitest-environment jsdom
 
 import { render, screen } from '@testing-library/react'
-import type { AnchorHTMLAttributes, ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const REDIRECT = new Error('redirect')
 const mocks = vi.hoisted(() => ({
-  createClient: vi.fn(),
-  loadCurriculum: vi.fn(),
-  loadRecentLesson: vi.fn(),
-  logRecentLessonFailure: vi.fn(),
-  buildCurriculum: vi.fn(),
-  redirect: vi.fn(),
+  loadOverview: vi.fn(),
+  redirect: vi.fn(() => {
+    throw REDIRECT
+  }),
+  refresh: vi.fn(),
 }))
 
-vi.mock('next/link', () => ({
-  default: function MockLink({
-    href,
-    children,
-    ...props
-  }: AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; children: ReactNode }) {
-    return (
-      <a href={href} {...props}>
-        {children}
-      </a>
-    )
-  },
+vi.mock('server-only', () => ({}))
+vi.mock('@/lib/curriculum/server', () => ({
+  loadAuthenticatedCurriculumOverview: mocks.loadOverview,
 }))
 vi.mock('next/navigation', () => ({
   redirect: mocks.redirect,
-  useRouter: () => ({ refresh: vi.fn() }),
+  useRouter: () => ({ refresh: mocks.refresh }),
 }))
-vi.mock('@/lib/curriculum/server', () => ({
-  loadCurriculumOverviewForUser: mocks.loadCurriculum,
+vi.mock('@/components/curriculum/home-overview', () => ({
+  HomeOverview: () => <div>Four track overview</div>,
 }))
-vi.mock('@/lib/home/progression', () => ({
-  buildHomeCurriculumModel: mocks.buildCurriculum,
-}))
-vi.mock('@/lib/home/recent-lesson', () => ({
-  loadRecentStructuredLessonId: mocks.loadRecentLesson,
-  logRecentStructuredLessonFailure: mocks.logRecentLessonFailure,
-}))
-vi.mock('@/lib/supabase/server', () => ({ createClient: mocks.createClient }))
 
-import HomePage from '@/app/(app)/home/page'
-
-const curriculumModel = {
-  primary: {
-    pathTitle: 'Interviews',
-    heading: 'Continue Interviews',
-    pathComplete: false,
-    transitionLabel: null,
-    chapterLabel: 'Beginner · Lesson 1 of 10',
-    lessonTitle: 'Open with a clear answer',
-    lessonStatus: 'Not attempted',
-    action: {
-      label: 'Continue' as const,
-      href: '/practice/paths/interviews/lessons/interviews-beginner-01/record',
-    },
-    passedLessons: 0,
-    totalLessons: 30,
-    earnedStars: 0,
-    maximumStars: 90,
-  },
-  secondary: [],
-}
-
-function supabaseClient() {
-  return {
-    auth: {
-      getUser: vi.fn(async () => ({ data: { user: { id: 'user-1' } }, error: null })),
-    },
-  }
-}
+import HomePage, { metadata } from '@/app/(app)/home/page'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mocks.createClient.mockResolvedValue(supabaseClient())
-  mocks.loadCurriculum.mockResolvedValue({ status: 'ready', data: { paths: [] } })
-  mocks.loadRecentLesson.mockResolvedValue({ status: 'ready', lessonId: 'interview-lesson-1' })
-  mocks.buildCurriculum.mockReturnValue(curriculumModel)
 })
 
-describe('Home data orchestration', () => {
-  it('loads owned curriculum without rendering removed response or alternative-practice sections', async () => {
-    const client = supabaseClient()
-    mocks.createClient.mockResolvedValue(client)
+describe('Home overview page states', () => {
+  it('uses Home metadata and renders the curriculum overview as the canonical destination', async () => {
+    mocks.loadOverview.mockResolvedValue({ status: 'ready', data: { paths: [] } })
 
     render(await HomePage())
 
-    expect(mocks.loadCurriculum).toHaveBeenCalledWith(client, 'user-1')
-    expect(mocks.loadRecentLesson).toHaveBeenCalledWith(client, 'user-1')
-    expect(mocks.buildCurriculum).toHaveBeenCalledWith({ paths: [] }, 'interview-lesson-1')
-    expect(screen.getByRole('heading', { name: 'Continue Interviews' })).toBeInTheDocument()
-    expect(screen.queryByText('Open with a clear answer')).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Latest response' })).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('heading', { name: 'Practice something else' }),
-    ).not.toBeInTheDocument()
+    expect(metadata).toMatchObject({ title: 'Home' })
+    expect(mocks.loadOverview).toHaveBeenCalledOnce()
+    expect(screen.getByText('Four track overview')).toBeInTheDocument()
   })
 
-  it('keeps a retryable curriculum failure state', async () => {
-    mocks.loadCurriculum.mockResolvedValue({
-      status: 'failure',
+  it.each([
+    {
       reason: 'query',
-      operation: 'overview',
-    })
+      operation: 'preferences',
+      description: 'The connection to your practice paths failed. Try loading them again.',
+    },
+    {
+      reason: 'invalid_response',
+      operation: 'preferences',
+      description: 'Your saved path information could not be read. Try loading it again.',
+    },
+  ] as const)(
+    'renders a retryable Home error for a $reason preference failure',
+    async ({ description, ...failure }) => {
+      mocks.loadOverview.mockResolvedValue({ status: 'failure', ...failure })
 
-    render(await HomePage())
+      render(await HomePage())
 
-    expect(screen.getByRole('heading', { name: 'Your path did not load' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
-    expect(screen.queryByText('Latest response')).not.toBeInTheDocument()
-  })
+      expect(
+        screen.getByRole('heading', { name: 'Your practice paths did not load' }),
+      ).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Home', level: 1 })).toHaveClass(
+        'prompt-display',
+        'text-2xl',
+      )
+      expect(screen.getByText(description)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+    },
+  )
 
-  it('uses General Speaking fallback selection when recent activity cannot load', async () => {
-    const failure = { status: 'failure', reason: 'query', error: { code: 'PGRST500' } }
-    mocks.loadRecentLesson.mockResolvedValue(failure)
+  it('redirects an unauthenticated request before rendering path content', async () => {
+    mocks.loadOverview.mockResolvedValue({ status: 'unauthenticated' })
 
-    render(await HomePage())
-
-    expect(mocks.logRecentLessonFailure).toHaveBeenCalledWith(failure)
-    expect(mocks.buildCurriculum).toHaveBeenCalledWith({ paths: [] }, null)
+    await expect(HomePage()).rejects.toBe(REDIRECT)
+    expect(mocks.redirect).toHaveBeenCalledWith('/login')
   })
 })

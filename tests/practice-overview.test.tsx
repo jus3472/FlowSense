@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { render, screen, within } from '@testing-library/react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { PracticeOverview } from '@/components/curriculum/practice-overview'
+import { HomeOverview } from '@/components/curriculum/home-overview'
 import {
   PATH_MODES,
   PATH_POSITIONS,
@@ -339,15 +339,15 @@ describe('curriculum overview server boundary', () => {
   })
 })
 
-describe('Practice overview', () => {
-  it('shows track order, progress, lesson numbers, and state-specific direct actions', () => {
-    render(<PracticeOverview overview={overview()} />)
+describe('Home curriculum overview', () => {
+  it('shows each track in order with only its immediate lesson and direct action', () => {
+    render(<HomeOverview overview={overview()} />)
 
-    expect(screen.getByRole('heading', { name: 'Tracks', level: 1 })).toHaveClass(
+    expect(screen.getByRole('heading', { name: 'Home', level: 1 })).toHaveClass(
       'prompt-display',
       'text-2xl',
     )
-    const tracks = screen.getByRole('region', { name: 'Tracks' })
+    const tracks = screen.getByRole('region', { name: 'Home' })
     expect(
       within(tracks)
         .getAllByRole('heading', { level: 2 })
@@ -358,18 +358,21 @@ describe('Practice overview', () => {
     expect(screen.queryByText('Available')).not.toBeInTheDocument()
     expect(screen.queryByText('Interviews lesson 1')).not.toBeInTheDocument()
     expect(screen.getAllByText('Lesson 1 of 10')).not.toHaveLength(0)
-    expect(screen.getByText('Interviews beginner')).toBeInTheDocument()
-    expect(screen.getByText('Best 64 · Need 70')).toBeInTheDocument()
+    expect(screen.getAllByText('Current lesson')).toHaveLength(3)
+    expect(screen.queryByText('Interviews beginner')).not.toBeInTheDocument()
+    expect(screen.queryByText('Best 64 · Need 70')).not.toBeInTheDocument()
+    expect(screen.queryByText(/\d+ \/ 10 passed/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\d+ \/ 30 passed/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\d+ \/ 90 stars/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Not passed yet')).not.toBeInTheDocument()
     expect(screen.getAllByRole('img', { name: '0 of 3 stars' })).toHaveLength(3)
 
-    expect(screen.getByRole('link', { name: 'Try Again' })).toHaveAttribute(
-      'href',
+    expect(
+      screen.getAllByRole('link', { name: 'Continue' }).map((link) => link.getAttribute('href')),
+    ).toEqual([
       '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record?retry=attempt-interviews-1',
-    )
-    expect(screen.getByRole('link', { name: 'Continue' })).toHaveAttribute(
-      'href',
       '/practice/paths/conversations/lessons/conversations-beginner-03-skill-3/record',
-    )
+    ])
     expect(screen.getByRole('link', { name: 'Start' })).toHaveAttribute(
       'href',
       '/practice/paths/general-speaking/lessons/general-speaking-beginner-01-skill-1/record',
@@ -379,11 +382,10 @@ describe('Practice overview', () => {
       '/practice/paths/presentations',
     )
     expect(screen.getByText('Path complete')).toBeInTheDocument()
-    expect(screen.getByText('90 / 90 stars')).toBeInTheDocument()
   })
 
   it('links every track card to its path without nesting the lesson actions', () => {
-    const { container } = render(<PracticeOverview overview={overview()} />)
+    const { container } = render(<HomeOverview overview={overview()} />)
 
     for (const [title, slug] of [
       ['General Speaking', 'general-speaking'],
@@ -399,21 +401,19 @@ describe('Practice overview', () => {
     }
 
     expect(container.querySelectorAll('a a')).toHaveLength(0)
-    expect(screen.getByRole('link', { name: 'Try Again' })).toHaveAttribute(
-      'href',
+    expect(
+      screen.getAllByRole('link', { name: 'Continue' }).map((link) => link.getAttribute('href')),
+    ).toEqual([
       '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record?retry=attempt-interviews-1',
-    )
-    expect(screen.getByRole('link', { name: 'Continue' })).toHaveAttribute(
-      'href',
       '/practice/paths/conversations/lessons/conversations-beginner-03-skill-3/record',
-    )
+    ])
     expect(screen.getByRole('link', { name: 'Start' })).toHaveAttribute(
       'href',
       '/practice/paths/general-speaking/lessons/general-speaking-beginner-01-skill-1/record',
     )
   })
 
-  it('describes neutral activity without implying which response was most recent', () => {
+  it('keeps neutral activity in the action state without adding status copy', () => {
     const paths = allPaths().map((item) =>
       item.path.slug === 'general-speaking'
         ? progress('general-speaking', { neutral: true })
@@ -422,14 +422,19 @@ describe('Practice overview', () => {
     const built = buildCurriculumOverview(paths, [])
     if (!built.ok) throw new Error(`Invalid neutral overview fixture: ${built.error.code}`)
 
-    render(<PracticeOverview overview={built.value} />)
+    render(<HomeOverview overview={built.value} />)
 
-    expect(screen.getByText('You have activity here, but no score.')).toBeInTheDocument()
+    expect(screen.queryByText('You have activity here, but no score.')).not.toBeInTheDocument()
     expect(screen.queryByText('Your last response was not scored.')).not.toBeInTheDocument()
+    expect(
+      screen.getAllByRole('link', { name: 'Continue' }).map((link) => link.getAttribute('href')),
+    ).toContain(
+      '/practice/paths/general-speaking/lessons/general-speaking-beginner-01-skill-1/record',
+    )
   })
 
   it('removes standalone Practice discovery while keeping Custom Prompt below tracks', () => {
-    render(<PracticeOverview overview={overview()} />)
+    render(<HomeOverview overview={overview()} />)
 
     expect(screen.queryByRole('region', { name: 'Practice' })).not.toBeInTheDocument()
     for (const label of [
@@ -448,8 +453,8 @@ describe('Practice overview', () => {
   })
 
   it('uses mobile-safe wrapping, semantic tokens, and the existing free-practice boundary', () => {
-    const component = readFileSync('src/components/curriculum/practice-overview.tsx', 'utf8')
-    const page = readFileSync('src/app/(app)/practice/page.tsx', 'utf8')
+    const component = readFileSync('src/components/curriculum/home-overview.tsx', 'utf8')
+    const page = readFileSync('src/app/(app)/home/page.tsx', 'utf8')
     const promptServer = readFileSync('src/lib/prompts/server.ts', 'utf8')
 
     expect(component).toContain('min-w-0 flex-wrap')

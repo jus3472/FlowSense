@@ -26,7 +26,7 @@ vi.mock('next/link', () => ({
 }))
 
 describe('PrimaryNavigation', () => {
-  it('exposes Home, Tracks, Progress, and History in that order with stable routes', () => {
+  it('exposes Home, Progress, and History in that order with stable routes', () => {
     navigation.pathname = '/home'
     render(<PrimaryNavigation />)
 
@@ -37,16 +37,18 @@ describe('PrimaryNavigation', () => {
       })),
     ).toEqual([
       { label: 'Home', href: '/home' },
-      { label: 'Tracks', href: '/practice' },
       { label: 'Progress', href: '/progress' },
       { label: 'History', href: '/history' },
     ])
+    expect(screen.queryByRole('link', { name: 'Tracks' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Practice' })).not.toBeInTheDocument()
   })
 
   it.each([
-    ['/practice', 'Tracks'],
-    ['/practice/paths/interviews', 'Tracks'],
+    ['/home', 'Home'],
+    ['/practice', 'Home'],
+    ['/practice/paths/interviews', 'Home'],
+    ['/practice/custom', 'Home'],
     ['/history', 'History'],
     ['/progress', 'Progress'],
   ])('marks %s as %s with an accessible active state', (pathname, label) => {
@@ -54,19 +56,6 @@ describe('PrimaryNavigation', () => {
     render(<PrimaryNavigation />)
 
     expect(screen.getByRole('link', { name: label })).toHaveAttribute('aria-current', 'page')
-  })
-
-  it.each([
-    '/practice/practice',
-    '/practice/interview',
-    '/practice/presentation',
-    '/practice/conversation',
-    '/practice/custom',
-  ])('does not add a replacement primary destination for %s', (pathname) => {
-    navigation.pathname = pathname
-    render(<PrimaryNavigation />)
-
-    expect(screen.queryByRole('link', { current: 'page' })).not.toBeInTheDocument()
   })
 
   it('uses a compact full-width mobile row and desktop inline layout', () => {

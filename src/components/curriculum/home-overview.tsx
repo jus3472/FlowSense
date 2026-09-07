@@ -4,7 +4,6 @@ import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { PageShell } from '@/components/ui/page-shell'
 import { PageTitle } from '@/components/ui/page-title'
-import { ScoreProgress } from '@/components/ui/score-progress'
 import type { CurriculumLessonProgress, CurriculumPathProgress } from '@/lib/curriculum/contracts'
 import type { CurriculumOverviewData } from '@/lib/curriculum/overview'
 import { curriculumLessonRecordHref, curriculumPathHref } from '@/lib/curriculum/routes'
@@ -15,7 +14,7 @@ function currentLesson(progress: CurriculumPathProgress): CurriculumLessonProgre
 }
 
 function pathAction(progress: CurriculumPathProgress): {
-  label: 'Start' | 'Continue' | 'Try Again' | 'View Path'
+  label: 'Start' | 'Continue' | 'View Path'
   href: ReturnType<typeof curriculumPathHref> | ReturnType<typeof curriculumLessonRecordHref>
 } {
   const action = progress.summary.nextAction
@@ -28,7 +27,6 @@ function pathAction(progress: CurriculumPathProgress): {
     action.lesson.slug,
     action.kind === 'retry' ? lesson?.bestAttemptId : null,
   )
-  if (action.kind === 'retry') return { label: 'Try Again', href }
   return {
     label: progress.summary.attemptedLessons === 0 ? 'Start' : 'Continue',
     href,
@@ -55,61 +53,25 @@ function PathCard({ item }: { item: CurriculumOverviewData['paths'][number] }) {
         {progress.path.title}
       </h2>
 
-      {progress.summary.pathComplete ? (
-        <p className="text-positive text-sm font-medium">Path complete</p>
-      ) : (
-        <div className="flex min-w-0 flex-col gap-1">
-          <p className="text-foreground text-sm font-medium">
-            {chapter?.chapter.title ?? 'Current chapter'}
-          </p>
-          <p className="numeric text-muted text-sm">
-            {chapter?.passedLessons ?? 0} / {chapter?.totalLessons ?? 10} passed
-          </p>
-        </div>
-      )}
-
-      <div className="text-muted flex flex-wrap gap-x-6 gap-y-2 text-sm">
-        <span className="numeric">
-          {progress.summary.passedLessons} / {progress.summary.totalLessons} passed
-        </span>
-        <span className="numeric">
-          {progress.summary.earnedStars} / {progress.summary.maximumStars} stars
-        </span>
-      </div>
-
-      <ScoreProgress
-        label={`${progress.path.title} lesson progress`}
-        value={progress.summary.passedLessons}
-        max={progress.summary.totalLessons}
-        size="section"
-      />
-
       {lesson ? (
-        <div className="border-border flex min-w-0 flex-col gap-2 border-t pt-4">
-          <p className="text-muted text-xs font-medium">
-            {lesson.checkpoint ? 'Current checkpoint' : 'Current lesson'}
-          </p>
+        <div className="flex min-w-0 flex-col gap-2">
+          <p className="text-muted text-xs font-medium">Current lesson</p>
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
             <p className="numeric text-foreground min-w-0 text-base font-medium">
               Lesson {lesson.lesson.position} of {chapter?.totalLessons ?? 10}
             </p>
             <CurriculumStars stars={lesson.stars} />
           </div>
-          {lesson.state === 'retry_required' && lesson.bestScore !== null ? (
-            <p className="numeric text-muted text-sm">Best {lesson.bestScore} · Need 70</p>
-          ) : lesson.attemptStatus === 'neutral' ? (
-            <p className="text-muted text-sm">You have activity here, but no score.</p>
-          ) : (
-            <p className="text-muted text-sm">Not passed yet</p>
-          )}
         </div>
-      ) : null}
+      ) : (
+        <p className="text-positive text-sm font-medium">Path complete</p>
+      )}
 
       <ButtonLink
         href={action.href}
         fullWidth
         variant={selection === 'primary' ? 'primary' : 'secondary'}
-        className="relative z-10"
+        className="relative z-10 mt-auto"
       >
         {action.label}
       </ButtonLink>
@@ -117,11 +79,11 @@ function PathCard({ item }: { item: CurriculumOverviewData['paths'][number] }) {
   )
 }
 
-export function PracticeOverview({ overview }: { overview: CurriculumOverviewData }) {
+export function HomeOverview({ overview }: { overview: CurriculumOverviewData }) {
   return (
     <PageShell>
-      <PageTitle id="tracks-heading">Tracks</PageTitle>
-      <section aria-labelledby="tracks-heading" className="flex flex-col gap-4">
+      <PageTitle id="home-heading">Home</PageTitle>
+      <section aria-labelledby="home-heading" className="flex flex-col gap-4">
         <div className="grid min-w-0 gap-6 md:grid-cols-2">
           {overview.paths.map((item) => (
             <PathCard key={item.progress.path.id} item={item} />
