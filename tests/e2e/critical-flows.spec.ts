@@ -413,8 +413,8 @@ test('keeps the full brand and final navigation within desktop and narrow viewpo
     await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link')).toHaveText([
       'Home',
       'Tracks',
-      'History',
       'Progress',
+      'History',
     ])
     expect(
       await brand.evaluate((element) => {
@@ -479,7 +479,7 @@ test('Progress shows current performance histories, exact result links, and ever
   ).toEqual(['all', 'practice', 'interview', 'presentation', 'conversation'])
 
   const overall = page.getByRole('button', { name: 'View Overall Score response history' })
-  await expect(overall).toContainText('12 responses from oldest to latest')
+  await expect(overall).not.toContainText(/responses from oldest to latest/i)
   await expect(overall.getByRole('img')).toHaveAttribute(
     'data-values',
     attempts
@@ -497,7 +497,7 @@ test('Progress shows current performance histories, exact result links, and ever
   await expect(overallLinks).toHaveCount(attempts.length)
   expect(
     await overallLinks.evaluateAll((links) => links.map((link) => link.getAttribute('href'))),
-  ).toEqual(attempts.map((attempt) => `/attempts/${attempt.id}`))
+  ).toEqual([...attempts].reverse().map((attempt) => `/attempts/${attempt.id}`))
   await expect(overallHistory.locator('[data-chart-size="expanded"]')).toHaveAttribute(
     'data-values',
     attempts.map((attempt) => attempt.score).join(','),
@@ -507,7 +507,7 @@ test('Progress shows current performance histories, exact result links, and ever
   await expect(historyTimes).toHaveCount(attempts.length)
   expect(
     await historyTimes.evaluateAll((times) => times.map((time) => time.getAttribute('datetime'))),
-  ).toEqual(attempts.map((attempt) => attempt.finished_at))
+  ).toEqual([...attempts].reverse().map((attempt) => attempt.finished_at))
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
@@ -534,12 +534,12 @@ test('Progress shows current performance histories, exact result links, and ever
   await expect(audioHistory.getByText('120 WPM')).toBeVisible()
   await page.getByRole('button', { name: 'Hide Pace response history' }).click()
 
-  for (const [value, mode, count] of [
-    ['practice', 'practice', 3],
-    ['interview', 'interview', 3],
-    ['presentation', 'presentation', 3],
-    ['conversation', 'conversation', 3],
-    ['all', null, 12],
+  for (const [value, mode] of [
+    ['practice', 'practice'],
+    ['interview', 'interview'],
+    ['presentation', 'presentation'],
+    ['conversation', 'conversation'],
+    ['all', null],
   ] as const) {
     await filter.selectOption(value)
     await expect(page).toHaveURL(mode === null ? `${APP}/progress` : `${APP}/progress?mode=${mode}`)
@@ -549,7 +549,7 @@ test('Progress shows current performance histories, exact result links, and ever
     const selectedOverall = page.getByRole('button', {
       name: 'View Overall Score response history',
     })
-    await expect(selectedOverall).toContainText(`${count} responses from oldest to latest`)
+    await expect(selectedOverall).not.toContainText(/responses from oldest to latest/i)
     await expect(selectedOverall.getByRole('img')).toHaveAttribute(
       'data-values',
       selectedAttempts
@@ -577,6 +577,61 @@ test('@mobile Progress remains usable when a full history is expanded', async ({
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
+})
+
+test('Progress cards remain balanced across responsive breakpoints and dark mode', async ({
+  page,
+  request,
+}) => {
+  await resetWithProgress(request)
+  await logIn(page)
+  await page.goto('/progress')
+
+  for (const [width, overviewRows, soundRows] of [
+    [390, 3, 4],
+    [768, 3, 2],
+    [1024, 1, 2],
+    [1280, 1, 1],
+  ] as const) {
+    await page.setViewportSize({ width, height: 900 })
+
+    const geometry = await page.evaluate(() => {
+      const cards = (headingId: string) =>
+        Array.from(document.querySelectorAll(`[aria-labelledby="${headingId}"] button`)).map(
+          (element) => {
+            const bounds = element.getBoundingClientRect()
+            return { height: bounds.height, top: Math.round(bounds.top) }
+          },
+        )
+      const select = document.querySelector('#progress-response-filter')
+      const selectBounds = select?.getBoundingClientRect()
+      return {
+        innerWidth: window.innerWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        selectHeight: selectBounds?.height ?? 0,
+        overview: cards('performance-overview-heading'),
+        sound: cards('audio-metrics-heading'),
+      }
+    })
+
+    expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.innerWidth)
+    expect(geometry.selectHeight).toBeGreaterThanOrEqual(44)
+    expect(new Set(geometry.overview.map(({ top }) => top)).size).toBe(overviewRows)
+    expect(new Set(geometry.sound.map(({ top }) => top)).size).toBe(soundRows)
+    for (const cards of [geometry.overview, geometry.sound]) {
+      for (const rowTop of new Set(cards.map(({ top }) => top))) {
+        expect(
+          new Set(cards.filter(({ top }) => top === rowTop).map(({ height }) => height)).size,
+        ).toBe(1)
+      }
+    }
+  }
+
+  await page.getByRole('button', { name: 'More options' }).click()
+  const theme = page.getByRole('menuitemcheckbox', { name: 'Light mode' })
+  await theme.click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await expect(page.getByRole('button', { name: 'View Pace response history' })).toBeVisible()
 })
 
 test('history hydrates cleanly when server and browser timezones differ', async ({
@@ -745,9 +800,14 @@ test('records once, shows processing and v3 results, retries, compares, filters,
   await expect(page.getByRole('link', { name: 'View previous response' })).toHaveCount(0)
   await page.goto('/progress')
   await expect(page.getByRole('heading', { name: 'Performance overview' })).toBeVisible()
+  const progressOverall = page.getByRole('button', {
+    name: 'View Overall Score response history',
+  })
+  await expect(progressOverall).not.toContainText(/responses from oldest to latest/i)
+  await progressOverall.click()
   await expect(
-    page.getByRole('button', { name: 'View Overall Score response history' }),
-  ).toContainText('2 responses from oldest to latest')
+    page.getByRole('region', { name: 'Overall Score response history' }).getByRole('link'),
+  ).toHaveCount(2)
   await page.goto('/history')
   await page.getByLabel('Show responses').selectOption('retry')
   await expect(page.getByText(/Interview · Library prompt · Retry/)).toBeVisible()

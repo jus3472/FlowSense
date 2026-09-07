@@ -50,30 +50,30 @@ export function ProgressDashboard({
       progress.counts.invalidTimestamp > 0)
 
   return (
-    <PageShell className="gap-8">
-      <header className="flex min-w-0 flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+    <PageShell className="gap-12">
+      <header className="flex min-w-0 flex-col gap-8 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex min-w-0 flex-col gap-3">
           <PageTitle>Progress</PageTitle>
           <p className="text-muted max-w-reading text-sm">
-            See how your speaking performance changes across responses.
+            See how your speaking improves over time.
           </p>
         </div>
         <ProgressFilterSelect filter={selectedFilter} />
       </header>
 
       {hasProgress && progress ? (
-        <div className="flex min-w-0 flex-col gap-12">
-          <section aria-labelledby="performance-overview-heading" className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-16">
+          <section aria-labelledby="performance-overview-heading" className="flex flex-col gap-6">
+            <div className="flex flex-col gap-2">
               <h2
                 id="performance-overview-heading"
                 className="prompt-display text-foreground text-xl"
               >
                 Performance overview
               </h2>
-              <p className="text-muted text-sm">Select a card to see every checked response.</p>
+              <p className="text-muted text-sm">Open a card to see your full response history.</p>
             </div>
-            <div className="grid min-w-0 gap-4 sm:grid-cols-3">
+            <div className="grid min-w-0 gap-4 lg:grid-cols-3">
               <ProgressTrend
                 label="Overall Score"
                 series={progress.overall}
@@ -95,8 +95,8 @@ export function ProgressDashboard({
             </div>
           </section>
 
-          <section aria-labelledby="content-metrics-heading" className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1">
+          <section aria-labelledby="content-metrics-heading" className="flex flex-col gap-6">
+            <div className="flex flex-col gap-2">
               <h2 id="content-metrics-heading" className="prompt-display text-foreground text-xl">
                 What You Said
               </h2>
@@ -115,14 +115,14 @@ export function ProgressDashboard({
             </div>
           </section>
 
-          <section aria-labelledby="audio-metrics-heading" className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1">
+          <section aria-labelledby="audio-metrics-heading" className="flex flex-col gap-6">
+            <div className="flex flex-col gap-2">
               <h2 id="audio-metrics-heading" className="prompt-display text-foreground text-xl">
                 How You Sounded
               </h2>
               <p className="text-muted text-sm">Four measures of how this response sounded.</p>
             </div>
-            <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {HOW_YOU_SOUNDED_METRICS.map((metric) => (
                 <ProgressTrend
                   key={metric}

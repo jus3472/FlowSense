@@ -12,6 +12,17 @@ export interface ProgressChartCoordinate {
   value: number
 }
 
+/** Keeps trend geometry chronological while listing response details newest first. */
+export function newestFirstProgressPoints(
+  points: readonly ProgressPoint[],
+): readonly ProgressPoint[] {
+  return [...points].sort(
+    (left, right) =>
+      Date.parse(right.finishedAt) - Date.parse(left.finishedAt) ||
+      right.attemptId.localeCompare(left.attemptId),
+  )
+}
+
 function rounded(value: number): number {
   return Number(value.toFixed(2))
 }

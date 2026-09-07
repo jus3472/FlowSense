@@ -130,14 +130,34 @@ describe('ProgressDashboard', () => {
     expect(within(content).getAllByRole('button')).toHaveLength(WHAT_YOU_SAID_METRICS.length)
     expect(within(sound).getAllByRole('button')).toHaveLength(HOW_YOU_SOUNDED_METRICS.length)
     expect(screen.getAllByRole('img')).toHaveLength(13)
+    expect(screen.getByText('See how your speaking improves over time.')).toBeInTheDocument()
+    expect(screen.getByText('Open a card to see your full response history.')).toBeInTheDocument()
+    expect(
+      screen.queryByText('See how your speaking performance changes across responses.'),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/checked response/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/responses from oldest to latest/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^2 responses$/i)).not.toBeInTheDocument()
+    expect(overview.querySelector('.grid')).toHaveClass('lg:grid-cols-3')
+    expect(overview.querySelector('.grid')).not.toHaveClass('sm:grid-cols-3')
+    expect(sound.querySelector('.grid')).toHaveClass('sm:grid-cols-2', 'xl:grid-cols-4')
+    expect(within(sound).getByText('Paused Time')).toHaveClass('text-balance')
     expect(screen.queryByText(/track progress|stars|lessons/i)).not.toBeInTheDocument()
   })
 
   it('routes the mode filter without losing the progress route', () => {
     render(<ProgressDashboard dashboard={dashboard()} filter="all" />)
 
+    const select = screen.getByLabelText('Show responses')
+    expect(select).toHaveAttribute('id', 'progress-response-filter')
+    expect(select).toHaveClass('min-h-11', 'appearance-none', 'pr-12', 'cursor-pointer')
+    expect(select.parentElement?.querySelector('svg[aria-hidden="true"]')).toHaveClass(
+      'right-4',
+      'size-5',
+      'pointer-events-none',
+    )
     expect(
-      within(screen.getByLabelText('Show responses'))
+      within(select)
         .getAllByRole('option')
         .map((option) => ({
           label: option.textContent,
@@ -151,14 +171,14 @@ describe('ProgressDashboard', () => {
       { label: 'Conversations', value: 'conversation' },
     ])
 
-    fireEvent.change(screen.getByLabelText('Show responses'), {
+    fireEvent.change(select, {
       target: { value: 'interview' },
     })
 
     expect(navigation.push).toHaveBeenCalledWith(progressFilterHref('interview'))
   })
 
-  it('expands a whole card into chronological, timezone-explicit result links', () => {
+  it('keeps charts chronological and lists expanded responses newest first', () => {
     render(<ProgressDashboard dashboard={dashboard()} filter="all" />)
 
     const card = screen.getByRole('button', {
@@ -173,16 +193,49 @@ describe('ProgressDashboard', () => {
     })
     const links = within(history).getAllByRole('link')
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
-      '/attempts/attempt-1',
       '/attempts/attempt-2',
+      '/attempts/attempt-1',
     ])
     expect(within(history).getByText('Describe a difficult decision.')).toBeInTheDocument()
     expect(within(history).getByText('Interviews · Retry')).toBeInTheDocument()
     expect(within(history).getAllByText('Sep 4, 2026, 11:30 PM')).toHaveLength(1)
     expect(within(history).getAllByRole('time')[0]).toHaveAttribute(
       'datetime',
-      '2026-09-05T06:30:00.000Z',
+      '2026-09-06T06:30:00.000Z',
     )
+    expect(within(history).getByRole('img')).toHaveAttribute('data-values', '60,80')
+  })
+
+  it('uses the whole collapsed card as a button and collapses from its header without intercepting links', () => {
+    render(
+      <ProgressTrend
+        label="Overall"
+        series={series([point('attempt-1', 60), point('attempt-2', 80)])}
+        timezone="UTC"
+      />,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'View Overall response history' })
+    expect(trigger.tagName).toBe('BUTTON')
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(trigger.querySelector('svg[aria-hidden="true"]')).toHaveClass('size-6')
+
+    fireEvent.click(trigger)
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(trigger).toHaveAccessibleName('Hide Overall response history')
+    expect(trigger.querySelector('svg[aria-hidden="true"]')).toHaveClass('rotate-180')
+
+    const history = screen.getByRole('region', { name: 'Overall response history' })
+    const resultLink = within(history).getAllByRole('link')[0]!
+    resultLink.addEventListener('click', (event) => event.preventDefault(), { once: true })
+    fireEvent.click(resultLink)
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+
+    fireEvent.click(trigger)
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(
+      screen.queryByRole('region', { name: 'Overall response history' }),
+    ).not.toBeInTheDocument()
   })
 
   it('uses the last ten observations in the chart and all observations when expanded', () => {
@@ -195,7 +248,7 @@ describe('ProgressDashboard', () => {
       <ProgressTrend label="Overall" series={series(points)} timezone="UTC" />,
     )
 
-    expect(container.querySelector('svg')).toHaveAttribute(
+    expect(container.querySelector('[data-chart-size="compact"]')).toHaveAttribute(
       'data-values',
       points
         .slice(-10)

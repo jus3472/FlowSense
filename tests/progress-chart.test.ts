@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { progressChartCoordinates, progressChartPath } from '@/lib/progress/chart'
+import {
+  newestFirstProgressPoints,
+  progressChartCoordinates,
+  progressChartPath,
+} from '@/lib/progress/chart'
 import type { ProgressPoint } from '@/lib/progress/v3-aggregation'
 
 function point(attemptId: string, value: number): ProgressPoint {
@@ -44,5 +48,24 @@ describe('progress chart geometry', () => {
     expect(progressChartCoordinates([])).toEqual([])
     expect(progressChartCoordinates([point('negative', -1), point('large', 101)])).toEqual([])
     expect(progressChartPath([])).toBe('')
+  })
+
+  it('orders response details newest first with a deterministic id tie-breaker', () => {
+    const chronological = [
+      { ...point('attempt-a', 60), finishedAt: '2026-09-05T12:00:00.000Z' },
+      { ...point('attempt-b', 70), finishedAt: '2026-09-06T12:00:00.000Z' },
+      { ...point('attempt-c', 80), finishedAt: '2026-09-06T12:00:00.000Z' },
+    ]
+
+    expect(newestFirstProgressPoints(chronological).map(({ attemptId }) => attemptId)).toEqual([
+      'attempt-c',
+      'attempt-b',
+      'attempt-a',
+    ])
+    expect(chronological.map(({ attemptId }) => attemptId)).toEqual([
+      'attempt-a',
+      'attempt-b',
+      'attempt-c',
+    ])
   })
 })

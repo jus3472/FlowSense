@@ -92,6 +92,8 @@ recordings or making provider calls.
 
 ## Database and deployment
 
+The primary user-facing Production domain is `https://flowsense-web.vercel.app`.
+
 Migrations in `supabase/migrations` run in filename order. `npm run db:push` reads
 `SUPABASE_DB_URL` from the environment or `.env.local`; the application does not read that value.
 FlowSense records full migration filename stems in `supabase_migrations.schema_migrations` and also
@@ -111,8 +113,9 @@ allows remote hosts only with the explicit confirmation documented by the comman
 Use a disposable database whose name includes `test`, `testing`, `scratch`, or `disposable`.
 
 For Vercel, set the five required application variables for Production, Preview, and Development.
-Add each deployment URL to Supabase Authentication URL Configuration. The three secret variables are
-read only in `src/lib/env/server.ts`; do not expose them to client components.
+Set the Supabase Auth Site URL to the primary Production domain and include that origin in the
+Redirect URL allowlist. Add Preview origins only when their authentication flow needs them. The three
+secret variables are read only in `src/lib/env/server.ts`; do not expose them to client components.
 
 ## Validation
 

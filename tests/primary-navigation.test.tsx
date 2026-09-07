@@ -26,14 +26,21 @@ vi.mock('next/link', () => ({
 }))
 
 describe('PrimaryNavigation', () => {
-  it('exposes the four coherent destinations with stable routes', () => {
+  it('exposes Home, Tracks, Progress, and History in that order with stable routes', () => {
     navigation.pathname = '/home'
     render(<PrimaryNavigation />)
 
-    expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/home')
-    expect(screen.getByRole('link', { name: 'Tracks' })).toHaveAttribute('href', '/practice')
-    expect(screen.getByRole('link', { name: 'History' })).toHaveAttribute('href', '/history')
-    expect(screen.getByRole('link', { name: 'Progress' })).toHaveAttribute('href', '/progress')
+    expect(
+      screen.getAllByRole('link').map((link) => ({
+        label: link.textContent,
+        href: link.getAttribute('href'),
+      })),
+    ).toEqual([
+      { label: 'Home', href: '/home' },
+      { label: 'Tracks', href: '/practice' },
+      { label: 'Progress', href: '/progress' },
+      { label: 'History', href: '/history' },
+    ])
     expect(screen.queryByRole('link', { name: 'Practice' })).not.toBeInTheDocument()
   })
 

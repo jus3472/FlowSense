@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card'
 import {
   PROGRESS_CHART_HEIGHT,
   PROGRESS_CHART_WIDTH,
+  newestFirstProgressPoints,
   progressChartCoordinates,
   progressChartPath,
 } from '@/lib/progress/chart'
@@ -171,11 +172,13 @@ function ExpandedHistory({
   timezone: string
   metric?: V3MetricId
 }) {
+  const newestFirst = newestFirstProgressPoints(points)
+
   return (
-    <div className="flex min-w-0 flex-col gap-4 p-4 sm:p-6">
+    <div className="flex min-w-0 flex-col gap-6 p-4 sm:p-6">
       <PerformanceChart label={label} points={points} expanded />
       <ol aria-label={`${label} response history`} className="divide-border divide-y">
-        {points.map((point) => {
+        {newestFirst.map((point) => {
           const measurementLabel = rawContext(point, metric)
           return (
             <li key={point.attemptId}>
@@ -207,6 +210,22 @@ function ExpandedHistory({
   )
 }
 
+function DisclosureIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      aria-hidden="true"
+      className={cn(
+        'text-muted size-6 shrink-0 transition-transform duration-150 ease-out',
+        open && 'rotate-180',
+      )}
+      fill="currentColor"
+    >
+      <path d="M5.3 7.3 10 12l4.7-4.7-1.4-1.4L10 9.2 6.7 5.9z" />
+    </svg>
+  )
+}
+
 export function ProgressTrend({
   label,
   series,
@@ -227,7 +246,7 @@ export function ProgressTrend({
   const latest = series.points.at(-1) ?? null
 
   return (
-    <Card className={cn('min-w-0 overflow-hidden p-0', open && 'sm:col-span-full')}>
+    <Card className={cn('h-full min-w-0 overflow-hidden p-0', open && 'sm:col-span-full')}>
       <button
         type="button"
         aria-label={`${open ? 'Hide' : 'View'} ${label} response history`}
@@ -235,29 +254,49 @@ export function ProgressTrend({
         aria-controls={expanded.length === 0 ? undefined : historyId}
         disabled={expanded.length === 0}
         onClick={() => setOpen((value) => !value)}
-        className="hover:bg-surface-sunken rounded-card flex min-h-11 w-full min-w-0 flex-col gap-4 p-4 text-left transition duration-150 ease-out disabled:cursor-default sm:p-6"
+        className={cn(
+          'enabled:hover:bg-surface-sunken rounded-card flex min-h-11 w-full min-w-0 flex-col p-4 text-left transition duration-150 ease-out disabled:cursor-default sm:p-6',
+          open ? 'gap-3' : 'h-full gap-6',
+        )}
       >
-        <span className="flex w-full min-w-0 items-start justify-between gap-4">
-          <span className="text-foreground font-medium break-words">{label}</span>
-          <span className="numeric text-foreground shrink-0 text-right text-sm">
-            {latest === null ? 'Unavailable' : scoreLabel(latest)}
+        <span
+          className={cn(
+            'flex w-full min-w-0 items-start justify-between gap-4',
+            size === 'overview' &&
+              'lg:flex-col lg:items-stretch lg:gap-2 xl:flex-row xl:items-start xl:gap-4',
+            size === 'metric' && 'sm:flex-col sm:items-stretch sm:gap-2',
+          )}
+        >
+          <span className="text-foreground min-w-0 font-medium text-balance break-words">
+            {label}
+          </span>
+          <span
+            className={cn(
+              'flex shrink-0 items-center gap-3',
+              size === 'overview' && 'lg:w-full lg:justify-between xl:w-auto',
+              size === 'metric' && 'sm:w-full sm:justify-between',
+            )}
+          >
+            <span className="numeric text-foreground text-right text-sm">
+              {latest === null ? 'Unavailable' : scoreLabel(latest)}
+            </span>
+            {expanded.length > 0 ? <DisclosureIcon open={open} /> : null}
           </span>
         </span>
-        <span className={cn('block w-full', size === 'overview' && 'py-2')}>
-          <PerformanceChart label={label} points={compact} prominent={size === 'overview'} />
-        </span>
-        <span className="text-muted flex w-full items-center justify-between gap-3 text-xs">
-          <span>
-            {series.observationCount === 0
-              ? 'No response history'
-              : series.observationCount === 1
-                ? 'One response. Add another to see a trend.'
-                : `${series.observationCount} responses from oldest to latest`}
-          </span>
-          <span aria-hidden="true" className={open ? 'rotate-180' : undefined}>
-            ▾
-          </span>
-        </span>
+        {open ? null : (
+          <>
+            <span className={cn('block w-full', size === 'overview' && 'py-2')}>
+              <PerformanceChart label={label} points={compact} prominent={size === 'overview'} />
+            </span>
+            {series.observationCount < 2 ? (
+              <span className="text-muted w-full text-xs">
+                {series.observationCount === 0
+                  ? 'No response history'
+                  : 'One response. Add another to see a trend.'}
+              </span>
+            ) : null}
+          </>
+        )}
       </button>
       {open ? (
         <div

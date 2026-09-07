@@ -20,14 +20,14 @@ const ITEMS: ReadonlyArray<{
     active: (pathname) => pathname === '/practice' || pathname.startsWith('/practice/paths/'),
   },
   {
-    label: 'History',
-    href: '/history',
-    active: (pathname) => pathname === '/history' || pathname.startsWith('/history/'),
-  },
-  {
     label: 'Progress',
     href: '/progress',
     active: (pathname) => pathname === '/progress' || pathname.startsWith('/progress/'),
+  },
+  {
+    label: 'History',
+    href: '/history',
+    active: (pathname) => pathname === '/history' || pathname.startsWith('/history/'),
   },
 ]
 

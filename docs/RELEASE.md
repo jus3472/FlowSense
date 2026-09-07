@@ -3,6 +3,8 @@
 FlowSense uses staged Vercel Production deployments. A push to `main` may build a Production
 candidate, but it must not move a Production domain until that exact artifact passes smoke testing.
 
+The primary user-facing Production domain is `https://flowsense-web.vercel.app`.
+
 ## Required Vercel configuration
 
 In the FlowSense project, open **Settings → Environments → Production → Branch Tracking**. Keep
