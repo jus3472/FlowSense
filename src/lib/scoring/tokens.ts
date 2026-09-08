@@ -91,19 +91,6 @@ export function buildTokens(words: readonly TranscriptWord[], transcript: string
   return tokens
 }
 
-/**
- * Tokens for text that carries no timings of its own, such as a rewrite. The
- * filler rules read punctuation and position rather than the clock, so the same
- * detector that counted the original can be run over the rewritten version.
- */
-export function tokensFromText(text: string): Token[] {
-  const raws = text.match(/\S+/g) ?? []
-  return buildTokens(
-    raws.map((raw, index) => ({ word: normalizeWord(raw), start: index, end: index })),
-    text,
-  )
-}
-
 /** Sentence boundaries as index ranges, for the clause restart rule. */
 export function sentenceRanges(tokens: readonly Token[]): Array<{ from: number; to: number }> {
   const ranges: Array<{ from: number; to: number }> = []

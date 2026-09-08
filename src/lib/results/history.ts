@@ -217,10 +217,3 @@ export function historyScoreLabel(entry: HistoryEntry): string {
   if (entry.score === null) return 'Overall unavailable'
   return String(entry.score)
 }
-
-export function matchesMetadataFilter(entry: HistoryEntry, filter: HistoryMetadataFilter): boolean {
-  if (filter === 'all') return true
-  if (filter === 'custom') return entry.promptSource === 'custom'
-  if (filter === 'retry') return typeof entry.retryOfAttemptId === 'string'
-  return historyMode(entry) === filter
-}

@@ -9,29 +9,6 @@ import { isPromptCollectionId, isPromptId } from '@/lib/prompts/selection'
 
 type SearchParam = string | string[] | undefined
 
-export const PRACTICE_MODE_OPTIONS: ReadonlyArray<{
-  mode: PracticeMode
-  label: string
-  description: string
-}> = [
-  { mode: 'practice', label: 'General Practice', description: 'Speak about everyday topics.' },
-  {
-    mode: 'interview',
-    label: 'Interviews',
-    description: 'Practice clear answers to interview questions.',
-  },
-  {
-    mode: 'presentation',
-    label: 'Presentations',
-    description: 'Practice sharing an idea with a group.',
-  },
-  {
-    mode: 'conversation',
-    label: 'Conversations',
-    description: 'Practice a thoughtful back-and-forth.',
-  },
-]
-
 function includes<T extends readonly string[]>(values: T, value: unknown): value is T[number] {
   return typeof value === 'string' && (values as readonly string[]).includes(value)
 }

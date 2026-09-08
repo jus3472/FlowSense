@@ -399,7 +399,6 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     return (
       <div className="flex flex-col gap-4">
         <V3ResultsView
-          attemptId={attempt.id}
           promptText={attempt.prompt_text}
           additionalContext={additionalContext}
           transcript={attempt.transcript ?? ''}
@@ -412,6 +411,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
           previousAttempts={previousAttempts}
           timezone={timezone}
           curriculumResult={curriculumResult?.status === 'ready' ? curriculumResult.data : null}
+          retryHref={retryHref}
         />
         <div className="border-border flex border-t pt-4">
           <DeleteResponseControl attemptId={attempt.id} />

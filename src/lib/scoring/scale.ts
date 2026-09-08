@@ -34,10 +34,3 @@ export function medianAbsoluteDeviation(values: readonly number[]): number {
   const centre = median(values)
   return 1.4826 * median(values.map((value) => Math.abs(value - centre)))
 }
-
-export function standardDeviation(values: readonly number[]): number {
-  if (values.length < 2) return 0
-  const mean = values.reduce((sum, value) => sum + value, 0) / values.length
-  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1)
-  return Math.sqrt(variance)
-}

@@ -521,7 +521,3 @@ export function isV3ScorePayload(value: unknown): value is V3ScorePayload {
       value.recommendation.text === priorCurrentRecommendation?.text)
   )
 }
-
-export function isCurrentV3ScorePayload(value: unknown): value is V3ScorePayload {
-  return isRecord(value) && value.version === V3_SCORE_PAYLOAD_VERSION && isV3ScorePayload(value)
-}

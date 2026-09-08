@@ -14,16 +14,6 @@ export interface TimedWord {
   endMs: number
 }
 
-export interface PronunciationAssessmentRequest {
-  contractVersion: typeof PRONUNCIATION_CONTRACT_VERSION
-  provider: { id: string; model: string; version: string }
-  locale: string
-  scenario: 'scripted' | 'unscripted'
-  audio: { contentType: string; durationMs: number }
-  referenceText: string | null
-  recognizedWords: readonly TimedWord[]
-}
-
 export interface PhonemeEvidence {
   expected: string | null
   recognized: string | null

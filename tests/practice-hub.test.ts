@@ -15,7 +15,6 @@ describe('practice hub routes', () => {
     expect(home).not.toContain('Latest response')
     expect(overview).not.toContain('Use a standalone prompt outside a track.')
     expect(overview).not.toContain('practiceBrowseHref(option.mode)')
-    expect(overview).not.toContain('PRACTICE_MODE_OPTIONS')
     expect(overview).toContain('Custom Prompt')
     expect(overview).toContain('href="/practice/custom"')
     expect(modePage).toContain('<Link href="/home"')
@@ -34,7 +33,6 @@ describe('practice hub routes', () => {
     expect(modePage).not.toContain('Choose a prompt, or start with one selected for you.')
     expect(modePage).not.toContain('getPromptCollections(')
     expect(modePage).not.toContain('getPromptLibrary(')
-    expect(modePage).not.toContain('pickPracticePrompt(')
     expect(modePage).not.toContain("from('prompts')")
   })
 
@@ -58,7 +56,6 @@ describe('practice hub routes', () => {
     expect(record).not.toContain("recentPromptIdsResult.status === 'failure'")
     expect(modePage).toContain('const browseOutcome = await getPromptBrowseData(')
     expect(home).not.toContain('loadHomeResponseData')
-    expect(home).not.toContain('pickPreferredPracticePrompt')
     expect(home).not.toContain('recordHrefForPrompt')
     expect(record).not.toContain('href="/practice"')
     expect(record).toContain('href="/home"')

@@ -24,7 +24,7 @@ vi.mock('next/link', () => ({
 }))
 
 const props = {
-  attemptId: 'attempt-1',
+  retryHref: '/record?retry=attempt-1' as Route,
   promptText: 'Describe a recent choice.',
   additionalContext: null,
   transcript: 'I used a vague phrase.',
@@ -130,6 +130,26 @@ describe('V3ResultsView', () => {
       'Overall 78 → 84',
     )
     expect(screen.queryByRole('link', { name: 'View previous response' })).not.toBeInTheDocument()
+  })
+
+  it('uses only a validated fallback retry route when curriculum context is unavailable', () => {
+    const { rerender } = render(
+      <V3ResultsView
+        {...props}
+        payload={v3Snapshot()}
+        retryHref={
+          '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record?retry=attempt-1' as Route
+        }
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'Try Again' })).toHaveAttribute(
+      'href',
+      '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record?retry=attempt-1',
+    )
+
+    rerender(<V3ResultsView {...props} payload={v3Snapshot()} retryHref={null} />)
+    expect(screen.queryByRole('link', { name: 'Try Again' })).not.toBeInTheDocument()
   })
 
   it('renders the required result sections and all ten current metrics in exact order', () => {

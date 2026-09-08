@@ -5,9 +5,7 @@ import type { PracticeMode, PromptDifficulty } from '@/lib/practice/contracts'
 import { promptRowOutcome, promptRowsOutcome } from '@/lib/prompts/data'
 import {
   buildPromptBrowseData,
-  choosePromptByModePriorityWithRecentFallback,
   choosePromptForRecord,
-  choosePromptWithRecentFallback,
   filterParsedPromptLibrary,
   isPromptId,
   recentCompletedLibraryPromptIds,
@@ -97,36 +95,6 @@ export async function getPromptLibrary(
 
   const prompts = filterParsedPromptLibrary(outcome.data, filters)
   return prompts.length > 0 ? dataReady(prompts) : dataEmpty()
-}
-
-export async function pickPracticePrompt(
-  filters: PromptLibraryFilters = {},
-  random: RandomSource = Math.random,
-): Promise<DataOutcome<LibraryPrompt>> {
-  const { excludeIds = [], ...query } = filters
-  const outcome = await getPromptLibrary(query)
-  if (outcome.status !== 'ready') return outcome
-
-  const prompt = choosePromptWithRecentFallback(outcome.data, excludeIds, random)
-  return prompt ? dataReady(prompt) : dataEmpty()
-}
-
-/** Selects the first available preferred mode, always ending at General Practice. */
-export async function pickPreferredPracticePrompt(
-  modes: readonly PracticeMode[],
-  excludeIds: readonly string[] = [],
-  random: RandomSource = Math.random,
-): Promise<DataOutcome<LibraryPrompt>> {
-  const outcome = await getPromptLibrary()
-  if (outcome.status !== 'ready') return outcome
-
-  const prompt = choosePromptByModePriorityWithRecentFallback(
-    outcome.data,
-    modes,
-    excludeIds,
-    random,
-  )
-  return prompt ? dataReady(prompt) : dataEmpty()
 }
 
 export async function pickRecordPrompt(

@@ -4,17 +4,23 @@ import { MinimalHeader } from '@/components/layout/minimal-header'
 import { Card } from '@/components/ui/card'
 import type { AuthMode } from '@/lib/validation'
 
-export const metadata: Metadata = {
-  title: 'Log in to FlowSense',
-}
-
 interface LoginPageProps {
   searchParams: Promise<{ mode?: string | string[] }>
 }
 
+function authMode(requestedMode: string | string[] | undefined): AuthMode {
+  return requestedMode === 'login' ? 'login' : 'signup'
+}
+
+export async function generateMetadata({ searchParams }: LoginPageProps): Promise<Metadata> {
+  const initialMode = authMode((await searchParams).mode)
+  return {
+    title: initialMode === 'login' ? 'Log in to FlowSense' : 'Create your FlowSense account',
+  }
+}
+
 export default async function LoginPage({ searchParams }: LoginPageProps) {
-  const requestedMode = (await searchParams).mode
-  const initialMode: AuthMode = requestedMode === 'login' ? 'login' : 'signup'
+  const initialMode = authMode((await searchParams).mode)
 
   return (
     <div className="flex min-h-dvh flex-col">

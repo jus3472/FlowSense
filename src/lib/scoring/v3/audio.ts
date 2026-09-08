@@ -249,10 +249,6 @@ for (const mode of Object.keys(AUDIO_THRESHOLDS_BY_MODE) as PracticeMode[]) {
   }
 }
 
-export function audioThresholdsFor(mode: PracticeMode): AudioModeThresholds {
-  return AUDIO_THRESHOLDS_BY_MODE[mode]
-}
-
 export interface AudioMetricEvidence {
   source:
     | 'audio_timeline'

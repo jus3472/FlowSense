@@ -36,13 +36,16 @@ vi.mock('@/components/results/v3-results-view', () => ({
     payload,
     previousAttempts,
     timezone,
+    retryHref,
   }: {
     payload: { fixture: string }
     previousAttempts: readonly { attemptId: string }[]
     timezone: string
+    retryHref: string | null
   }) => (
     <div
       data-history={previousAttempts.map((item) => item.attemptId).join(',')}
+      data-retry-href={retryHref ?? ''}
       data-timezone={timezone}
       data-testid="v3-result"
     >
@@ -181,6 +184,35 @@ describe('attempt result page', () => {
     expect(screen.getByTestId('v3-result')).toHaveAttribute('data-timezone', 'America/New_York')
     expect(client.from).toHaveBeenCalledWith('profiles')
     expect(client.profileQuery.select).toHaveBeenCalledWith('timezone')
+  })
+
+  it('preserves a structured retry route when curriculum context cannot load', async () => {
+    const row = attempt({
+      lesson_id: LESSON_ID,
+      metrics: currentMetrics({ structured: true }),
+    })
+    mocks.createClient.mockResolvedValue(clientFor(row))
+    mocks.readAttemptResult.mockReturnValue({
+      kind: 'v3',
+      payload: {
+        fixture: 'Current result',
+        mode: 'interview',
+        rubric_version: 'v3',
+        total_earned_points: 80,
+      },
+    })
+    mocks.loadStructuredLessonResultForUser.mockResolvedValue({
+      status: 'failure',
+      reason: 'query',
+      operation: 'progress',
+    })
+
+    render(await AttemptPage({ params: Promise.resolve({ id: ATTEMPT_ID }) }))
+
+    expect(screen.getByTestId('v3-result')).toHaveAttribute(
+      'data-retry-href',
+      `/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record?retry=${ATTEMPT_ID}`,
+    )
   })
 
   it.each(['failed', 'timed_out'] as const)(

@@ -6,6 +6,7 @@ import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Disclosure } from '@/components/ui/disclosure'
 import { ScoreProgress } from '@/components/ui/score-progress'
+import type { Route } from 'next'
 import type { TranscriptWord } from '@/lib/deepgram/parse'
 import type { StructuredLessonResultModel } from '@/lib/curriculum/result'
 import type { RetryComparison } from '@/lib/results/retry-comparison'
@@ -22,16 +23,11 @@ import {
   v3SectionViews,
   v3TranscriptSegments,
 } from '@/lib/results/v3'
-import {
-  V3_METRIC_LABELS,
-  type V3MetricId,
-  type V3ScorePayload,
-} from '@/lib/scoring/v3/contracts'
+import { V3_METRIC_LABELS, type V3MetricId, type V3ScorePayload } from '@/lib/scoring/v3/contracts'
 import { UTC_TIMEZONE } from '@/lib/timezone'
 import { cn } from '@/lib/utils'
 
 interface V3ResultsViewProps {
-  attemptId: string
   promptText: string
   additionalContext: string | null
   transcript: string
@@ -44,6 +40,7 @@ interface V3ResultsViewProps {
   previousAttempts?: readonly LessonAttemptHistoryItem[]
   timezone?: string
   curriculumResult?: StructuredLessonResultModel | null
+  retryHref?: Route | null
 }
 
 function scoreLabel(value: number | null, max: number): string {
@@ -107,13 +104,7 @@ function Finding({ metric, finding }: { metric: V3MetricId; finding: V3MetricFin
   )
 }
 
-function MetricDetails({
-  metric,
-  details,
-}: {
-  metric: V3MetricId
-  details: V3MetricDetailView
-}) {
+function MetricDetails({ metric, details }: { metric: V3MetricId; details: V3MetricDetailView }) {
   return (
     <div className="flex flex-col gap-6">
       {details.overview ? <p className="text-muted text-sm">{details.overview}</p> : null}
@@ -151,7 +142,6 @@ function MetricDetails({
 }
 
 export function V3ResultsView({
-  attemptId,
   promptText,
   additionalContext,
   transcript,
@@ -164,6 +154,7 @@ export function V3ResultsView({
   previousAttempts = [],
   timezone = UTC_TIMEZONE,
   curriculumResult = null,
+  retryHref = null,
 }: V3ResultsViewProps) {
   const complete = payload.total_earned_points !== null
   const transcriptSegments = v3TranscriptSegments(transcript, payload, words)
@@ -422,11 +413,11 @@ export function V3ResultsView({
               </ButtonLink>
             ) : null}
           </>
-        ) : (
-          <ButtonLink href={`/record?retry=${attemptId}`} size="lg" fullWidth>
+        ) : retryHref ? (
+          <ButtonLink href={retryHref} size="lg" fullWidth>
             Try Again
           </ButtonLink>
-        )}
+        ) : null}
       </div>
     </div>
   )

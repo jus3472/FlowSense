@@ -17,12 +17,13 @@ otherwise replace the current application before the candidate is tested.
 
 ## Release sequence
 
-1. Start from a clean `main` that matches `origin/main`. Run the repository's required local checks.
+1. Start from a clean, reviewed local `main`. Record its relationship to `origin/main` and run the
+   repository's required local checks. Local release commits may legitimately be ahead before push.
 2. Review every pending migration before release. For schema changes, record a usable backup or
    recovery point, run `npm run db:preflight`, and apply migrations only with explicit approval.
 3. Identify the current Production deployment and a known-good rollback deployment that is
    compatible with the post-migration schema.
-4. Push the exact reviewed source commit to `main`.
+4. Push the exact reviewed source commit to `main`, then confirm `origin/main` resolves to that SHA.
 5. Confirm Vercel created a staged deployment with target `production`, the expected commit SHA,
    Production environment variables, a generated immutable URL, and no Production domain assigned.
    When creating the candidate with the CLI, use `vercel --prod --skip-domain`.
