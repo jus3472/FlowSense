@@ -81,8 +81,8 @@ export function ProcessingStep({ promptText, state, onRetry }: ProcessingStepPro
             />
           </svg>
           <div className="max-w-reading flex flex-col gap-2">
-            <h2 className="text-foreground text-2xl font-semibold">Preparing your feedback</h2>
-            <p role="status" aria-live="polite" className="text-muted text-lg">
+            <h2 className="text-foreground text-lg font-semibold">Preparing your feedback</h2>
+            <p role="status" aria-live="polite" className="text-muted text-base">
               {state.stage === 'done' ? 'Opening your result' : STAGE_LABEL[state.stage]}
             </p>
           </div>

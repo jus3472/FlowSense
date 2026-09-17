@@ -27,9 +27,9 @@ describe('ProcessingStep', () => {
 
     expect(screen.getByText('Describe a clear decision.')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Preparing your feedback' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Preparing your feedback' })).toHaveClass('text-2xl')
+    expect(screen.getByRole('heading', { name: 'Preparing your feedback' })).toHaveClass('text-lg')
     expect(screen.getByRole('status')).toHaveTextContent(copy)
-    expect(screen.getByRole('status')).toHaveClass('text-lg')
+    expect(screen.getByRole('status')).toHaveClass('text-base')
     expect(container.querySelector('[data-processing-spinner="true"]')).toHaveClass(
       'size-12',
       'text-accent-visual',
