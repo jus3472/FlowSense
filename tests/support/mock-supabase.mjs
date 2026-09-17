@@ -464,7 +464,7 @@ function v3ScorePayload(attempt, failure = false, forcedScore = null) {
           earned_points: notChecked ? null : earned,
           max_points: maximum,
           explanation: notChecked ? null : explanation,
-          measurements: notChecked ? null : {},
+          measurements: notChecked ? null : metric === 'pace' ? { words_per_minute: 90 } : {},
           evidence: [],
           details: [],
           warnings: notChecked ? ['Provider check was unavailable.'] : [],
