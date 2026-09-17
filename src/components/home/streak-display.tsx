@@ -1,4 +1,5 @@
 import type { PracticeActivitySummary } from '@/lib/activity/server'
+import { HelpTooltip } from '@/components/ui/help-tooltip'
 
 export function StreakDisplay({ summary }: { summary: PracticeActivitySummary }) {
   const todayLabel = summary.todayActive
@@ -7,13 +8,11 @@ export function StreakDisplay({ summary }: { summary: PracticeActivitySummary })
   const label = `${summary.current} day streak. ${todayLabel}.`
 
   return (
-    <div
-      role="img"
-      aria-label={label}
-      title={label}
-      data-today-active={summary.todayActive ? 'true' : 'false'}
-      className={`flex min-h-11 items-center gap-1.5 rounded-full px-3 ${
-        summary.todayActive ? 'bg-accent-soft text-accent' : 'bg-surface-sunken text-muted'
+    <HelpTooltip
+      label={label}
+      active={summary.todayActive}
+      className={`focus-visible:ring-accent-ink focus-visible:ring-offset-background flex min-h-11 items-center gap-1.5 rounded-full px-3 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none ${
+        summary.todayActive ? 'bg-accent text-accent-fg' : 'bg-surface-sunken text-muted'
       }`}
     >
       <span className="relative flex size-5 items-center justify-center" aria-hidden="true">
@@ -44,6 +43,6 @@ export function StreakDisplay({ summary }: { summary: PracticeActivitySummary })
         ) : null}
       </span>
       <span className="numeric text-sm font-semibold">{summary.current}</span>
-    </div>
+    </HelpTooltip>
   )
 }

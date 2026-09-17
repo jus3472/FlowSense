@@ -1,13 +1,21 @@
 // @vitest-environment jsdom
 
-import { render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/actions/authenticate', () => ({
-  authenticate: vi.fn(),
+const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), signInWithOAuth: vi.fn() }))
+
+vi.mock('@/actions/authenticate', () => ({ authenticate: mocks.authenticate }))
+vi.mock('@/lib/supabase/client', () => ({
+  createClient: () => ({ auth: { signInWithOAuth: mocks.signInWithOAuth } }),
 }))
 
 import LoginPage, { generateMetadata } from '@/app/login/page'
+import type { AuthFormState } from '@/lib/forms'
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
 
 describe('login entry intent', () => {
   it('opens the login form when the login mode is requested', async () => {
@@ -37,5 +45,46 @@ describe('login entry intent', () => {
     await expect(
       generateMetadata({ searchParams: Promise.resolve({ mode: ['login', 'signup'] }) }),
     ).resolves.toMatchObject({ title: 'Create your FlowSense account' })
+  })
+
+  it('starts Google OAuth with the same-origin callback and shows bounded callback failures', async () => {
+    mocks.signInWithOAuth.mockResolvedValue({ error: null })
+    render(await LoginPage({ searchParams: Promise.resolve({ mode: 'login', oauth: 'failed' }) }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Google sign-in did not finish. Try again.')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }))
+
+    await waitFor(() =>
+      expect(mocks.signInWithOAuth).toHaveBeenCalledWith({
+        provider: 'google',
+        options: { redirectTo: 'http://localhost:3000/auth/callback' },
+      }),
+    )
+  })
+
+  it('keeps the submitted email visible after a wrong-password response', async () => {
+    mocks.authenticate.mockImplementation(async (_previous: AuthFormState, formData: FormData) => ({
+      formError: 'Your email or password is not correct.',
+      notice: null,
+      fieldErrors: {},
+      email: String(formData.get('email') ?? '').trim(),
+    }))
+    render(await LoginPage({ searchParams: Promise.resolve({ mode: 'login' }) }))
+
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: ' speaker@example.test ' },
+    })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'wrong-password' } })
+    const submit = screen
+      .getAllByRole('button', { name: 'Log in' })
+      .find((button) => button.getAttribute('type') === 'submit')
+    expect(submit).toBeDefined()
+    fireEvent.click(submit!)
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('Your email or password is not correct.'),
+    )
+    expect(screen.getByLabelText('Email')).toHaveValue('speaker@example.test')
+    expect(screen.getByLabelText('Password')).toHaveFocus()
   })
 })

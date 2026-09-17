@@ -39,7 +39,7 @@ describe('logout reliability', () => {
     mocks.createClient.mockResolvedValue(clientWith(signOut))
     const logging = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    await expect(logOut()).rejects.toMatchObject({ path: '/login' })
+    await expect(logOut()).rejects.toMatchObject({ path: '/' })
 
     expect(events).toEqual(['sign_out', 'clear_handoff'])
     expect(mocks.redirect).toHaveBeenCalledOnce()
@@ -98,12 +98,12 @@ describe('logout reliability', () => {
     expect(JSON.stringify(logging.mock.calls)).not.toContain('private-token')
   })
 
-  it('still reaches login when handoff cleanup fails after successful sign-out', async () => {
+  it('still reaches the public landing page when handoff cleanup fails after successful sign-out', async () => {
     mocks.createClient.mockResolvedValue(clientWith(vi.fn(async () => ({ error: null }))))
     mocks.clearHandoff.mockRejectedValue(new Error('private cleanup details'))
     const logging = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    await expect(logOut()).rejects.toMatchObject({ path: '/login' })
+    await expect(logOut()).rejects.toMatchObject({ path: '/' })
 
     expect(logging).toHaveBeenCalledWith('[auth] operation failed', {
       operation: 'logout_cleanup',

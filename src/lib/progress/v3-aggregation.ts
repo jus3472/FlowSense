@@ -1,4 +1,6 @@
 import { PRACTICE_MODES, type PracticeMode, type PromptSource } from '@/lib/practice/contracts'
+import { PRACTICE_CATEGORIES, type PracticeCategory } from '@/lib/practice/category'
+import type { ResponseCategoryFilter } from '@/lib/practice/category-filter'
 import { decodeStoredSectionSnapshot } from '@/lib/results/snapshot'
 import {
   HOW_YOU_SOUNDED_METRICS,
@@ -24,7 +26,7 @@ export const PROGRESS_DIMENSION_IDS = [
 ] as const
 
 export type ProgressDimensionId = (typeof PROGRESS_DIMENSION_IDS)[number]
-export type ProgressFilter = 'all' | PracticeMode
+export type ProgressFilter = ResponseCategoryFilter
 export type ProgressSeriesView = 'compact' | 'expanded'
 
 export interface ProgressAttemptInput {
@@ -36,6 +38,7 @@ export interface ProgressAttemptInput {
   sectionScores: unknown
   practiceMode: PracticeMode
   promptSource: PromptSource
+  category?: PracticeCategory
   rubricVersion: string
   status: 'done'
 }
@@ -159,7 +162,11 @@ export function aggregateV3Progress(
   const now = options.now.getTime()
   if (!Number.isFinite(now)) throw new Error('Progress aggregation requires a valid current time.')
   const filter = options.filter ?? 'all'
-  if (filter !== 'all' && !(PRACTICE_MODES as readonly string[]).includes(filter)) {
+  if (
+    filter !== 'all' &&
+    filter !== 'custom' &&
+    !(PRACTICE_CATEGORIES as readonly string[]).includes(filter)
+  ) {
     throw new Error('Progress aggregation requires a valid filter.')
   }
 
@@ -201,7 +208,16 @@ export function aggregateV3Progress(
       metadataMismatch += 1
       continue
     }
-    if (filter !== 'all' && item.practiceMode !== filter) {
+    const category =
+      item.promptSource === 'custom' &&
+      item.practiceMode === 'practice' &&
+      item.category === 'other'
+        ? 'other'
+        : item.practiceMode
+    if (
+      filter !== 'all' &&
+      (filter === 'custom' ? item.promptSource !== 'custom' : category !== filter)
+    ) {
       excludedMode += 1
       continue
     }

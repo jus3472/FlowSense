@@ -8,7 +8,7 @@ export function TextLink({ className, ...props }: ComponentProps<typeof Link>) {
     <Link
       {...props}
       className={cn(
-        'rounded-input text-accent underline-offset-4 transition duration-150 ease-out hover:underline',
+        'rounded-input text-accent-ink underline-offset-4 transition duration-150 ease-out hover:underline',
         className,
       )}
     />

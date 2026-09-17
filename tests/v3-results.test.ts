@@ -20,6 +20,66 @@ import { v3Snapshot } from './helpers/result-snapshots'
 import { wordsFrom } from './helpers/transcript'
 
 describe('v3 result presentation helpers', () => {
+  it('highlights only the uncertain occurrence of a word even at full Articulation credit', () => {
+    const transcript = 'I start at ten and finish at eleven.'
+    const start = transcript.indexOf('at')
+    const payload = v3Snapshot({
+      component: 1,
+      evidenceMetric: 'articulation',
+      evidence: [
+        {
+          source: 'deepgram_word_confidence',
+          start,
+          end: start + 2,
+          coordinate: { space: 'transcript', unit: 'utf16_code_unit' },
+          quote: 'at',
+          detail: 'Lower recognition confidence.',
+        },
+      ],
+    })
+    const original = structuredClone(payload)
+    expect(v3TranscriptSegments(transcript, payload)).toEqual([
+      { type: 'text', text: 'I start ' },
+      {
+        type: 'highlight',
+        text: 'at',
+        label: 'Articulation: Word clarity',
+        details: [
+          'Articulation: Word clarity',
+          'Speech recognition is less sure about this word.',
+          "It doesn't lower your score.",
+        ],
+      },
+      { type: 'text', text: ' ten and finish at eleven.' },
+    ])
+    expect(payload).toEqual(original)
+  })
+
+  it('shows a localized content issue despite score rounding, but never guesses a repeated quote', () => {
+    const payload = v3Snapshot({ component: 1 })
+    Object.assign(payload.sections.what_you_said.metrics.word_choice, {
+      component: 0.99,
+      details: [
+        {
+          kind: 'vague_wording',
+          source: 'ai',
+          quote: 'stuff',
+          observation: 'This word leaves the object unclear.',
+          suggestion: 'Name the object.',
+          evidence: [],
+        },
+      ],
+    })
+    const highlights = v3TranscriptSegments('I bring stuff.', payload).filter(
+      (item) => item.type === 'highlight',
+    )
+    expect(highlights).toHaveLength(1)
+    expect(highlights[0]).toMatchObject({ text: 'stuff', label: 'Word Choice: Precision' })
+    expect(v3TranscriptSegments('I bring stuff and more stuff.', payload)).toEqual([
+      { type: 'text', text: 'I bring stuff and more stuff.' },
+    ])
+  })
+
   it('marks only exact transcript evidence for a metric that lost points', () => {
     const transcript = 'I used a vague phrase.'
     const deduction = v3Snapshot({
@@ -41,11 +101,8 @@ describe('v3 result presentation helpers', () => {
       {
         type: 'highlight',
         text: 'vague',
-        label: 'Word Choice: wording that could be more precise',
-        details: [
-          'Word Choice: wording that could be more precise',
-          'This word does not identify the choice.',
-        ],
+        label: 'Word Choice',
+        details: ['Word Choice', "This word doesn't identify the choice."],
       },
       { type: 'text', text: ' phrase.' },
     ])
@@ -440,11 +497,8 @@ describe('v3 result presentation helpers', () => {
     expect(v3TranscriptSegments(transcript, payload)).toContainEqual({
       type: 'highlight',
       text: 'Um,',
-      label: 'Conciseness: unnecessary wording',
-      details: [
-        'Conciseness: unnecessary wording',
-        'This opening functions as unnecessary filler.',
-      ],
+      label: 'Conciseness',
+      details: ['Conciseness', 'This opening functions as unnecessary filler.'],
     })
   })
 
@@ -587,12 +641,12 @@ describe('v3 result presentation helpers', () => {
       'find it difficult',
     ])
     expect(highlights[0]?.details).toEqual([
-      'Conciseness: unnecessary filler',
-      'This opening does not add meaning here.',
+      'Conciseness: Fillers and restarts',
+      "This opening doesn't add meaning here.",
       'Try: Begin with the main point.',
     ])
-    expect(highlights[1]?.details).toContain('More precise: two scheduling conflicts')
-    expect(highlights[2]?.details).toContain('Clearer form: I find it difficult')
+    expect(highlights[1]?.details).toContain('Try: two scheduling conflicts')
+    expect(highlights[2]?.details).toContain('Try: I find it difficult')
   })
 
   it('places only excessive Paused Time evidence at authoritative timed-word boundaries', () => {
@@ -629,19 +683,19 @@ describe('v3 result presentation helpers', () => {
     expect(markers).toEqual([
       {
         type: 'marker',
-        text: '+0.9 sec',
-        label: 'Paused Time',
-        details: ['Paused Time', '0.9 sec excessive pause before you started.'],
+        text: '0.9s',
+        label: 'Paused Time: Before you begin',
+        details: ['Paused Time: Before you begin', 'You pause an extra 0.9s before you begin.'],
       },
       {
         type: 'marker',
-        text: '+1.5 sec',
-        label: 'Paused Time',
-        details: ['Paused Time', '1.5 sec excessive pause.'],
+        text: '1.5s',
+        label: 'Paused Time: Within ideas',
+        details: ['Paused Time: Within ideas', 'You pause an extra 1.5s here.'],
       },
     ])
     expect(segments.map((segment) => segment.text).join('')).toBe(
-      '+0.9 secI can+1.5 sec relax but I also work.',
+      '0.9sI can1.5s relax but I also work.',
     )
 
     Object.assign(payload.sections.how_you_sounded.metrics.paused_time, {
@@ -695,7 +749,9 @@ describe('v3 result presentation helpers', () => {
       (segment) => segment.type === 'highlight',
     )
     expect(highlights.some((segment) => segment.text === hardWord)).toBe(true)
-    expect(highlights.some((segment) => segment.details?.includes('Energy'))).toBe(true)
+    expect(
+      highlights.some((segment) => segment.details?.includes('Energy: Sustained expression')),
+    ).toBe(true)
 
     Object.assign(energy, {
       evidence: [
@@ -712,7 +768,9 @@ describe('v3 result presentation helpers', () => {
     highlights = v3TranscriptSegments(transcript, payload, words).filter(
       (segment) => segment.type === 'highlight',
     )
-    expect(highlights.some((segment) => segment.details?.includes('Energy'))).toBe(false)
+    expect(
+      highlights.some((segment) => segment.details?.includes('Energy: Sustained expression')),
+    ).toBe(false)
   })
 
   it('combines legitimate overlapping annotations and omits unavailable evidence', () => {
@@ -747,9 +805,9 @@ describe('v3 result presentation helpers', () => {
     expect(highlights).toHaveLength(1)
     expect(highlights[0]?.text).toBe('vague phrase')
     expect(highlights[0]?.details).toEqual([
-      'Conciseness: unnecessary wording',
+      'Conciseness',
       'This phrase reduced clarity.',
-      'Word Choice: wording that could be more precise',
+      'Word Choice',
     ])
   })
 })

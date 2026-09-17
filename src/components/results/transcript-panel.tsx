@@ -4,7 +4,7 @@ import { useState } from 'react'
 import type { Segment } from '@/lib/results/segments'
 
 /**
- * Amber means one thing: this cost points. Every mark is a tint behind the
+ * Amber marks a specific issue, including one that does not cost points. Every mark is a tint behind the
  * speaker's own words rather than coloured text, so marked words stay as
  * readable as the rest. No check name appears in the transcript itself, only in
  * the popover, and there is no legend to decode.

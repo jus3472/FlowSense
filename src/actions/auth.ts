@@ -30,5 +30,5 @@ export async function logOut() {
   } catch (error) {
     logAuthDiagnostic('logout_cleanup', error)
   }
-  redirect('/login')
+  redirect('/')
 }

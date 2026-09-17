@@ -1,9 +1,4 @@
-import {
-  PATH_MODES,
-  PATH_POSITIONS,
-  PATH_SLUGS,
-  type PathSlug,
-} from '@/lib/curriculum/contracts'
+import { PATH_MODES, PATH_POSITIONS, PATH_SLUGS, type PathSlug } from '@/lib/curriculum/contracts'
 import { parseCurriculumPreferenceRows } from '@/lib/curriculum/overview'
 import { sanitizeFocusAreas } from '@/lib/focus-areas'
 
@@ -124,7 +119,9 @@ export function samePathPreferenceOrder(
   expected: readonly PathSlug[],
 ): boolean {
   const actual = [loaded.primarySlug, ...loaded.secondarySlugs]
-  return actual.length === expected.length && actual.every((slug, index) => slug === expected[index])
+  return (
+    actual.length === expected.length && actual.every((slug, index) => slug === expected[index])
+  )
 }
 
 const LEGACY_FOCUS_BY_PATH: Readonly<Record<PathSlug, string>> = {

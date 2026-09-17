@@ -5,7 +5,6 @@ const home = readFileSync('src/app/(app)/home/page.tsx', 'utf8')
 const record = readFileSync('src/app/(app)/record/page.tsx', 'utf8')
 const modePage = readFileSync('src/app/(app)/practice/[mode]/page.tsx', 'utf8')
 const overview = readFileSync('src/components/curriculum/home-overview.tsx', 'utf8')
-const pathPreferences = readFileSync('src/components/onboarding/path-preference-fields.tsx', 'utf8')
 const recordFlow = readFileSync('src/components/record/record-flow.tsx', 'utf8')
 
 describe('practice hub routes', () => {
@@ -19,8 +18,7 @@ describe('practice hub routes', () => {
     expect(overview).toContain('href="/practice/custom"')
     expect(modePage).toContain('<Link href="/home"')
     expect(modePage).not.toContain('>Tracks</Link>')
-    expect(pathPreferences).toContain('This track appears first on Home.')
-    expect(pathPreferences).not.toContain('appears first in Tracks')
+    expect(overview).not.toContain('selection ===')
   })
 
   it('uses the server prompt service for mode browsing and validates its route segment', () => {

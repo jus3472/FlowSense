@@ -108,7 +108,8 @@ describe('structured lesson result thresholds', () => {
       bestStars: 0,
       personalBest: true,
       primaryAction: { label: 'Try Again' },
-      secondaryAction: null,
+      secondaryAction: { label: 'Back to Track' },
+      tertiaryAction: null,
     })
     expect(result.primaryAction.href).toContain('?retry=current-attempt')
   })
@@ -134,7 +135,8 @@ describe('structured lesson result thresholds', () => {
       bestScore: score,
       bestStars: stars,
       personalBest: true,
-      primaryAction: { label: 'Continue' },
+      primaryAction: { label: 'Next Lesson' },
+      tertiaryAction: { label: 'Back to Track' },
     })
     expect(result.primaryAction.href).toContain('/lessons/general-speaking-beginner-02-')
     expect(result.primaryAction.href).toMatch(/\/record$/)
@@ -147,8 +149,9 @@ describe('structured lesson result thresholds', () => {
       state: 'passed',
       currentStars: 3,
       bestScore: null,
-      primaryAction: { label: 'Continue' },
+      primaryAction: { label: 'Next Lesson' },
       secondaryAction: { label: 'Try Again' },
+      tertiaryAction: { label: 'Back to Track' },
     })
   })
 })
@@ -178,6 +181,7 @@ describe('structured lesson durable bests', () => {
       currentScore: null,
       currentStars: 0,
       primaryAction: { label: 'Try Again' },
+      secondaryAction: { label: 'Back to Track' },
     })
   })
 
@@ -196,7 +200,7 @@ describe('structured lesson durable bests', () => {
       bestStars: 2,
       bestAttemptId: 'best-attempt',
       personalBest: false,
-      primaryAction: { label: 'Continue' },
+      primaryAction: { label: 'Next Lesson' },
     })
   })
 
@@ -247,7 +251,8 @@ describe('structured lesson durable bests', () => {
       bestStars: 2,
       personalBest: false,
       primaryAction: { label: 'Try Again' },
-      secondaryAction: null,
+      secondaryAction: { label: 'Back to Track' },
+      tertiaryAction: null,
     })
   })
 })
@@ -271,18 +276,20 @@ describe('structured lesson result navigation', () => {
       state: 'not_passed',
       currentStars: 0,
       primaryAction: { label: 'Try Again' },
+      secondaryAction: { label: 'Back to Track' },
     })
     expect(continued).toMatchObject({
       state: 'passed',
       currentStars: 1,
       nextLesson: { level: 'intermediate', position: 1 },
-      primaryAction: { label: 'Continue' },
+      primaryAction: { label: 'Next Lesson' },
+      tertiaryAction: { label: 'Back to Track' },
     })
     expect(continued.primaryAction.href).toContain('/lessons/general-speaking-intermediate-01-')
     expect(continued.primaryAction.href).toMatch(/\/record$/)
   })
 
-  it('ends the final checkpoint at View Path without inventing another lesson', () => {
+  it('ends the final checkpoint at Back to Track without inventing another lesson', () => {
     const path = makePath()
     const allPassed = Array.from({ length: 30 }, (_, index) =>
       progressRow(path, index, 70, index === 29 ? 'current-attempt' : `attempt-${index}`),
@@ -293,7 +300,8 @@ describe('structured lesson result navigation', () => {
       state: 'passed',
       pathComplete: true,
       nextLesson: null,
-      primaryAction: { label: 'View Path', href: '/practice/paths/general-speaking' },
+      primaryAction: { label: 'Back to Track', href: '/practice/paths/general-speaking' },
+      tertiaryAction: null,
     })
   })
 })

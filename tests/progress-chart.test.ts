@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   newestFirstProgressPoints,
   progressChartCoordinates,
+  progressChartLabelIndexes,
   progressChartPath,
 } from '@/lib/progress/chart'
 import type { ProgressPoint } from '@/lib/progress/v3-aggregation'
@@ -67,5 +68,12 @@ describe('progress chart geometry', () => {
       'attempt-b',
       'attempt-c',
     ])
+  })
+
+  it('labels every small-history point and samples longer histories evenly', () => {
+    expect(progressChartLabelIndexes(0)).toEqual([])
+    expect(progressChartLabelIndexes(4)).toEqual([0, 1, 2, 3])
+    expect(progressChartLabelIndexes(12)).toEqual([0, 2, 4, 7, 9, 11])
+    expect(progressChartLabelIndexes(12, 1)).toEqual([11])
   })
 })

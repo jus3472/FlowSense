@@ -4,6 +4,7 @@ import type {
   TranscriptWord,
 } from '@/lib/deepgram/parse'
 import type { ChapterLevel, PathSlug } from '@/lib/curriculum/contracts'
+import type { PracticeCategory } from '@/lib/practice/category'
 
 export interface AmplitudeSample {
   t_ms: number
@@ -65,7 +66,12 @@ export interface AttemptCreationMetrics {
 export interface AttemptMetrics {
   capture?: CaptureMetrics
   transcript?: TranscriptMetrics
-  practice?: { target_duration_seconds?: number; additional_context?: string }
+  practice?: {
+    target_duration_seconds?: number
+    category?: PracticeCategory
+    /** Historical custom attempts may retain context that new attempts no longer collect. */
+    additional_context?: string
+  }
   creation?: AttemptCreationMetrics
   upload?: AttemptUploadMetrics
 }

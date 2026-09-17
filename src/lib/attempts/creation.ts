@@ -14,6 +14,7 @@ import {
   matchesStructuredRetryParent,
   structuredPracticeSession,
 } from '@/lib/curriculum/recording'
+import { parsePracticeCategory, practiceModeForCategory } from '@/lib/practice/category'
 
 interface StoredCreationSnapshot {
   id: string
@@ -52,6 +53,7 @@ export function libraryCreationSession(
     requested.difficulty !== prompt.difficulty ||
     requested.targetDurationSeconds !== prompt.targetDurationSeconds ||
     requested.additionalContext !== undefined ||
+    requested.category !== undefined ||
     requested.curriculum !== undefined
   ) {
     return null
@@ -77,6 +79,10 @@ export function customCreationSession(
     requested.promptId !== null ||
     requested.retryOfAttemptId !== null ||
     requested.difficulty !== 'beginner' ||
+    requested.category === undefined ||
+    parsePracticeCategory(requested.category) === null ||
+    practiceModeForCategory(requested.category) !== requested.mode ||
+    requested.additionalContext !== undefined ||
     requested.curriculum !== undefined
   ) {
     return null
@@ -89,7 +95,7 @@ export function customCreationSession(
     source: 'custom',
     targetDurationSeconds: requested.targetDurationSeconds,
     retryOfAttemptId: null,
-    ...(requested.additionalContext ? { additionalContext: requested.additionalContext } : {}),
+    category: requested.category,
   }
 }
 
@@ -147,6 +153,7 @@ export function initialAttemptMetrics(
     },
     practice: {
       target_duration_seconds: session.targetDurationSeconds,
+      ...(session.category ? { category: session.category } : {}),
       ...(session.additionalContext ? { additional_context: session.additionalContext } : {}),
     },
     upload: { storage_path: storagePath, mime_type: mimeType },
@@ -206,6 +213,7 @@ export function storedAttemptReuse(
     (stored.retry_of_attempt_id === requested.retryOfAttemptId ||
       stored.retry_of_attempt_id === null) &&
     practice.target_duration_seconds === requested.targetDurationSeconds &&
+    (practice.category ?? undefined) === requested.category &&
     (practice.additional_context ?? undefined) === requested.additionalContext &&
     upload.storage_path === storagePath &&
     upload.mime_type === requested.mimeType

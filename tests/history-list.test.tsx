@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { AnchorHTMLAttributes, ReactNode } from 'react'
 import { hydrateRoot, type Root } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
@@ -172,23 +172,28 @@ describe('HistoryList', () => {
     expect(navigation.refresh).not.toHaveBeenCalled()
   })
 
-  it('restores focus to delete when deletion fails', async () => {
-    vi.mocked(deleteAttempt).mockRejectedValueOnce(new Error('It could not be deleted.'))
+  it('keeps the dialog open and restores a retryable confirm action when deletion fails', async () => {
+    vi.mocked(deleteAttempt)
+      .mockRejectedValueOnce(new Error('It could not be deleted.'))
+      .mockResolvedValueOnce({ redirectTo: '/history' })
     render(<HistoryList {...timeContext} entries={entries} focusPhrase="with less filler" />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Confirm delete' }))
 
-    await screen.findByRole('alert')
-
-    expect(screen.queryByText('Delete this response?')).not.toBeInTheDocument()
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Delete response' })).toHaveFocus()
-    })
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete this response?' })
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('It could not be deleted.')
+    const confirm = within(dialog).getByRole('button', { name: 'Confirm delete' })
+    expect(confirm).not.toBeDisabled()
+    expect(confirm.querySelector('[data-loading-spinner="true"]')).not.toBeInTheDocument()
+    await waitFor(() => expect(confirm).toHaveFocus())
     expect(navigation.refresh).not.toHaveBeenCalled()
+
+    fireEvent.click(confirm)
+    await waitFor(() => expect(navigation.refresh).toHaveBeenCalledOnce())
   })
 
-  it('keeps dialog controls focusable while busy, then announces success and focuses a remaining row', async () => {
+  it('shows stable loading feedback, blocks duplicate deletion, then focuses a remaining row', async () => {
     let finishDelete: (() => void) | undefined
     vi.mocked(deleteAttempt).mockReturnValueOnce(
       new Promise((resolve) => {
@@ -217,10 +222,16 @@ describe('HistoryList', () => {
     const dialog = screen.getByRole('alertdialog', { name: 'Delete this response?' })
     const cancel = screen.getByRole('button', { name: 'Cancel delete' })
     expect(dialog).toHaveAttribute('aria-busy', 'true')
-    expect(confirm).toHaveAttribute('aria-disabled', 'true')
+    expect(confirm).toBeDisabled()
+    expect(confirm).toHaveAttribute('aria-busy', 'true')
     expect(cancel).toHaveAttribute('aria-disabled', 'true')
-    expect(confirm).not.toBeDisabled()
     expect(cancel).not.toBeDisabled()
+    expect(confirm).toHaveAccessibleName('Confirm delete')
+    expect(confirm).toHaveTextContent('Delete response')
+    expect(confirm.querySelector('[data-loading-spinner="true"]')).toBeInTheDocument()
+    expect(within(confirm).getByRole('status')).toHaveClass('sr-only')
+    fireEvent.click(confirm)
+    expect(deleteAttempt).toHaveBeenCalledOnce()
     expect(confirm).toHaveFocus()
     fireEvent.keyDown(dialog, { key: 'Tab' })
     expect(cancel).toHaveFocus()
@@ -268,7 +279,9 @@ describe('HistoryList', () => {
       />,
     )
 
-    expect(screen.getByLabelText('Show responses')).toHaveClass('min-h-11')
+    const filter = screen.getByRole('combobox', { name: 'Show responses' })
+    expect(within(filter).getAllByRole('option')).toHaveLength(8)
+    expect(filter).toHaveClass('min-h-11', 'appearance-none')
     expect(screen.queryByRole('link', { name: 'High scores' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Low scores' })).not.toBeInTheDocument()
     expect(screen.getByText(longPrompt)).toHaveClass('min-w-0', 'break-words')
@@ -377,7 +390,7 @@ describe('HistoryList', () => {
     expect(screen.queryByLabelText(/stars/)).not.toBeInTheDocument()
   })
 
-  it('uses the metadata selector and explains an empty filter', () => {
+  it('uses the shared compact category filter and explains an empty filter', () => {
     render(
       <HistoryList
         {...timeContext}
@@ -388,10 +401,29 @@ describe('HistoryList', () => {
       />,
     )
 
-    expect(screen.getByLabelText('Show responses')).toHaveValue('interview')
+    const filters = screen.getByRole('navigation', { name: 'Response filter' })
+    const select = within(filters).getByRole('combobox', { name: 'Show responses' })
+    expect(select).toHaveValue('interview')
+    expect(
+      within(filters)
+        .getAllByRole('option')
+        .map((option) => ({
+          label: option.textContent,
+          value: (option as HTMLOptionElement).value,
+        })),
+    ).toEqual([
+      { label: 'All', value: 'all' },
+      { label: 'General Speaking', value: 'general' },
+      { label: 'Interviews', value: 'interview' },
+      { label: 'Presentations', value: 'presentation' },
+      { label: 'Conversations', value: 'conversation' },
+      { label: 'Custom Prompts', value: 'custom' },
+      { label: 'Other', value: 'other' },
+      { label: 'Retries', value: 'retry' },
+    ])
     expect(screen.queryByRole('group', { name: 'Filter responses' })).not.toBeInTheDocument()
     expect(screen.getByText('Nothing in this filter')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Show responses'), { target: { value: 'custom' } })
+    fireEvent.change(select, { target: { value: 'custom' } })
     expect(navigation.push).toHaveBeenCalledWith('/history?show=custom')
   })
 

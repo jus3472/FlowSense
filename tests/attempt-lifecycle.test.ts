@@ -78,7 +78,6 @@ describe('attempt lifecycle contract', () => {
     expect(['uploading', 'transcribing', 'scoring'].every(isActiveAttemptStatus)).toBe(true)
     expect(['done', 'failed', 'timed_out'].some(isActiveAttemptStatus)).toBe(false)
   })
-
 })
 
 describe('authoritative attempt creation', () => {
@@ -108,9 +107,10 @@ describe('authoritative attempt creation', () => {
       promptText: 'Explain why this matters to you.',
       source: 'custom' as const,
       mode: 'conversation' as const,
-      additionalContext: 'Use a recent example.',
+      category: 'conversation' as const,
     }
-    expect(customCreationSession(custom)).toEqual({
+    const session = customCreationSession(custom)
+    expect(session).toEqual({
       promptId: null,
       promptText: custom.promptText,
       mode: 'conversation',
@@ -118,10 +118,19 @@ describe('authoritative attempt creation', () => {
       source: 'custom',
       targetDurationSeconds: 30,
       retryOfAttemptId: null,
-      additionalContext: 'Use a recent example.',
+      category: 'conversation',
     })
     expect(customCreationSession({ ...custom, promptId: PROMPT_ID })).toBeNull()
     expect(customCreationSession({ ...custom, difficulty: 'advanced' })).toBeNull()
+    expect(customCreationSession({ ...custom, additionalContext: 'Removed input' })).toBeNull()
+    expect(customCreationSession({ ...custom, category: 'practice' })).toBeNull()
+    expect(
+      session && initialAttemptMetrics(session, custom.mimeType, 'private/audio.webm'),
+    ).toEqual(
+      expect.objectContaining({
+        practice: { target_duration_seconds: 30, category: 'conversation' },
+      }),
+    )
   })
 
   it('derives retries only from a settled owned parent snapshot', () => {

@@ -1,13 +1,23 @@
 'use client'
 
 import Link from 'next/link'
-import { useId, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react'
+import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { ModalLayer } from '@/components/ui/modal-layer'
 import {
   PROGRESS_CHART_HEIGHT,
   PROGRESS_CHART_WIDTH,
   newestFirstProgressPoints,
   progressChartCoordinates,
+  progressChartLabelIndexes,
   progressChartPath,
 } from '@/lib/progress/chart'
 import { PROGRESS_FILTER_LABELS } from '@/lib/progress/display'
@@ -51,6 +61,10 @@ function scoreLabel(point: ProgressPoint): string {
     : `${earned} / ${maximum} · ${performance}%`
 }
 
+function averageLabel(value: number | null): string {
+  return value === null ? 'Unavailable' : `${displayValue(value)}%`
+}
+
 function measurement(point: ProgressPoint, key: string): number | null {
   const value = point.raw?.measurements?.[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -91,6 +105,9 @@ function PerformanceChart({
 }) {
   const coordinates = progressChartCoordinates(points)
   const path = progressChartPath(coordinates)
+  const labelIndexes = new Set(
+    expanded ? progressChartLabelIndexes(coordinates.length) : coordinates.map((_, index) => index),
+  )
   const values = points.map((point) => displayValue(point.value)).join(' to ')
 
   if (coordinates.length === 0) {
@@ -98,7 +115,7 @@ function PerformanceChart({
   }
 
   const accessibleSummary = expanded
-    ? `${label} full trend with ${points.length} responses on a fixed 0 to 100 scale. Oldest ${displayValue(points[0]!.value)}%, latest ${displayValue(points.at(-1)!.value)}%.`
+    ? `${label} full trend with ${points.length} responses on a fixed 0 to 100 scale. Values from oldest to latest: ${values}.`
     : `${label} from oldest to latest: ${values}`
 
   return (
@@ -138,7 +155,7 @@ function PerformanceChart({
           <path
             d={path}
             fill="none"
-            className="text-accent"
+            className="text-accent-visual"
             stroke="currentColor"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -146,15 +163,30 @@ function PerformanceChart({
             vectorEffect="non-scaling-stroke"
           />
         ) : null}
-        {coordinates.map((point) => (
-          <circle
-            key={point.attemptId}
-            cx={point.x}
-            cy={point.y}
-            r={expanded ? 2.5 : 3}
-            className="text-accent"
-            fill="currentColor"
-          />
+        {coordinates.map((point, index) => (
+          <g key={point.attemptId}>
+            <circle
+              cx={point.x}
+              cy={point.y}
+              r={expanded ? 2.5 : 3}
+              className="text-accent-visual"
+              fill="currentColor"
+            />
+            {labelIndexes.has(index) ? (
+              <text
+                x={point.x}
+                y={point.y < 18 ? point.y + 12 : point.y - 7}
+                textAnchor={
+                  index === 0 ? 'start' : index === coordinates.length - 1 ? 'end' : 'middle'
+                }
+                className="fill-muted numeric text-[9px]"
+                aria-hidden="true"
+                data-point-label={point.attemptId}
+              >
+                {displayValue(point.value)}%
+              </text>
+            ) : null}
+          </g>
         ))}
       </svg>
     </div>
@@ -210,22 +242,6 @@ function ExpandedHistory({
   )
 }
 
-function DisclosureIcon({ open }: { open: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      aria-hidden="true"
-      className={cn(
-        'text-muted size-6 shrink-0 transition-transform duration-150 ease-out',
-        open && 'rotate-180',
-      )}
-      fill="currentColor"
-    >
-      <path d="M5.3 7.3 10 12l4.7-4.7-1.4-1.4L10 9.2 6.7 5.9z" />
-    </svg>
-  )
-}
-
 export function ProgressTrend({
   label,
   series,
@@ -240,74 +256,152 @@ export function ProgressTrend({
   size?: 'overview' | 'metric'
 }) {
   const [open, setOpen] = useState(false)
-  const historyId = useId()
+  const id = useId()
+  const dialogId = `${id}-dialog`
+  const titleId = `${id}-title`
+  const descriptionId = `${id}-description`
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
   const compact = performancePoints(series, 'compact')
   const expanded = performancePoints(series, 'expanded')
-  const latest = series.points.at(-1) ?? null
+  const average = averageLabel(series.averageValue)
+
+  const close = useCallback(() => {
+    setOpen(false)
+    requestAnimationFrame(() => triggerRef.current?.focus())
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    closeRef.current?.focus()
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      close()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+    }
+  }, [close, open])
+
+  const trapFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab') return
+    const focusable = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    )
+    const first = focusable[0]
+    const last = focusable.at(-1)
+    if (!first || !last) return
+
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
 
   return (
-    <Card className={cn('h-full min-w-0 overflow-hidden p-0', open && 'sm:col-span-full')}>
-      <button
-        type="button"
-        aria-label={`${open ? 'Hide' : 'View'} ${label} response history`}
-        aria-expanded={expanded.length === 0 ? undefined : open}
-        aria-controls={expanded.length === 0 ? undefined : historyId}
-        disabled={expanded.length === 0}
-        onClick={() => setOpen((value) => !value)}
-        className={cn(
-          'enabled:hover:bg-surface-sunken rounded-card flex min-h-11 w-full min-w-0 flex-col p-4 text-left transition duration-150 ease-out disabled:cursor-default sm:p-6',
-          open ? 'gap-3' : 'h-full gap-6',
-        )}
-      >
-        <span
-          className={cn(
-            'flex w-full min-w-0 items-start justify-between gap-4',
-            size === 'overview' &&
-              'lg:flex-col lg:items-stretch lg:gap-2 xl:flex-row xl:items-start xl:gap-4',
-            size === 'metric' && 'sm:flex-col sm:items-stretch sm:gap-2',
-          )}
+    <>
+      <Card className="h-full min-w-0 overflow-hidden p-0">
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-label={`View ${label} response history`}
+          aria-haspopup="dialog"
+          aria-expanded={expanded.length === 0 ? undefined : open}
+          aria-controls={expanded.length === 0 ? undefined : dialogId}
+          disabled={expanded.length === 0}
+          onClick={() => setOpen(true)}
+          className="enabled:hover:bg-surface-sunken rounded-card flex h-full min-h-11 w-full min-w-0 flex-col gap-6 p-4 text-left transition duration-150 ease-out disabled:cursor-default sm:p-6"
         >
-          <span className="text-foreground min-w-0 font-medium text-balance break-words">
-            {label}
-          </span>
           <span
             className={cn(
-              'flex shrink-0 items-center gap-3',
-              size === 'overview' && 'lg:w-full lg:justify-between xl:w-auto',
-              size === 'metric' && 'sm:w-full sm:justify-between',
+              'flex w-full min-w-0 items-start justify-between gap-4',
+              size === 'overview' &&
+                'lg:flex-col lg:items-stretch lg:gap-2 xl:flex-row xl:items-start xl:gap-4',
+              size === 'metric' && 'sm:flex-col sm:items-stretch sm:gap-2',
             )}
           >
-            <span className="numeric text-foreground text-right text-sm">
-              {latest === null ? 'Unavailable' : scoreLabel(latest)}
+            <span className="text-foreground min-w-0 font-medium text-balance break-words">
+              {label}
             </span>
-            {expanded.length > 0 ? <DisclosureIcon open={open} /> : null}
-          </span>
-        </span>
-        {open ? null : (
-          <>
-            <span className={cn('block w-full', size === 'overview' && 'py-2')}>
-              <PerformanceChart label={label} points={compact} prominent={size === 'overview'} />
-            </span>
-            {series.observationCount < 2 ? (
-              <span className="text-muted w-full text-xs">
-                {series.observationCount === 0
-                  ? 'No response history'
-                  : 'One response. Add another to see a trend.'}
+            <span
+              className={cn(
+                'flex shrink-0 items-center gap-3',
+                size === 'overview' && 'lg:w-full lg:justify-between xl:w-auto',
+                size === 'metric' && 'sm:w-full sm:justify-between',
+              )}
+            >
+              <span className="flex flex-col items-end gap-0.5">
+                <span className="text-muted text-xs">Average</span>
+                <span className="numeric text-foreground text-right text-sm">{average}</span>
               </span>
-            ) : null}
-          </>
-        )}
-      </button>
+            </span>
+          </span>
+          <span className={cn('block w-full', size === 'overview' && 'py-2')}>
+            <PerformanceChart label={label} points={compact} prominent={size === 'overview'} />
+          </span>
+          {series.observationCount < 2 ? (
+            <span className="text-muted w-full text-xs">
+              {series.observationCount === 0
+                ? 'No response history'
+                : 'One response. Add another to see a trend.'}
+            </span>
+          ) : null}
+        </button>
+      </Card>
+
       {open ? (
-        <div
-          id={historyId}
-          role="region"
-          aria-label={`${label} response history`}
-          className="border-border border-t"
+        <ModalLayer
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) close()
+          }}
         >
-          <ExpandedHistory label={label} points={expanded} timezone={timezone} metric={metric} />
-        </div>
+          <Card
+            ref={dialogRef}
+            id={dialogId}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            aria-describedby={descriptionId}
+            onKeyDown={trapFocus}
+            className="border-border bg-surface shadow-float rounded-card max-w-column flex max-h-[calc(100dvh-2rem)] w-full flex-col overflow-hidden border p-0"
+          >
+            <div className="border-border flex items-start justify-between gap-6 border-b p-4 sm:p-6">
+              <div className="flex min-w-0 flex-col gap-1">
+                <h2 id={titleId} className="text-foreground text-lg font-semibold">
+                  {label} response history
+                </h2>
+                <p id={descriptionId} className="text-muted text-sm">
+                  Average <span className="numeric">{average}</span>. The chart runs from oldest to
+                  latest. Responses are listed newest first.
+                </p>
+              </div>
+              <Button ref={closeRef} variant="ghost" className="shrink-0" onClick={close}>
+                Close
+              </Button>
+            </div>
+            <div className="min-h-0 overflow-y-auto">
+              <ExpandedHistory
+                label={label}
+                points={expanded}
+                timezone={timezone}
+                metric={metric}
+              />
+            </div>
+          </Card>
+        </ModalLayer>
       ) : null}
-    </Card>
+    </>
   )
 }

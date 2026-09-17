@@ -17,15 +17,15 @@ export default async function HomePage() {
   const failureDescription =
     outcome.status === 'failure' &&
     (outcome.reason === 'invalid_response' || outcome.reason.startsWith('invalid_'))
-      ? 'Your saved path information could not be read. Try loading it again.'
-      : 'The connection to your practice paths failed. Try loading them again.'
+      ? 'Your practice tracks could not be read. Try loading them again.'
+      : 'The connection to your practice tracks failed. Try loading them again.'
 
   if (outcome.status === 'ready') return <HomeOverview overview={outcome.data} />
 
   return (
     <PageShell>
       <PageTitle>Home</PageTitle>
-      <ErrorState title="Your practice paths did not load" description={failureDescription}>
+      <ErrorState title="Your practice tracks did not load" description={failureDescription}>
         <RetryButton />
       </ErrorState>
     </PageShell>

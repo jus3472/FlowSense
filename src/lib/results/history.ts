@@ -2,6 +2,8 @@ import type { Route } from 'next'
 import { ATTEMPT_FAILURE_CODES, type AttemptStatus } from '@/lib/attempts/lifecycle'
 import type { ChapterLevel, PathSlug, Stars } from '@/lib/curriculum/contracts'
 import type { PracticeMode, PromptSource } from '@/lib/practice/contracts'
+import type { PracticeCategory } from '@/lib/practice/category'
+import { TRACK_IDENTITIES } from '@/lib/curriculum/track-identity'
 import type { HistoryResultKind } from '@/lib/results/history-result'
 import { localDateKey, safeTimezone } from '@/lib/timezone'
 
@@ -13,6 +15,7 @@ export interface HistoryEntry {
   resultKind?: HistoryResultKind
   practiceMode?: PracticeMode | null
   promptSource?: PromptSource | null
+  category?: PracticeCategory | null
   retryOfAttemptId?: string | null
   status?: Extract<AttemptStatus, 'done' | 'failed' | 'timed_out'>
   failureCode?: string | null
@@ -89,15 +92,16 @@ export function groupByDay(
 }
 
 export type HistoryMetadataFilter =
-  'all' | 'general' | 'interview' | 'presentation' | 'conversation' | 'custom' | 'retry'
+  'all' | 'general' | 'interview' | 'presentation' | 'conversation' | 'custom' | 'other' | 'retry'
 
 export const METADATA_FILTER_LABEL: Record<HistoryMetadataFilter, string> = {
-  all: 'All responses',
-  general: 'General Practice',
-  interview: 'Interviews',
-  presentation: 'Presentations',
-  conversation: 'Conversations',
-  custom: 'Custom prompts',
+  all: 'All',
+  general: TRACK_IDENTITIES['general-speaking'].title,
+  interview: TRACK_IDENTITIES.interviews.title,
+  presentation: TRACK_IDENTITIES.presentations.title,
+  conversation: TRACK_IDENTITIES.conversations.title,
+  custom: 'Custom Prompts',
+  other: 'Other',
   retry: 'Retries',
 }
 
@@ -120,6 +124,7 @@ const HISTORY_METADATA_FILTERS: readonly HistoryMetadataFilter[] = [
   'presentation',
   'conversation',
   'custom',
+  'other',
   'retry',
 ]
 
@@ -167,6 +172,7 @@ const MODE_LABEL: Record<PracticeMode, string> = {
 }
 
 export function historyMode(entry: HistoryEntry): HistoryMetadataFilter {
+  if (entry.promptSource === 'custom' && entry.category === 'other') return 'other'
   if (entry.practiceMode === 'interview') return 'interview'
   if (entry.practiceMode === 'presentation') return 'presentation'
   if (entry.practiceMode === 'conversation') return 'conversation'
@@ -181,7 +187,12 @@ export function historyContext(entry: HistoryEntry): string[] {
       ...(typeof entry.retryOfAttemptId === 'string' ? ['Retry'] : []),
     ]
   }
-  const mode = entry.practiceMode ? MODE_LABEL[entry.practiceMode] : 'General'
+  const mode =
+    entry.promptSource === 'custom' && entry.category === 'other'
+      ? 'Other'
+      : entry.practiceMode
+        ? MODE_LABEL[entry.practiceMode]
+        : 'General'
   return [
     mode,
     ...(entry.promptSource === 'custom' ? ['Custom prompt'] : []),

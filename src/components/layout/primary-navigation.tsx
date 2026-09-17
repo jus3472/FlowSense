@@ -49,7 +49,7 @@ export function PrimaryNavigation() {
             href={item.href}
             aria-current={active ? 'page' : undefined}
             className={`${BASE_CLASS} ${
-              active ? 'bg-accent-soft text-accent' : 'text-foreground hover:bg-surface-sunken'
+              active ? 'bg-accent-soft text-accent-ink' : 'text-foreground hover:bg-surface-sunken'
             }`}
           >
             {item.label}

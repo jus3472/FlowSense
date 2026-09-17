@@ -250,6 +250,9 @@ function selected(row, value) {
   for (const field of value.split(',')) {
     const key = field.trim()
     if (key in row) output[key] = row[key]
+    if (key === 'practice_category:metrics->practice->>category') {
+      output.practice_category = fieldValue(row, 'metrics->practice->>category') ?? null
+    }
   }
   if (value.includes('lesson:practice_lessons') && typeof row.lesson_id === 'string') {
     const lesson = PRACTICE_LESSONS.find((candidate) => candidate.id === row.lesson_id)
@@ -276,10 +279,9 @@ function singular(req, rows) {
 }
 
 function fieldValue(row, field) {
-  const [column, jsonKey] = field.split('->>')
-  if (!jsonKey) return row[column]
-  const source = row[column]
-  return source && typeof source === 'object' ? source[jsonKey] : null
+  return field
+    .split(/->>?/)
+    .reduce((value, key) => (value && typeof value === 'object' ? value[key] : null), row)
 }
 
 function splitOrExpressions(value) {
@@ -366,8 +368,7 @@ function queryRows(req, rows, url, paginate = true) {
     if (QUERY_CONTROL_KEYS.has(key)) continue
     result = result.filter((row) => matchesFilter(row, `${key}.${value}`))
   }
-  const or = url.searchParams.get('or')
-  if (or) {
+  for (const or of url.searchParams.getAll('or')) {
     const expressions = splitOrExpressions(or)
     result = result.filter((row) =>
       expressions.some((expression) => matchesFilter(row, expression)),
@@ -525,7 +526,7 @@ function v3ScorePayload(attempt, failure = false, forcedScore = null) {
   }
 }
 
-function seedProgressAttempts() {
+function seedProgressAttempts(categories = false) {
   const fixtures = [
     { mode: 'practice', score: 52, prompt: 'Explain one useful daily habit.' },
     { mode: 'interview', score: 58, prompt: 'Describe a difficult decision.' },
@@ -556,7 +557,7 @@ function seedProgressAttempts() {
       prompt_text: fixture.prompt,
       duration_ms: 30_000,
       practice_mode: fixture.mode,
-      prompt_source: 'custom',
+      prompt_source: categories && index === 1 ? 'library' : 'custom',
       prompt_difficulty: 'intermediate',
       rubric_version: 'v3',
       retry_of_attempt_id: fixture.retryOf === undefined ? null : (ids[fixture.retryOf] ?? null),
@@ -569,7 +570,10 @@ function seedProgressAttempts() {
       section_scores: null,
       content_result: null,
       metrics: {
-        practice: { target_duration_seconds: 30 },
+        practice: {
+          target_duration_seconds: 30,
+          ...(categories ? { category: index === 0 ? 'other' : fixture.mode } : {}),
+        },
         upload: {
           storage_path: `${USER_ID}/${ids[index]}.webm`,
           mime_type: 'audio/webm',
@@ -763,7 +767,7 @@ const server = createServer(async (req, res) => {
       state.pathPreferences = [{ user_id: USER_ID, path_id: PRACTICE_PATHS[0].id, rank: 0 }]
     }
     if (input.curriculum) seedLessonProgress(input.curriculum)
-    if (input.progress === true) seedProgressAttempts()
+    if (input.progress === true) seedProgressAttempts(input.categories === true)
     return json(res, 200, state)
   }
   if (url.pathname === '/__e2e/state' && req.method === 'GET') return json(res, 200, state)
@@ -841,6 +845,10 @@ const server = createServer(async (req, res) => {
   }
 
   if (url.pathname === '/auth/v1/signup' || url.pathname === '/auth/v1/token') {
+    const credentials = await body(req)
+    if (credentials.password === 'wrong-test-password') {
+      return json(res, 400, { error_code: 'invalid_credentials', msg: 'Invalid login credentials' })
+    }
     state.profile = { ...state.profile, focus_areas: [] }
     if (url.pathname.endsWith('signup')) state.userMetadata = {}
     const session = {

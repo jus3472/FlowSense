@@ -31,7 +31,7 @@ export function MicrophoneRecovery({ onRetry, retrying, children }: MicrophoneRe
       <ol className="flex flex-col gap-3">
         {STEPS.map((line, index) => (
           <li key={line} className="flex items-start gap-3">
-            <span className="numeric text-accent text-sm font-medium">{index + 1}</span>
+            <span className="numeric text-accent-ink text-sm font-medium">{index + 1}</span>
             <span className="text-muted text-base">{line}</span>
           </li>
         ))}

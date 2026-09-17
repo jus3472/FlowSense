@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DeleteResponseControl } from '@/components/results/delete-response-control'
 import { attemptResultHref } from '@/lib/curriculum/routes'
@@ -36,6 +36,14 @@ describe('DeleteResponseControl', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus())
   })
 
+  it('can join the full-width result action stack', () => {
+    render(<DeleteResponseControl attemptId="attempt-1" fullWidth />)
+
+    const trigger = screen.getByRole('button', { name: 'Delete response' })
+    expect(trigger).toHaveClass('w-full', 'min-h-14', 'border', 'text-negative')
+    expect(trigger.parentElement).toHaveClass('w-full')
+  })
+
   it('closes on Escape and returns focus to the trigger', async () => {
     render(<DeleteResponseControl attemptId="attempt-1" />)
     const trigger = screen.getByRole('button', { name: 'Delete response' })
@@ -61,10 +69,13 @@ describe('DeleteResponseControl', () => {
     expect(cancel).toHaveFocus()
   })
 
-  it('deletes once and replaces the removed result route', async () => {
-    vi.mocked(deleteAttempt).mockResolvedValueOnce({
-      redirectTo: attemptResultHref('attempt-2'),
-    })
+  it('keeps a stable label with a spinner, blocks duplicates, and replaces the removed route', async () => {
+    let finishDelete: ((value: Awaited<ReturnType<typeof deleteAttempt>>) => void) | undefined
+    vi.mocked(deleteAttempt).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishDelete = resolve
+      }),
+    )
     render(<DeleteResponseControl attemptId="attempt-1" />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete response' }))
@@ -74,8 +85,17 @@ describe('DeleteResponseControl', () => {
     fireEvent.click(remove)
     fireEvent.click(remove)
 
+    expect(deleteAttempt).toHaveBeenCalledOnce()
+    expect(remove).toBeDisabled()
+    expect(remove).toHaveAttribute('aria-busy', 'true')
+    expect(remove).toHaveAccessibleName('Delete response')
+    expect(remove).toHaveTextContent('Delete response')
+    expect(remove.querySelector('[data-loading-spinner="true"]')).toBeInTheDocument()
+    expect(within(remove).getByRole('status')).toHaveClass('sr-only')
+
+    await act(async () => finishDelete?.({ redirectTo: attemptResultHref('attempt-2') }))
+
     await waitFor(() => {
-      expect(deleteAttempt).toHaveBeenCalledOnce()
       expect(deleteAttempt).toHaveBeenCalledWith('attempt-1')
       expect(navigation.replace).toHaveBeenCalledWith('/attempts/attempt-2')
       expect(navigation.refresh).toHaveBeenCalledOnce()
@@ -95,6 +115,10 @@ describe('DeleteResponseControl', () => {
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(
       'The response could not be deleted.',
     )
+    const remove = within(dialog).getByRole('button', { name: 'Delete response' })
+    expect(remove).not.toBeDisabled()
+    expect(remove.querySelector('[data-loading-spinner="true"]')).not.toBeInTheDocument()
+    await waitFor(() => expect(remove).toHaveFocus())
     expect(navigation.replace).not.toHaveBeenCalled()
   })
 })

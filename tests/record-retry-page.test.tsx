@@ -315,7 +315,7 @@ describe('record retry route boundary', () => {
     expect(mocks.recordFlow).not.toHaveBeenCalled()
   })
 
-  it('preserves custom prompt context and duration from the private attempt snapshot', async () => {
+  it('preserves historical custom prompt context and duration from the private attempt snapshot', async () => {
     useClient({
       data: retryAttempt({
         prompt_id: null,
@@ -346,6 +346,38 @@ describe('record retry route boundary', () => {
       additionalContext: 'Keep the names private.',
     })
     expect(mocks.pickRecordPrompt).not.toHaveBeenCalled()
+  })
+
+  it('preserves a custom Other category on retry', async () => {
+    useClient({
+      data: retryAttempt({
+        prompt_id: null,
+        prompt_text: 'Describe a topic outside the Tracks.',
+        practice_mode: 'practice',
+        prompt_source: 'custom',
+        prompt_difficulty: 'beginner',
+        metrics: {
+          practice: {
+            target_duration_seconds: 30,
+            category: 'other',
+          },
+        },
+      }),
+      error: null,
+    })
+
+    await renderPage({ retry: ATTEMPT_ID })
+
+    expect(mocks.recordFlow).toHaveBeenCalledWith({
+      promptText: 'Describe a topic outside the Tracks.',
+      promptId: null,
+      mode: 'practice',
+      difficulty: 'beginner',
+      source: 'custom',
+      targetDurationSeconds: 30,
+      retryOfAttemptId: ATTEMPT_ID,
+      category: 'other',
+    })
   })
 
   it('re-runs the owned lookup for a refreshed direct retry URL', async () => {

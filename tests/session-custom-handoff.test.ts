@@ -22,8 +22,8 @@ const userId = '10000000-0000-4000-8000-000000000001'
 const secret = 'test-only-secret-with-enough-entropy'
 const practice = {
   promptText: 'Explain a choice you made.',
+  category: 'practice' as const,
   mode: 'practice' as const,
-  additionalContext: 'Keep it private.',
   targetDurationSeconds: 30,
 }
 

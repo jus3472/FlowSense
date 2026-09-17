@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  classifySpeakingActivity,
-  isSpeakingActivity,
-} from '@/lib/activity/speaking'
+import { classifySpeakingActivity, isSpeakingActivity } from '@/lib/activity/speaking'
 import { v3Snapshot } from './helpers/result-snapshots'
 
 function activity(overrides: Record<string, unknown> = {}) {
@@ -25,9 +22,11 @@ describe('speaking activity classification', () => {
       resultKind: 'current',
     })
     const neutral = v3Snapshot({ unavailableMetric: 'energy' })
-    expect(
-      classifySpeakingActivity(activity({ score: null, sectionScores: neutral })),
-    ).toEqual({ kind: 'neutral', score: null, resultKind: 'current' })
+    expect(classifySpeakingActivity(activity({ score: null, sectionScores: neutral }))).toEqual({
+      kind: 'neutral',
+      score: null,
+      resultKind: 'current',
+    })
   })
 
   it.each([

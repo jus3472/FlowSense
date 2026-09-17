@@ -38,6 +38,29 @@ describe('parseCreateAttemptPayload', () => {
     )
   })
 
+  it('accepts only source-consistent custom categories', () => {
+    expect(
+      parseCreateAttemptPayload({
+        ...VALID,
+        source: 'custom',
+        promptId: null,
+        category: 'other',
+      }),
+    ).toMatchObject({ ok: true, value: { category: 'other', mode: 'practice' } })
+    expect(parseCreateAttemptPayload({ ...VALID, category: 'practice' })).toMatchObject({
+      ok: false,
+    })
+    expect(
+      parseCreateAttemptPayload({
+        ...VALID,
+        source: 'custom',
+        promptId: null,
+        category: 'other',
+        mode: 'interview',
+      }),
+    ).toMatchObject({ ok: false })
+  })
+
   it.each([
     ['a non-object payload', null, 'The request body was malformed.'],
     ['a blank prompt', { ...VALID, promptText: ' \n ' }, 'The prompt text was missing.'],

@@ -47,6 +47,7 @@ export function matchesStructuredPracticeSession(
     requested.difficulty === canonical.difficulty &&
     requested.source === canonical.source &&
     requested.targetDurationSeconds === canonical.targetDurationSeconds &&
+    requested.category === undefined &&
     requested.additionalContext === undefined &&
     requested.curriculum.lessonId === canonical.curriculum.lessonId &&
     requested.curriculum.pathSlug === canonical.curriculum.pathSlug &&

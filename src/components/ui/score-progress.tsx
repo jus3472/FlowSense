@@ -3,6 +3,7 @@ interface ScoreProgressProps {
   max: number
   label: string
   size?: 'overall' | 'section' | 'metric'
+  tone?: 'overall' | 'content' | 'delivery'
   emptyText?: 'Unavailable' | 'Not checked'
 }
 
@@ -15,6 +16,7 @@ export function ScoreProgress({
   max,
   label,
   size = 'metric',
+  tone = 'overall',
   emptyText = 'Unavailable',
 }: ScoreProgressProps) {
   const available =
@@ -26,6 +28,11 @@ export function ScoreProgress({
     value <= max
   const percentage = available ? (value / max) * 100 : null
   const height = size === 'metric' ? 'h-1' : 'h-2'
+  const fill = {
+    overall: 'from-score-fill-start to-score-fill-end bg-linear-to-r',
+    content: 'from-score-content to-score-overall bg-linear-to-r',
+    delivery: 'from-score-overall to-score-delivery bg-linear-to-r',
+  }[tone]
 
   return (
     <div
@@ -41,7 +48,7 @@ export function ScoreProgress({
       {percentage !== null ? (
         <span
           aria-hidden="true"
-          className="from-score-fill-start to-score-fill-end block h-full rounded-full bg-linear-to-r"
+          className={`${fill} block h-full rounded-full`}
           style={{ width: `${percentage}%` }}
         />
       ) : null}

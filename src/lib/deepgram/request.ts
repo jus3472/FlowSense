@@ -1,4 +1,5 @@
 export const DEEPGRAM_LISTEN_URL = 'https://api.deepgram.com/v1/listen'
+export const DEEPGRAM_LIVE_LISTEN_URL = 'wss://api.deepgram.com/v1/listen'
 
 /**
  * Nova-2, deliberately, not Nova-3.
@@ -31,13 +32,27 @@ export const DEEPGRAM_MODEL = 'nova-2'
  * transcript, which erases the disfluencies being measured, and it overrides
  * `punctuate`. Do not add it.
  */
-export function buildDeepgramUrl(): string {
-  const params = new URLSearchParams({
+function transcriptionParams(): URLSearchParams {
+  return new URLSearchParams({
     model: DEEPGRAM_MODEL,
     filler_words: 'true',
     punctuate: 'true',
   })
-  return `${DEEPGRAM_LISTEN_URL}?${params.toString()}`
+}
+
+export function buildDeepgramUrl(): string {
+  return `${DEEPGRAM_LISTEN_URL}?${transcriptionParams().toString()}`
+}
+
+/** Uses the same scoring-sensitive transcription contract for live, provisional text. */
+export function buildDeepgramLiveUrl(): string {
+  const params = transcriptionParams()
+  params.set('interim_results', 'true')
+  // Recording ends only when the user presses Stop. VAD endpointing would
+  // otherwise lock an ambiguous word after a short pause, before the next
+  // phrase can provide the context that corrects it.
+  params.set('endpointing', 'false')
+  return `${DEEPGRAM_LIVE_LISTEN_URL}?${params.toString()}`
 }
 
 /** Deepgram authenticates with a `Token` prefix, not `Bearer`. */

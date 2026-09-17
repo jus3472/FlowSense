@@ -157,7 +157,7 @@ describe('v3 content evaluator contract', () => {
     expect(assembled.total_earned_points).toBe(88)
   })
 
-  it('keeps this attempt fail-closed when both responses reuse unreliable evidence', async () => {
+  it('omits an unsafe deduction after the retry without discarding the other metrics', async () => {
     const unsafe = response({
       conciseness: metric({
         component: 0.8,
@@ -182,14 +182,56 @@ describe('v3 content evaluator contract', () => {
     })
 
     expect(complete).toHaveBeenCalledTimes(2)
-    expect(evaluated.status).toBe('not_checked')
-    expect(evaluated.diagnostic).toEqual({
-      category: 'content_validation_failed',
-      code: 'schema_invalid',
-      reason: 'evidence_overlaps_unreliable',
-      metric: 'conciseness',
+    expect(evaluated.status).toBe('checked')
+    expect(evaluated.metrics.conciseness).toMatchObject({
+      status: 'scored',
+      component: 1,
+      explanation: 'No reliable issue was counted for this metric.',
     })
-    expect(Object.values(evaluated.metrics).every((result) => result.component === null)).toBe(true)
+    expect(Object.values(evaluated.metrics).every((result) => result.status === 'scored')).toBe(
+      true,
+    )
+    const assembled = assembleV3Score({
+      mode: 'practice',
+      content: evaluated,
+      sounded: v3Snapshot({ component: 0.8 }).sections.how_you_sounded.metrics,
+    })
+    expect(assembled.sections.what_you_said.earned_points).toBe(50)
+    expect(assembled.total_earned_points).toBe(90)
+  })
+
+  it('keeps the other content scores when Word Choice repeatedly cites an unreliable word', async () => {
+    const transcript = 'We planned a vacation.'
+    const vacationStart = transcript.indexOf('vacation')
+    const unsafe = response({
+      word_choice: metric({
+        component: 0.6,
+        explanation: 'Your wording could be more precise.',
+        findings: [finding('imprecise_wording', 'vacation', transcript)],
+      }),
+    })
+    const complete = vi.fn().mockResolvedValue(unsafe)
+
+    const evaluated = await runV3ContentEvaluation({
+      provider: provider(complete),
+      mode: 'practice',
+      prompt: 'Describe a changed plan.',
+      transcript,
+      unreliableTranscriptSpans: [
+        { start: vacationStart, end: vacationStart + 'vacation'.length, confidence: 0.5 },
+      ],
+    })
+
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(evaluated.status).toBe('checked')
+    expect(evaluated.metrics.word_choice).toMatchObject({
+      status: 'scored',
+      component: 1,
+      explanation: 'No reliable issue was counted for this metric.',
+    })
+    expect(Object.values(evaluated.metrics).every((result) => result.status === 'scored')).toBe(
+      true,
+    )
   })
 
   it('scores all six metrics for the real-attempt transcript shape', async () => {
@@ -449,7 +491,7 @@ describe('v3 content evaluator contract', () => {
     )
   })
 
-  it('rejects low-confidence, mechanically owned, and cross-metric reused evidence', () => {
+  it('rejects unsafe evidence and omits a later metric deduction that reuses a span', () => {
     const vague = finding('vague_wording', 'useful')
     const start = TRANSCRIPT.indexOf('useful')
     expect(() =>
@@ -476,18 +518,22 @@ describe('v3 content evaluator contract', () => {
       ),
     ).toThrow(/mechanically owned speech/)
 
-    expect(() =>
-      parseV3ContentResponse(
-        response({
-          word_choice: metric({ component: 0.8, findings: [vague] }),
-          grammar: metric({
-            component: 0.8,
-            findings: [finding('grammatical_error', 'useful')],
-          }),
+    const parsed = parseV3ContentResponse(
+      response({
+        word_choice: metric({ component: 0.8, findings: [vague] }),
+        grammar: metric({
+          component: 0.8,
+          findings: [finding('grammatical_error', 'useful')],
         }),
-        { transcript: TRANSCRIPT },
-      ),
-    ).toThrow(/owned by another metric/)
+      }),
+      { transcript: TRANSCRIPT },
+    )
+    expect(parsed.metrics.grammar).toMatchObject({ component: 0.8 })
+    expect(parsed.metrics.word_choice).toMatchObject({
+      component: 1,
+      details: [],
+      evidence: [],
+    })
   })
 
   it('ignores invalid or overlapping structural spans instead of charging twice', () => {

@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  compareV3RetryResults,
-  loadRetryAncestorChain,
-} from '@/lib/results/retry-comparison'
+import { compareV3RetryResults, loadRetryAncestorChain } from '@/lib/results/retry-comparison'
 import { v3Snapshot } from './helpers/result-snapshots'
 
 describe('current retry comparison', () => {

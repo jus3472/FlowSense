@@ -2,11 +2,6 @@
 
 import { redirect } from 'next/navigation'
 import { ONBOARDED_AT_KEY } from '@/lib/onboarding'
-import {
-  legacyFocusAreasForPaths,
-  parseSubmittedPathPreferences,
-} from '@/lib/path-preferences'
-import { replacePathPreferencesForUser } from '@/lib/path-preferences-server'
 import { createClient } from '@/lib/supabase/server'
 import { isValidIanaTimezone, safeTimezone } from '@/lib/timezone'
 
@@ -26,13 +21,7 @@ async function markOnboarded(supabase: Awaited<ReturnType<typeof createClient>>)
   })
 }
 
-export async function saveFocusAreas(formData: FormData) {
-  const orderedPaths = parseSubmittedPathPreferences(
-    formData.get('primary_path'),
-    formData.getAll('secondary_path'),
-  )
-  if (!orderedPaths) redirect('/onboarding/focus?error=primary')
-
+export async function completeOnboarding(formData: FormData) {
   const { supabase, user } = await authenticatedClient()
   const { data: existingProfile, error: existingProfileError } = await supabase
     .from('profiles')
@@ -45,23 +34,15 @@ export async function saveFocusAreas(formData: FormData) {
   const timezone = isValidIanaTimezone(existingProfile?.timezone)
     ? existingProfile.timezone
     : submittedTimezone
-  const focusAreas = legacyFocusAreasForPaths(orderedPaths)
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .upsert({ id: user.id, focus_areas: [...focusAreas], timezone }, { onConflict: 'id' })
-    .select('id, focus_areas, timezone')
+    .upsert({ id: user.id, timezone }, { onConflict: 'id' })
+    .select('id, timezone')
     .maybeSingle()
 
-  if (
-    profileError ||
-    profile?.id !== user.id ||
-    JSON.stringify(profile.focus_areas) !== JSON.stringify(focusAreas) ||
-    profile.timezone !== timezone
-  )
+  if (profileError || profile?.id !== user.id || profile.timezone !== timezone) {
     redirect('/onboarding/focus?error=save')
-
-  const preferenceSave = await replacePathPreferencesForUser(supabase, user.id, orderedPaths)
-  if (preferenceSave.status === 'failure') redirect('/onboarding/focus?error=save')
+  }
 
   const { error: metadataError } = await markOnboarded(supabase)
   if (metadataError) redirect('/onboarding/focus?error=save')

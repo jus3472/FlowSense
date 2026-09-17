@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/card'
 import type { AuthMode } from '@/lib/validation'
 
 interface LoginPageProps {
-  searchParams: Promise<{ mode?: string | string[] }>
+  searchParams: Promise<{ mode?: string | string[]; oauth?: string | string[] }>
 }
 
 function authMode(requestedMode: string | string[] | undefined): AuthMode {
@@ -20,14 +20,16 @@ export async function generateMetadata({ searchParams }: LoginPageProps): Promis
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
-  const initialMode = authMode((await searchParams).mode)
+  const query = await searchParams
+  const initialMode = authMode(query.mode)
+  const initialOAuthError = query.oauth === 'failed'
 
   return (
     <div className="flex min-h-dvh flex-col">
       <MinimalHeader />
       <main className="max-w-form mx-auto flex w-full flex-1 items-start px-4 py-12 sm:px-0 sm:py-16">
         <Card className="w-full p-6 sm:p-8">
-          <AuthForm initialMode={initialMode} />
+          <AuthForm initialMode={initialMode} initialOAuthError={initialOAuthError} />
         </Card>
       </main>
     </div>

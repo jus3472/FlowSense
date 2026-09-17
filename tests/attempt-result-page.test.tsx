@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ReactNode } from 'react'
 import { render, screen } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
@@ -37,11 +38,13 @@ vi.mock('@/components/results/v3-results-view', () => ({
     previousAttempts,
     timezone,
     retryHref,
+    deleteControl,
   }: {
     payload: { fixture: string }
     previousAttempts: readonly { attemptId: string }[]
     timezone: string
     retryHref: string | null
+    deleteControl: ReactNode
   }) => (
     <div
       data-history={previousAttempts.map((item) => item.attemptId).join(',')}
@@ -50,11 +53,12 @@ vi.mock('@/components/results/v3-results-view', () => ({
       data-testid="v3-result"
     >
       {payload.fixture}
+      {deleteControl}
     </div>
   ),
 }))
 vi.mock('@/components/results/delete-response-control', () => ({
-  DeleteResponseControl: ({ attemptId }: { attemptId: string }) => (
+  DeleteResponseControl: ({ attemptId }: { attemptId: string; fullWidth?: boolean }) => (
     <button type="button">Delete {attemptId}</button>
   ),
 }))
@@ -228,12 +232,43 @@ describe('attempt result page', () => {
       mocks.createClient.mockResolvedValue(clientFor(row))
       mocks.readAttemptResult.mockReturnValue({ kind: 'incomplete' })
       render(await AttemptPage({ params: Promise.resolve({ id: ATTEMPT_ID }) }))
-      expect(screen.getByText('Not scored yet')).toBeInTheDocument()
+      expect(screen.getByText('Result unavailable')).toBeInTheDocument()
+      expect(screen.getByText(/saved but could not be evaluated/)).toBeInTheDocument()
       expect(screen.getByTestId('audio')).toHaveTextContent('https://audio.test')
       expect(screen.getByRole('link', { name: 'Try this prompt again' })).toHaveAttribute(
         'href',
         `/record?retry=${ATTEMPT_ID}`,
       )
+    },
+  )
+
+  it.each([
+    [
+      'recording_unavailable',
+      'Recording unavailable',
+      /saved your response but couldn't read the recording/,
+    ],
+    ['client_transcription_timeout', 'Transcript unavailable', /Try again in a moment/],
+    ['client_scoring_failed', 'Result unavailable', /couldn't complete every check/],
+  ] as const)(
+    'explains a known %s terminal state without treating it as a score',
+    async (failureCode, title, description) => {
+      const row = attempt({
+        status: 'failed',
+        score: null,
+        section_scores: null,
+        failure_code: failureCode,
+        metrics: currentMetrics(),
+      })
+      mocks.createClient.mockResolvedValue(clientFor(row))
+      mocks.readAttemptResult.mockReturnValue({ kind: 'incomplete' })
+
+      render(await AttemptPage({ params: Promise.resolve({ id: ATTEMPT_ID }) }))
+
+      expect(screen.getByText(title)).toBeInTheDocument()
+      expect(screen.getByText(description)).toBeInTheDocument()
+      expect(screen.queryByText(/failed lesson|not passed/i)).not.toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Try this prompt again' })).toBeInTheDocument()
     },
   )
 
@@ -275,6 +310,10 @@ describe('attempt result page', () => {
     expect(screen.getByRole('link', { name: 'Try this prompt again' })).toHaveAttribute(
       'href',
       `/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record?retry=${ATTEMPT_ID}`,
+    )
+    expect(screen.getByRole('link', { name: 'Back to Track' })).toHaveAttribute(
+      'href',
+      '/practice/paths/interviews',
     )
   })
 

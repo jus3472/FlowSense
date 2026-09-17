@@ -27,7 +27,7 @@ export function HowItWorks() {
             key={step.title}
             className="border-border bg-surface shadow-card rounded-card grid grid-cols-[32px_minmax(0,1fr)] gap-4 border p-6"
           >
-            <span className="numeric bg-accent-soft text-accent flex size-8 items-center justify-center rounded-full text-sm font-medium">
+            <span className="numeric bg-accent text-accent-fg flex size-8 items-center justify-center rounded-full text-sm font-medium">
               {index + 1}
             </span>
             <span className="flex flex-col gap-1">

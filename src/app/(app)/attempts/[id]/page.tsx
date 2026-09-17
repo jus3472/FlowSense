@@ -4,6 +4,7 @@ import { notFound, redirect } from 'next/navigation'
 import { AudioPlayer } from '@/components/record/audio-player'
 import { DeleteResponseControl } from '@/components/results/delete-response-control'
 import { V3ResultsView } from '@/components/results/v3-results-view'
+import { ResultPrompt } from '@/components/results/result-prompt'
 import { RetryButton } from '@/components/system/retry-button'
 import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -17,38 +18,21 @@ import {
   type AttemptStatus,
 } from '@/lib/attempts/lifecycle'
 import { reconcileCurrentUserStaleAttempts } from '@/lib/attempts/reconciliation'
-import { attemptRetryHref } from '@/lib/attempts/retry-href'
+import { attemptRetryHref, attemptTrackHref } from '@/lib/attempts/retry-href'
 import { logAttemptDiagnostic } from '@/lib/attempts/server'
 import { loadStructuredLessonResultForUser } from '@/lib/curriculum/result-server'
 import { isUuid } from '@/lib/practice/session'
 import { RECORDINGS_BUCKET } from '@/lib/recording/storage'
 import { readAttemptResult, storedTranscriptWords } from '@/lib/results/attempt-result'
 import { loadLessonAttemptHistoryForUser } from '@/lib/results/lesson-attempt-history'
-import { compareV3RetryResults, loadRetryAncestorChain } from '@/lib/results/retry-comparison'
 import { createClient } from '@/lib/supabase/server'
 import { safeTimezone, UTC_TIMEZONE } from '@/lib/timezone'
-import type { AttemptRow } from '@/lib/types/database'
 
 export const metadata: Metadata = {
   title: 'Your answer',
 }
 
 const SIGNED_URL_SECONDS = 60 * 60
-type RetryAttemptRow = Pick<
-  AttemptRow,
-  | 'id'
-  | 'prompt_text'
-  | 'transcript'
-  | 'duration_ms'
-  | 'created_at'
-  | 'score'
-  | 'section_scores'
-  | 'metrics'
-  | 'content_result'
-  | 'retry_of_attempt_id'
->
-type RetryAttempt = RetryAttemptRow & { retryOfAttemptId: string | null }
-
 function resultLoadError() {
   return (
     <ErrorState
@@ -88,7 +72,7 @@ const PROCESSING_DESCRIPTION: Record<
 function processingResult(promptText: string, status: keyof typeof PROCESSING_DESCRIPTION) {
   return (
     <div className="flex flex-col gap-8">
-      <h1 className="text-foreground text-xl font-semibold">{promptText}</h1>
+      <ResultPrompt>{promptText}</ResultPrompt>
       <Card>
         <EmptyState
           title="Your response is processing"
@@ -100,10 +84,14 @@ function processingResult(promptText: string, status: keyof typeof PROCESSING_DE
   )
 }
 
-function abandonedUploadResult(promptText: string, retryHref: ReturnType<typeof attemptRetryHref>) {
+function abandonedUploadResult(
+  promptText: string,
+  retryHref: ReturnType<typeof attemptRetryHref>,
+  trackHref: ReturnType<typeof attemptTrackHref>,
+) {
   return (
     <div className="flex flex-col gap-8">
-      <h1 className="text-foreground text-xl font-semibold">{promptText}</h1>
+      <ResultPrompt>{promptText}</ResultPrompt>
       <Card>
         <EmptyState
           title="Recording not saved"
@@ -119,9 +107,73 @@ function abandonedUploadResult(promptText: string, retryHref: ReturnType<typeof 
         <ButtonLink href="/history" variant="ghost" fullWidth>
           Go to History
         </ButtonLink>
+        {trackHref ? (
+          <ButtonLink href={trackHref} variant="ghost" fullWidth>
+            Back to Track
+          </ButtonLink>
+        ) : null}
       </div>
     </div>
   )
+}
+
+function incompleteResultCopy(failureCode: string | null): {
+  title: string
+  description: string
+} {
+  if (
+    failureCode === ATTEMPT_FAILURE_CODES.recordingUnavailable ||
+    failureCode === ATTEMPT_FAILURE_CODES.recordingPathInvalid
+  ) {
+    return {
+      title: 'Recording unavailable',
+      description:
+        "We saved your response but couldn't read the recording, so it could not be evaluated. Try the prompt again.",
+    }
+  }
+  if (
+    failureCode === ATTEMPT_FAILURE_CODES.uploadMissing ||
+    failureCode === ATTEMPT_FAILURE_CODES.uploadVerificationFailed
+  ) {
+    return {
+      title: 'Recording not saved',
+      description:
+        "We couldn't finish saving this recording, so this response could not be evaluated. Try the prompt again.",
+    }
+  }
+  if (
+    failureCode === ATTEMPT_FAILURE_CODES.transcriptionTimeout ||
+    failureCode === ATTEMPT_FAILURE_CODES.transcriptionUnavailable ||
+    failureCode === ATTEMPT_FAILURE_CODES.transcriptionRejected ||
+    failureCode === ATTEMPT_FAILURE_CODES.transcriptionInvalidResponse ||
+    failureCode === ATTEMPT_FAILURE_CODES.transcriptionPersistenceFailed ||
+    failureCode === ATTEMPT_FAILURE_CODES.clientTranscriptionFailed ||
+    failureCode === ATTEMPT_FAILURE_CODES.clientTranscriptionTimeout
+  ) {
+    return {
+      title: 'Transcript unavailable',
+      description:
+        "We couldn't produce a usable transcript, so this response could not be evaluated. Try again in a moment.",
+    }
+  }
+  if (
+    failureCode === ATTEMPT_FAILURE_CODES.scoringInputInvalid ||
+    failureCode === ATTEMPT_FAILURE_CODES.scoringUnexpected ||
+    failureCode === ATTEMPT_FAILURE_CODES.scoringPersistenceFailed ||
+    failureCode === ATTEMPT_FAILURE_CODES.unsupportedRubricVersion ||
+    failureCode === ATTEMPT_FAILURE_CODES.clientScoringFailed ||
+    failureCode === ATTEMPT_FAILURE_CODES.clientScoringTimeout
+  ) {
+    return {
+      title: 'Result unavailable',
+      description:
+        "We saved your response but couldn't complete every check. Try again in a moment.",
+    }
+  }
+  return {
+    title: 'Result unavailable',
+    description: 'This response was saved but could not be evaluated. Try the same prompt again.',
+  }
 }
 
 export default async function AttemptPage({ params }: { params: Promise<{ id: string }> }) {
@@ -171,9 +223,14 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     lessonId: attempt.lesson_id,
     metrics: attempt.metrics,
   })
+  const trackHref = attemptTrackHref({
+    attemptId: attempt.id,
+    lessonId: attempt.lesson_id,
+    metrics: attempt.metrics,
+  })
   if (attempt.failure_code === ATTEMPT_FAILURE_CODES.clientUploadAbandoned) {
     return resultWithAudioStatus(
-      abandonedUploadResult(attempt.prompt_text, retryHref),
+      abandonedUploadResult(attempt.prompt_text, retryHref, trackHref),
       false,
       attempt.id,
     )
@@ -239,21 +296,26 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
 
   // A recording that never finished scoring still shows what it does have.
   if (result.kind === 'incomplete') {
+    const unavailable = incompleteResultCopy(attempt.failure_code)
     return resultWithAudioStatus(
       <div className="flex flex-col gap-8">
-        <h1 className="text-foreground text-xl font-semibold">{attempt.prompt_text}</h1>
+        <ResultPrompt>{attempt.prompt_text}</ResultPrompt>
         {audioUrl ? <AudioPlayer src={audioUrl} durationMs={durationMs} /> : null}
         <Card>
-          <EmptyState
-            title="Not scored yet"
-            description="This response was saved but never scored. Record another and it will be scored automatically."
-          />
+          <EmptyState title={unavailable.title} description={unavailable.description} />
         </Card>
-        {retryHref ? (
-          <ButtonLink href={retryHref} size="lg" fullWidth>
-            Try this prompt again
-          </ButtonLink>
-        ) : null}
+        <div className="flex flex-col gap-2">
+          {retryHref ? (
+            <ButtonLink href={retryHref} size="lg" fullWidth>
+              Try this prompt again
+            </ButtonLink>
+          ) : null}
+          {trackHref ? (
+            <ButtonLink href={trackHref} variant="secondary" fullWidth>
+              Back to Track
+            </ButtonLink>
+          ) : null}
+        </div>
       </div>,
       audioUnavailable,
       attempt.id,
@@ -310,63 +372,6 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
   }
 
   if (result.kind === 'v3') {
-    let comparison = null
-    if (attempt.retry_of_attempt_id) {
-      let chain: readonly RetryAttempt[] | null = null
-      try {
-        chain = await loadRetryAncestorChain<RetryAttempt>(attempt.id, async (ancestorId) => {
-          if (ancestorId === attempt.id) {
-            return {
-              id: attempt.id,
-              prompt_text: attempt.prompt_text,
-              transcript: attempt.transcript,
-              duration_ms: attempt.duration_ms,
-              created_at: attempt.created_at,
-              score: attempt.score,
-              section_scores: attempt.section_scores,
-              metrics: attempt.metrics,
-              content_result: attempt.content_result,
-              retry_of_attempt_id: attempt.retry_of_attempt_id,
-              retryOfAttemptId: attempt.retry_of_attempt_id,
-            }
-          }
-          const response: { data: RetryAttemptRow | null; error: unknown } = await supabase
-            .from('attempts')
-            .select(
-              'id, prompt_text, transcript, duration_ms, created_at, score, section_scores, metrics, content_result, retry_of_attempt_id',
-            )
-            .eq('id', ancestorId)
-            .eq('user_id', user.id)
-            .maybeSingle()
-          if (response.error) throw response.error
-          return response.data
-            ? { ...response.data, retryOfAttemptId: response.data.retry_of_attempt_id }
-            : null
-        })
-      } catch (error) {
-        logAttemptDiagnostic('load_retry_ancestor', 'retry_ancestor_read_failed', attempt.id, error)
-      }
-      const parent = chain?.[0] ?? null
-      if (parent) {
-        const parentResult = readAttemptResult({
-          id: parent.id,
-          promptText: parent.prompt_text,
-          transcript: parent.transcript,
-          durationMs: parent.duration_ms,
-          createdAt: parent.created_at,
-          audioUrl: null,
-          score: parent.score,
-          sectionScores: parent.section_scores,
-          metrics: parent.metrics,
-          contentResult: parent.content_result,
-        })
-        comparison = compareV3RetryResults(
-          result.payload,
-          parentResult.kind === 'v3' ? parentResult.payload : null,
-        )
-      }
-    }
-
     const additionalContext =
       typeof attempt.metrics === 'object' &&
       attempt.metrics !== null &&
@@ -397,32 +402,27 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
     ])
 
     return (
-      <div className="flex flex-col gap-4">
-        <V3ResultsView
-          promptText={attempt.prompt_text}
-          additionalContext={additionalContext}
-          transcript={attempt.transcript ?? ''}
-          words={storedTranscriptWords(attempt.metrics)}
-          durationMs={durationMs}
-          audioUrl={audioUrl}
-          audioUnavailable={audioUnavailable}
-          payload={result.payload}
-          comparison={comparison}
-          previousAttempts={previousAttempts}
-          timezone={timezone}
-          curriculumResult={curriculumResult?.status === 'ready' ? curriculumResult.data : null}
-          retryHref={retryHref}
-        />
-        <div className="border-border flex border-t pt-4">
-          <DeleteResponseControl attemptId={attempt.id} />
-        </div>
-      </div>
+      <V3ResultsView
+        promptText={attempt.prompt_text}
+        additionalContext={additionalContext}
+        transcript={attempt.transcript ?? ''}
+        words={storedTranscriptWords(attempt.metrics)}
+        durationMs={durationMs}
+        audioUrl={audioUrl}
+        audioUnavailable={audioUnavailable}
+        payload={result.payload}
+        previousAttempts={previousAttempts}
+        timezone={timezone}
+        curriculumResult={curriculumResult?.status === 'ready' ? curriculumResult.data : null}
+        retryHref={retryHref}
+        deleteControl={<DeleteResponseControl attemptId={attempt.id} fullWidth />}
+      />
     )
   }
 
   return resultWithAudioStatus(
     <div className="flex flex-col gap-8">
-      <h1 className="text-foreground text-xl font-semibold">{attempt.prompt_text}</h1>
+      <ResultPrompt>{attempt.prompt_text}</ResultPrompt>
       {audioUrl ? <AudioPlayer src={audioUrl} durationMs={durationMs} /> : null}
       <Card>
         <EmptyState
@@ -430,11 +430,18 @@ export default async function AttemptPage({ params }: { params: Promise<{ id: st
           description="This response uses a result format that is not available here yet."
         />
       </Card>
-      {retryHref ? (
-        <ButtonLink href={retryHref} size="lg" fullWidth>
-          Try this prompt again
-        </ButtonLink>
-      ) : null}
+      <div className="flex flex-col gap-2">
+        {retryHref ? (
+          <ButtonLink href={retryHref} size="lg" fullWidth>
+            Try this prompt again
+          </ButtonLink>
+        ) : null}
+        {trackHref ? (
+          <ButtonLink href={trackHref} variant="secondary" fullWidth>
+            Back to Track
+          </ButtonLink>
+        ) : null}
+      </div>
     </div>,
     audioUnavailable,
     attempt.id,

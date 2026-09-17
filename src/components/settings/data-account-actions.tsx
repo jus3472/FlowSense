@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { deleteAccount, resetProgress } from '@/actions/account'
 import { Button } from '@/components/ui/button'
+import { ModalLayer } from '@/components/ui/modal-layer'
 import { FIELD_CONTROL_CLASS } from '@/components/ui/text-field'
 import { initialDestructiveActionFormState, type DestructiveActionFormState } from '@/lib/forms'
 
@@ -112,8 +113,7 @@ function TypedDestructiveAction({
       ) : null}
 
       {open ? (
-        <div
-          className="bg-foreground/20 fixed inset-0 z-50 flex items-center justify-center p-4"
+        <ModalLayer
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) close()
           }}
@@ -187,7 +187,7 @@ function TypedDestructiveAction({
               </div>
             </form>
           </div>
-        </div>
+        </ModalLayer>
       ) : null}
     </div>
   )

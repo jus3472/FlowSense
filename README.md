@@ -27,6 +27,7 @@ their prompt, transcript, capture data, recording playback, and fresh-retry path
   risks.
 - [AGENTS.md](AGENTS.md) contains instructions for coding agents working in this repository.
 - [docs/RELEASE.md](docs/RELEASE.md) is the staged Production release and rollback runbook.
+- [docs/AUTH.md](docs/AUTH.md) covers password and Google OAuth setup and security boundaries.
 
 ## Run locally
 
@@ -45,6 +46,10 @@ Required application variables:
 - `SUPABASE_SECRET_KEY`
 - `DEEPGRAM_API_KEY`
 - `DEEPSEEK_API_KEY`
+
+The Deepgram key must have Member permission or higher so the server can mint the short-lived token
+used for words that appear during recording. Pre-recorded transcription can work with a more limited
+key even when live transcription cannot.
 
 Articulation uses final Deepgram word confidence, guarded by
 stored audio signal and evidence-coverage checks, and never measures accent conformity.

@@ -35,7 +35,7 @@ export async function POST(request: Request) {
         ? 'That retry session is no longer available.'
         : payload.curriculum
           ? 'That lesson is no longer available.'
-        : 'That prompt is no longer available.',
+          : 'That prompt is no longer available.',
       409,
     )
   }

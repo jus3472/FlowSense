@@ -10,6 +10,44 @@ import { progressAttempt, v3Snapshot } from './helpers/result-snapshots'
 const NOW = new Date('2026-09-05T12:00:00.000Z')
 
 describe('current progress aggregation', () => {
+  it('includes matching custom categories with tracks but separates Other from General', () => {
+    const base = progressAttempt('library-general', '2026-09-04T12:00:00.000Z')
+    const interview = progressAttempt(
+      'library-interview',
+      '2026-09-04T12:00:00.000Z',
+      v3Snapshot({ mode: 'interview' }),
+    )
+    const attempts = [
+      base,
+      { ...base, id: 'legacy-custom', promptSource: 'custom' as const },
+      { ...base, id: 'other-custom', promptSource: 'custom' as const, category: 'other' as const },
+      interview,
+      {
+        ...interview,
+        id: 'interview-custom',
+        promptSource: 'custom' as const,
+        category: 'interview' as const,
+      },
+      {
+        ...interview,
+        id: 'mismatched-category',
+        promptSource: 'custom' as const,
+        category: 'other' as const,
+      },
+    ]
+    for (const [filter, ids] of [
+      ['practice', ['legacy-custom', 'library-general']],
+      ['interview', ['interview-custom', 'library-interview', 'mismatched-category']],
+      ['custom', ['interview-custom', 'legacy-custom', 'mismatched-category', 'other-custom']],
+      ['other', ['other-custom']],
+    ] as const) {
+      const result = aggregateV3Progress(attempts, { now: NOW, filter })
+      expect(result.overall.points.map((point) => point.attemptId)).toEqual(ids)
+      expect(result.metrics.pace.points).toHaveLength(ids.length)
+    }
+    expect(aggregateV3Progress(attempts, { now: NOW }).overall.points).toHaveLength(6)
+  })
+
   it('exposes the exact overview and ten-metric dimension order', () => {
     const result = aggregateV3Progress([progressAttempt('attempt', '2026-09-04T12:00:00.000Z')], {
       now: NOW,

@@ -9,7 +9,7 @@ interface TextFieldProps extends Omit<ComponentProps<'input'>, 'id'> {
 }
 
 export const FIELD_CONTROL_CLASS =
-  'border-border bg-surface text-foreground rounded-input min-h-11 border px-4 text-base placeholder:text-muted transition duration-150 ease-out focus-visible:ring-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-muted'
+  'border-border bg-surface text-foreground rounded-input min-h-11 border px-4 text-base placeholder:text-muted transition duration-150 ease-out focus-visible:ring-accent-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-muted'
 
 export function TextField({ id, label, hint, error, className, ...props }: TextFieldProps) {
   const hintId = hint ? `${id}-hint` : undefined

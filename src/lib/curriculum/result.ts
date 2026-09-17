@@ -47,6 +47,7 @@ export interface StructuredLessonResultModel {
   pathComplete: boolean
   primaryAction: StructuredLessonResultAction
   secondaryAction: StructuredLessonResultAction | null
+  tertiaryAction: StructuredLessonResultAction | null
 }
 
 function resultState(score: number | null): StructuredLessonResultState {
@@ -80,29 +81,28 @@ function passedActions(
   path: CurriculumPathProgress,
   lesson: CurriculumLessonProgress,
   attemptId: string,
-  currentStars: Stars,
-): Pick<StructuredLessonResultModel, 'primaryAction' | 'secondaryAction'> {
-  const practiceAgain = retryAction(
-    path.path.slug,
-    lesson.lesson.slug,
-    attemptId,
-    currentStars < 3 && lesson.stars < 3 ? 'Retry for 3 stars' : 'Try Again',
-  )
+): Pick<StructuredLessonResultModel, 'primaryAction' | 'secondaryAction' | 'tertiaryAction'> {
+  const practiceAgain = retryAction(path.path.slug, lesson.lesson.slug, attemptId)
   if (lesson.nextLesson) {
     return {
       primaryAction: {
-        label: 'Continue',
+        label: 'Next Lesson',
         href: curriculumLessonRecordHref(path.path.slug, lesson.nextLesson.slug),
       },
       secondaryAction: practiceAgain,
+      tertiaryAction: {
+        label: 'Back to Track',
+        href: curriculumPathHref(path.path.slug),
+      },
     }
   }
   return {
     primaryAction: {
-      label: 'View Path',
+      label: 'Back to Track',
       href: curriculumPathHref(path.path.slug),
     },
     secondaryAction: practiceAgain,
+    tertiaryAction: null,
   }
 }
 
@@ -132,10 +132,14 @@ export function buildStructuredLessonResult(input: {
   const state = resultState(currentScore)
   const actions =
     state === 'passed'
-      ? passedActions(input.path, lesson, input.attemptId, currentStars)
+      ? passedActions(input.path, lesson, input.attemptId)
       : {
           primaryAction: retryAction(input.path.path.slug, lesson.lesson.slug, input.attemptId),
-          secondaryAction: null,
+          secondaryAction: {
+            label: 'Back to Track',
+            href: curriculumPathHref(input.path.path.slug),
+          },
+          tertiaryAction: null,
         }
 
   return {

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { CurriculumStars } from '@/components/curriculum/stars'
+import { TrackIcon } from '@/components/curriculum/track-identity'
 import { Card } from '@/components/ui/card'
 import { PageShell } from '@/components/ui/page-shell'
 import { ScoreProgress } from '@/components/ui/score-progress'
@@ -10,6 +11,7 @@ import type {
 } from '@/lib/curriculum/contracts'
 import { attemptResultHref, curriculumLessonRecordHref } from '@/lib/curriculum/routes'
 import { PASSING_SCORE } from '@/lib/curriculum/thresholds'
+import { TRACK_IDENTITIES } from '@/lib/curriculum/track-identity'
 import { cn } from '@/lib/utils'
 
 function LessonDetails({ lesson }: { lesson: CurriculumLessonProgress }) {
@@ -85,7 +87,7 @@ function LessonCard({
       <LessonDetails lesson={lesson} />
 
       {lesson.state === 'locked' ? null : (
-        <span className="text-accent min-h-11 self-start py-3 text-sm font-medium">
+        <span className="text-accent-ink min-h-11 self-start py-3 text-sm font-medium">
           {lesson.state === 'retry_required'
             ? 'Try Again'
             : lesson.state === 'available'
@@ -123,20 +125,26 @@ function LessonCard({
 
 export function CurriculumPathLadder({ progress }: { progress: CurriculumPathProgress }) {
   const currentLessonId = progress.summary.currentLesson?.id ?? null
+  const identity = TRACK_IDENTITIES[progress.path.slug]
 
   return (
     <PageShell width="reading" className="gap-8">
       <header className="flex min-w-0 flex-col gap-6">
-        <div className="flex flex-col gap-2">
-          <p className="text-muted text-sm">Track</p>
-          <h1 className="prompt-display text-foreground text-2xl break-words">
-            {progress.path.title}
-          </h1>
+        <div className="flex items-center gap-4">
+          <span className="bg-accent text-accent-fg flex size-12 shrink-0 items-center justify-center rounded-full">
+            <TrackIcon slug={progress.path.slug} />
+          </span>
+          <div className="flex min-w-0 flex-col gap-1">
+            <p className="text-muted text-sm">Track</p>
+            <h1 className="prompt-display text-foreground text-2xl break-words">
+              {identity.title}
+            </h1>
+          </div>
         </div>
 
         <Card className="flex min-w-0 flex-col gap-6 sm:p-8">
           <ScoreProgress
-            label={`${progress.path.title} lesson progress`}
+            label={`${identity.title} lesson progress`}
             value={progress.summary.passedLessons}
             max={progress.summary.totalLessons}
             size="section"

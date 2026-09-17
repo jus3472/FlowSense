@@ -49,6 +49,47 @@ describe('progress data loading boundary', () => {
     expect(() => JSON.stringify(result)).not.toThrow()
   })
 
+  it('extracts Other only from a consistent custom General Speaking snapshot', () => {
+    expect(
+      readProgressAttemptRows(
+        [
+          row({
+            prompt_source: 'custom',
+            practice_mode: 'practice',
+            practice_category: 'other',
+          }),
+        ],
+        false,
+      ),
+    ).toMatchObject({
+      status: 'ready',
+      attempts: [{ category: 'other', practiceMode: 'practice', promptSource: 'custom' }],
+    })
+  })
+
+  it.each([
+    ['missing legacy metadata', undefined, 'interview', 'custom', 'interview'],
+    ['invalid metadata', 'unknown', 'presentation', 'custom', 'presentation'],
+    ['mode mismatch', 'conversation', 'interview', 'custom', 'interview'],
+    ['Other on a library row', 'other', 'practice', 'library', 'practice'],
+  ])(
+    'falls back to the stored mode for %s',
+    (_label, category, practiceMode, promptSource, expected) => {
+      expect(
+        readProgressAttemptRows(
+          [
+            row({
+              prompt_source: promptSource,
+              practice_mode: practiceMode,
+              practice_category: category,
+            }),
+          ],
+          false,
+        ),
+      ).toMatchObject({ status: 'ready', attempts: [{ category: expected }] })
+    },
+  )
+
   it.each([
     null,
     {},

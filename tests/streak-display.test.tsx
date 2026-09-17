@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { StreakDisplay } from '@/components/home/streak-display'
 
@@ -18,10 +18,11 @@ describe('compact header streak presentation', () => {
       />,
     )
 
-    const status = screen.getByRole('img', {
+    const status = screen.getByRole('button', {
       name: "12 day streak. Today's practice complete.",
     })
     expect(status).toHaveTextContent('12')
+    expect(status).toHaveClass('bg-accent', 'text-accent-fg')
     expect(status).toHaveAttribute('data-today-active', 'true')
     expect(status.querySelectorAll('svg')).toHaveLength(2)
   })
@@ -39,11 +40,32 @@ describe('compact header streak presentation', () => {
       />,
     )
 
-    const status = screen.getByRole('img', {
+    const status = screen.getByRole('button', {
       name: "4 day streak. Today's practice not complete.",
     })
     expect(status).toHaveTextContent('4')
     expect(status).toHaveAttribute('data-today-active', 'false')
     expect(status.querySelectorAll('svg')).toHaveLength(1)
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    fireEvent.focus(status)
+    expect(screen.getByRole('tooltip')).toHaveTextContent('4 day streak')
+    fireEvent.keyDown(status, { key: 'Escape' })
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    fireEvent.click(status)
+    expect(screen.getByRole('tooltip')).toHaveTextContent("Today's practice not complete")
+    fireEvent.blur(status)
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    fireEvent.pointerEnter(status.parentElement!, { pointerType: 'mouse' })
+    expect(screen.getByRole('tooltip')).toBeInTheDocument()
+    fireEvent.pointerLeave(status.parentElement!)
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    // A touch click need not focus a button (for example, on mobile Safari).
+    fireEvent.click(status)
+    expect(screen.getByRole('tooltip')).toBeInTheDocument()
+    fireEvent.click(status)
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    fireEvent.click(status)
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
   })
 })

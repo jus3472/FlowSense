@@ -1,10 +1,11 @@
 'use client'
 
-import { useActionState, useState, type FormEvent } from 'react'
+import { useActionState, useEffect, useRef, useState, type FormEvent } from 'react'
 import { authenticate } from '@/actions/authenticate'
 import { Button } from '@/components/ui/button'
 import { TextField } from '@/components/ui/text-field'
 import { initialAuthFormState } from '@/lib/forms'
+import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { validateEmail, validatePassword, type AuthMode } from '@/lib/validation'
 
@@ -23,17 +24,51 @@ const COPY: Record<AuthMode, { heading: string; submit: string; pending: string 
   },
 }
 
-export function AuthForm({ initialMode = 'signup' }: { initialMode?: AuthMode }) {
+export function AuthForm({
+  initialMode = 'signup',
+  initialOAuthError = false,
+}: {
+  initialMode?: AuthMode
+  initialOAuthError?: boolean
+}) {
   const [mode, setMode] = useState<AuthMode>(initialMode)
+  const [email, setEmail] = useState('')
   const [clientErrors, setClientErrors] = useState<FieldErrors>({})
+  const [oauthError, setOAuthError] = useState(initialOAuthError)
+  const [oauthPending, setOAuthPending] = useState(false)
   const [state, formAction, pending] = useActionState(authenticate, initialAuthFormState)
+  const passwordInput = useRef<HTMLInputElement>(null)
 
   const copy = COPY[mode]
   const errors: FieldErrors = { ...state.fieldErrors, ...clientErrors }
 
+  useEffect(() => {
+    if (state.formError) passwordInput.current?.focus()
+  }, [state])
+
   const switchMode = (next: AuthMode) => {
     setMode(next)
     setClientErrors({})
+  }
+
+  const continueWithGoogle = async () => {
+    if (oauthPending) return
+    setOAuthPending(true)
+    setOAuthError(false)
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: `${window.location.origin}/auth/callback` },
+      })
+      if (error) {
+        setOAuthError(true)
+        setOAuthPending(false)
+      }
+    } catch {
+      setOAuthError(true)
+      setOAuthPending(false)
+    }
   }
 
   // The server action validates too. This pass only exists so the first
@@ -41,16 +76,17 @@ export function AuthForm({ initialMode = 'signup' }: { initialMode?: AuthMode })
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     const form = event.currentTarget
     const data = new FormData(form)
-    const email = String(data.get('email') ?? '')
+    const submittedEmail = String(data.get('email') ?? '').trim()
     const password = String(data.get('password') ?? '')
 
     const next: FieldErrors = {}
-    const emailError = validateEmail(email)
+    const emailError = validateEmail(submittedEmail)
     const passwordError = validatePassword(password, mode)
     if (emailError) next.email = emailError
     if (passwordError) next.password = passwordError
 
     setClientErrors(next)
+    setEmail(submittedEmail)
     if (next.email || next.password) {
       event.preventDefault()
       const target = next.email ? 'email' : 'password'
@@ -105,12 +141,17 @@ export function AuthForm({ initialMode = 'signup' }: { initialMode?: AuthMode })
           autoComplete="email"
           inputMode="email"
           placeholder="name@example.com"
+          value={email}
           error={errors.email ?? null}
-          onChange={() => clearFieldError('email')}
+          onChange={(event) => {
+            setEmail(event.target.value)
+            clearFieldError('email')
+          }}
         />
 
         <TextField
           id="password"
+          ref={passwordInput}
           name="password"
           type="password"
           label="Password"
@@ -139,6 +180,29 @@ export function AuthForm({ initialMode = 'signup' }: { initialMode?: AuthMode })
           {copy.submit}
         </Button>
       </form>
+
+      <div className="flex items-center gap-4" aria-hidden="true">
+        <span className="bg-border h-px flex-1" />
+        <span className="text-muted text-xs">or</span>
+        <span className="bg-border h-px flex-1" />
+      </div>
+
+      <Button
+        variant="secondary"
+        size="lg"
+        fullWidth
+        loading={oauthPending}
+        loadingLabel="Opening Google"
+        onClick={continueWithGoogle}
+      >
+        Continue with Google
+      </Button>
+
+      {oauthError ? (
+        <p role="alert" className="bg-negative-soft text-negative rounded-input px-4 py-3 text-sm">
+          Google sign-in did not finish. Try again.
+        </p>
+      ) : null}
     </div>
   )
 }

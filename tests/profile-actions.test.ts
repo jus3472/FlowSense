@@ -13,7 +13,7 @@ vi.mock('server-only', () => ({}))
 vi.mock('next/navigation', () => ({ redirect: mocks.redirect }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 
-import { saveFocusAreas } from '@/actions/onboarding'
+import { completeOnboarding } from '@/actions/onboarding'
 import { updateProfile } from '@/actions/profile'
 import { initialProfileFormState } from '@/lib/forms'
 
@@ -151,34 +151,21 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('onboarding path persistence', () => {
-  it('verifies profile, timezone, atomic path order, and readback before completion', async () => {
+describe('onboarding completion', () => {
+  it('stores timezone and completion without changing legacy path preferences', async () => {
     const setup = fakeClient()
     mocks.createClient.mockResolvedValue(setup.client)
 
-    await expect(
-      saveFocusAreas(preferenceForm('interviews', ['presentations'])),
-    ).rejects.toMatchObject({ path: '/home' })
+    await expect(completeOnboarding(preferenceForm())).rejects.toMatchObject({ path: '/home' })
 
-    expect(setup.events).toEqual(['profile', 'preferences', 'metadata'])
+    expect(setup.events).toEqual(['profile', 'metadata'])
     expect(setup.profileQuery.upsert).toHaveBeenCalledWith(
-      {
-        id: USER_ID,
-        focus_areas: ['interviews', 'presentations'],
-        timezone: 'America/New_York',
-      },
+      { id: USER_ID, timezone: 'America/New_York' },
       { onConflict: 'id' },
     )
-    expect(setup.rpc).toHaveBeenCalledWith('replace_profile_path_preferences', {
-      path_ids: [PATHS[1].id, PATHS[2].id],
-    })
-  })
-
-  it('requires a primary path before any authenticated write', async () => {
-    await expect(saveFocusAreas(new FormData())).rejects.toMatchObject({
-      path: '/onboarding/focus?error=primary',
-    })
-    expect(mocks.createClient).not.toHaveBeenCalled()
+    expect(setup.rpc).not.toHaveBeenCalled()
+    expect(setup.client.from).not.toHaveBeenCalledWith('practice_paths')
+    expect(setup.client.from).not.toHaveBeenCalledWith('profile_path_preferences')
   })
 
   it('uses UTC for an invalid browser timezone', async () => {
@@ -187,7 +174,7 @@ describe('onboarding path persistence', () => {
     const formData = preferenceForm()
     formData.set('timezone', 'Mars/Olympus')
 
-    await expect(saveFocusAreas(formData)).rejects.toMatchObject({ path: '/home' })
+    await expect(completeOnboarding(formData)).rejects.toMatchObject({ path: '/home' })
     expect(setup.profileQuery.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ timezone: 'UTC' }),
       { onConflict: 'id' },
@@ -198,25 +185,22 @@ describe('onboarding path persistence', () => {
     const setup = fakeClient({ timezone: 'Europe/London' })
     mocks.createClient.mockResolvedValue(setup.client)
 
-    await expect(saveFocusAreas(preferenceForm())).rejects.toMatchObject({ path: '/home' })
+    await expect(completeOnboarding(preferenceForm())).rejects.toMatchObject({ path: '/home' })
     expect(setup.profileQuery.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ timezone: 'Europe/London' }),
       { onConflict: 'id' },
     )
   })
 
-  it.each([{ rpcError: { code: 'PGRST500' } }, { keepReadback: true }])(
-    'does not complete onboarding after an atomic save failure or mismatched readback',
-    async (options) => {
-      const setup = fakeClient(options)
-      mocks.createClient.mockResolvedValue(setup.client)
+  it('does not complete onboarding after a mismatched profile readback', async () => {
+    const setup = fakeClient({ profileWriteData: { id: USER_ID, timezone: 'UTC' } })
+    mocks.createClient.mockResolvedValue(setup.client)
 
-      await expect(saveFocusAreas(preferenceForm('interviews'))).rejects.toMatchObject({
-        path: '/onboarding/focus?error=save',
-      })
-      expect(setup.updateUser).not.toHaveBeenCalled()
-    },
-  )
+    await expect(completeOnboarding(preferenceForm())).rejects.toMatchObject({
+      path: '/onboarding/focus?error=save',
+    })
+    expect(setup.updateUser).not.toHaveBeenCalled()
+  })
 })
 
 describe('settings profile persistence', () => {

@@ -9,13 +9,14 @@ import {
   type V3ProgressAggregation,
 } from '@/lib/progress/v3-aggregation'
 import { createClient } from '@/lib/supabase/server'
+import { applyResponseCategoryFilter } from '@/lib/practice/category-filter'
 import { safeTimezone, UTC_TIMEZONE } from '@/lib/timezone'
 import type { Database } from '@/lib/types/database'
 
 export const PROGRESS_QUERY_PAGE_SIZE = 500
 
 const PROGRESS_ATTEMPT_COLUMNS =
-  'id, finished_at, prompt_text, retry_of_attempt_id, score, section_scores, practice_mode, prompt_source, rubric_version, status'
+  'id, finished_at, prompt_text, retry_of_attempt_id, score, section_scores, practice_mode, prompt_source, rubric_version, status, practice_category:metrics->practice->>category'
 
 export interface ProgressDashboardData {
   progress: V3ProgressAggregation
@@ -46,7 +47,7 @@ async function loadProgressAttempts(
       .in('prompt_source', ['library', 'custom'])
       .lte('finished_at', now.toISOString())
 
-    if (filter !== 'all') query = query.eq('practice_mode', filter)
+    query = applyResponseCategoryFilter(query, filter)
 
     const { data, error } = await query
       .order('finished_at', { ascending: true })

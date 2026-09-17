@@ -12,6 +12,12 @@ import {
   type ChapterLevel,
   type PathSlug,
 } from '@/lib/curriculum/contracts'
+import {
+  parsePracticeCategory,
+  practiceCategoryFromMetrics,
+  practiceModeForCategory,
+  type PracticeCategory,
+} from '@/lib/practice/category'
 
 export const MIN_TARGET_DURATION_SECONDS = 15
 export const MAX_TARGET_DURATION_SECONDS = 600
@@ -36,6 +42,8 @@ export interface PracticeSessionDescriptor {
   source: PromptSource
   targetDurationSeconds: number
   retryOfAttemptId: string | null
+  category?: PracticeCategory
+  /** Historical retries retain this field, but new custom attempts do not collect it. */
   additionalContext?: string
   curriculum?: StructuredLessonSessionDescriptor
 }
@@ -114,7 +122,9 @@ export function parsePracticeSessionDescriptor(value: unknown): PracticeSessionD
   const curriculum =
     value.curriculum === undefined
       ? undefined
-      : parseStructuredLessonSessionDescriptor(value.curriculum) ?? null
+      : (parseStructuredLessonSessionDescriptor(value.curriculum) ?? null)
+  const category =
+    value.category === undefined ? undefined : (parsePracticeCategory(value.category) ?? null)
 
   if (
     promptText.length === 0 ||
@@ -124,13 +134,20 @@ export function parsePracticeSessionDescriptor(value: unknown): PracticeSessionD
     !includes(PROMPT_DIFFICULTIES, value.difficulty) ||
     !includes(PROMPT_SOURCES, value.source) ||
     !isTargetDuration(value.targetDurationSeconds) ||
-    curriculum === null
+    curriculum === null ||
+    category === null
   ) {
     return null
   }
   if (
     (value.source === 'library' && promptId === null && retryOfAttemptId === null) ||
     (value.source === 'custom' && promptId !== null)
+  ) {
+    return null
+  }
+  if (
+    (value.source !== 'custom' && category !== undefined) ||
+    (category !== undefined && practiceModeForCategory(category) !== value.mode)
   ) {
     return null
   }
@@ -143,6 +160,7 @@ export function parsePracticeSessionDescriptor(value: unknown): PracticeSessionD
     source: value.source,
     targetDurationSeconds: value.targetDurationSeconds,
     retryOfAttemptId,
+    ...(category ? { category } : {}),
     ...(additionalContext ? { additionalContext } : {}),
     ...(curriculum ? { curriculum } : {}),
   }
@@ -210,6 +228,14 @@ export function retrySessionFromAttempt(value: unknown): PracticeSessionDescript
     return null
   }
 
+  const category = practiceCategoryFromMetrics(metrics, mode, source)
+  const storedCategory = isRecord(practice) ? practice.category : undefined
+  const categoryWasAccepted =
+    source === 'custom' &&
+    storedCategory !== undefined &&
+    parsePracticeCategory(storedCategory) === category &&
+    category !== null
+
   return parsePracticeSessionDescriptor({
     promptText: value.prompt_text,
     promptId: source === 'library' ? promptId : null,
@@ -218,6 +244,7 @@ export function retrySessionFromAttempt(value: unknown): PracticeSessionDescript
     source,
     targetDurationSeconds,
     retryOfAttemptId: value.id,
+    ...(categoryWasAccepted ? { category } : {}),
     additionalContext: typeof storedContext === 'string' ? storedContext : undefined,
   })
 }
@@ -237,6 +264,7 @@ export function matchesRetrySession(
     requested.difficulty === canonical.difficulty &&
     requested.source === canonical.source &&
     requested.targetDurationSeconds === canonical.targetDurationSeconds &&
+    requested.category === canonical.category &&
     requested.additionalContext === canonical.additionalContext &&
     requested.curriculum === undefined
   )

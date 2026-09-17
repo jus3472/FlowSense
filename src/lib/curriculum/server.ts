@@ -20,11 +20,7 @@ import {
 } from '@/lib/curriculum/data'
 import { buildCurriculumPathProgress } from '@/lib/curriculum/progression'
 import { validateCurriculumPathDefinition } from '@/lib/curriculum/navigation'
-import {
-  buildCurriculumOverview,
-  parseCurriculumPreferenceRows,
-  type CurriculumOverviewData,
-} from '@/lib/curriculum/overview'
+import { buildCurriculumOverview, type CurriculumOverviewData } from '@/lib/curriculum/overview'
 import { createClient } from '@/lib/supabase/server'
 import type { Database } from '@/lib/types/database'
 
@@ -36,7 +32,6 @@ const PROGRESS_COLUMNS = 'lesson_id, best_score, best_attempt_id'
 const NEUTRAL_ATTEMPT_COLUMNS = 'lesson_id, status, duration_ms, transcript, score, section_scores'
 const PROMPT_COLUMNS =
   'id, text, active, mode, difficulty, target_duration_seconds, free_practice_visible'
-const PREFERENCE_COLUMNS = 'path_id, rank'
 
 export const CURRICULUM_ATTEMPT_PAGE_SIZE = 100
 
@@ -307,22 +302,6 @@ export async function loadCurriculumOverviewForUser(
   userId: string,
   pathLoader: CurriculumPathLoader = loadCurriculumPathForUser,
 ): Promise<CurriculumOverviewLoadOutcome> {
-  let preferenceRows: unknown
-  try {
-    const { data, error } = await supabase
-      .from('profile_path_preferences')
-      .select(PREFERENCE_COLUMNS)
-      .eq('user_id', userId)
-      .order('rank', { ascending: true })
-    if (error) return queryFailure('preferences', error)
-    preferenceRows = data
-  } catch (error) {
-    return queryFailure('preferences', error)
-  }
-
-  const preferences = parseCurriculumPreferenceRows(preferenceRows)
-  if (!preferences) return invalidResponse('preferences')
-
   const pathOutcomes = await Promise.all(
     PATH_SLUGS.map((slug) => pathLoader(supabase, userId, slug)),
   )
@@ -336,15 +315,8 @@ export async function loadCurriculumOverviewForUser(
     pathProgress.push(outcome.data)
   }
 
-  const overview = buildCurriculumOverview(pathProgress, preferences)
-  return overview.ok
-    ? { status: 'ready', data: overview.value }
-    : invalidResponse(
-        overview.error.code.startsWith('invalid_preference') ||
-          overview.error.code === 'unknown_preference_path'
-          ? 'preferences'
-          : 'overview',
-      )
+  const overview = buildCurriculumOverview(pathProgress)
+  return overview.ok ? { status: 'ready', data: overview.value } : invalidResponse('overview')
 }
 
 async function lessonExistsOutsidePath(

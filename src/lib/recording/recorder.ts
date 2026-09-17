@@ -36,6 +36,9 @@ export interface AttemptRecorderOptions {
   createRecorder: (mimeType: string) => MediaRecorderLike
   sampler: CaptureSampler
   maxDurationMs?: number
+  /** Mirrors each recorded slice to an optional live consumer without a second recorder. */
+  onChunk?: (chunk: Blob) => void
+  timesliceMs?: number
   /** Runs once the recording is finished or has failed, to release the stream. */
   onRelease?: () => void
 }
@@ -121,15 +124,22 @@ export class AttemptRecorder {
 
     this.recorder = recorder
     recorder.ondataavailable = (event) => {
-      if (event.data && event.data.size > 0) this.chunks.push(event.data)
+      if (event.data && event.data.size > 0) {
+        this.chunks.push(event.data)
+        try {
+          this.options.onChunk?.(event.data)
+        } catch {
+          // Live consumers are best effort and must never interrupt local capture.
+        }
+      }
     }
     recorder.onstop = () => this.finish()
     recorder.onerror = () => this.fail(new RecorderError('The recorder stopped unexpectedly.'))
 
     try {
       this.options.sampler.start()
-      // No timeslice: one dataavailable at stop, so there is nothing to interleave.
-      recorder.start()
+      if (this.options.timesliceMs === undefined) recorder.start()
+      else recorder.start(this.options.timesliceMs)
       // Only valid once started. An empty string means the browser will not say.
       if (recorder.mimeType) this.actualMimeType = recorder.mimeType
     } catch (error) {

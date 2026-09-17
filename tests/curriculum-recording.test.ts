@@ -64,10 +64,7 @@ describe('structured lesson recording contract', () => {
 
     expect(matchesStructuredPracticeSession(session, LESSON)).toBe(true)
     expect(
-      matchesStructuredPracticeSession(
-        { ...session, promptText: 'A different prompt.' },
-        LESSON,
-      ),
+      matchesStructuredPracticeSession({ ...session, promptText: 'A different prompt.' }, LESSON),
     ).toBe(false)
     expect(
       matchesStructuredPracticeSession(
@@ -92,9 +89,9 @@ describe('structured lesson recording contract', () => {
         ATTEMPT_ID,
       ),
     ).toBe(false)
-    expect(
-      matchesStructuredRetryParent(parent({ status: 'scoring' }), LESSON, ATTEMPT_ID),
-    ).toBe(false)
+    expect(matchesStructuredRetryParent(parent({ status: 'scoring' }), LESSON, ATTEMPT_ID)).toBe(
+      false,
+    )
     expect(
       matchesStructuredRetryParent(parent({ prompt_text: 'Changed.' }), LESSON, ATTEMPT_ID),
     ).toBe(false)

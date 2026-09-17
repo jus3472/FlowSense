@@ -4,7 +4,12 @@ import {
   deepgramQualityMetrics,
   parseDeepgramResponse,
 } from '@/lib/deepgram/parse'
-import { buildDeepgramUrl, deepgramAuthHeader, isFillerToken } from '@/lib/deepgram/request'
+import {
+  buildDeepgramLiveUrl,
+  buildDeepgramUrl,
+  deepgramAuthHeader,
+  isFillerToken,
+} from '@/lib/deepgram/request'
 
 /** Shaped after a real nova-3 response with filler_words=true and punctuate=true. */
 const RESPONSE_WITH_FILLERS = {
@@ -213,6 +218,19 @@ describe('buildDeepgramUrl', () => {
 
   /** smart_format tidies away the very disfluencies being measured. */
   it('never enables smart_format', () => {
+    expect(url.searchParams.has('smart_format')).toBe(false)
+  })
+})
+
+describe('buildDeepgramLiveUrl', () => {
+  const url = new URL(buildDeepgramLiveUrl())
+
+  it('keeps the live preview on the scoring-sensitive transcription contract', () => {
+    expect(url.origin + url.pathname).toBe('wss://api.deepgram.com/v1/listen')
+    expect(url.searchParams.get('model')).toBe('nova-2')
+    expect(url.searchParams.get('filler_words')).toBe('true')
+    expect(url.searchParams.get('punctuate')).toBe('true')
+    expect(url.searchParams.get('interim_results')).toBe('true')
     expect(url.searchParams.has('smart_format')).toBe(false)
   })
 })

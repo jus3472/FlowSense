@@ -9,10 +9,7 @@ import { RetryButton } from '@/components/system/retry-button'
 import { ButtonLink } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
 import { reconcileCurrentUserStaleAttempts } from '@/lib/attempts/reconciliation'
-import {
-  matchesStructuredRetryParent,
-  structuredPracticeSession,
-} from '@/lib/curriculum/recording'
+import { matchesStructuredRetryParent, structuredPracticeSession } from '@/lib/curriculum/recording'
 import { curriculumLessonHref } from '@/lib/curriculum/routes'
 import { loadAuthenticatedCurriculumLessonAccess } from '@/lib/curriculum/server'
 import { parseRecordRetryParam } from '@/lib/practice/navigation'
@@ -86,7 +83,10 @@ export default async function CurriculumLessonRecordPage({
   if (access.status === 'denied') return <CurriculumLessonDeniedState reason={access.reason} />
   if (access.status === 'failure') return <CurriculumLessonFailureState />
 
-  const lessonHref = curriculumLessonHref(access.data.session.pathSlug, access.data.session.lessonSlug)
+  const lessonHref = curriculumLessonHref(
+    access.data.session.pathSlug,
+    access.data.session.lessonSlug,
+  )
   const retryOfAttemptId = parseRecordRetryParam((await searchParams).retry)
   if (retryOfAttemptId === null) return <StructuredRetryUnavailable href={lessonHref} />
 

@@ -1,4 +1,4 @@
-import { ProgressFilterSelect } from '@/components/progress/progress-filter'
+import { ProgressFilterNav } from '@/components/progress/progress-filter'
 import { ProgressTrend } from '@/components/progress/progress-trend'
 import { RetryButton } from '@/components/system/retry-button'
 import { Card } from '@/components/ui/card'
@@ -58,7 +58,7 @@ export function ProgressDashboard({
             See how your speaking improves over time.
           </p>
         </div>
-        <ProgressFilterSelect filter={selectedFilter} />
+        <ProgressFilterNav filter={selectedFilter} />
       </header>
 
       {hasProgress && progress ? (

@@ -45,12 +45,12 @@ describe('Home overview page states', () => {
     {
       reason: 'query',
       operation: 'preferences',
-      description: 'The connection to your practice paths failed. Try loading them again.',
+      description: 'The connection to your practice tracks failed. Try loading them again.',
     },
     {
       reason: 'invalid_response',
       operation: 'preferences',
-      description: 'Your saved path information could not be read. Try loading it again.',
+      description: 'Your practice tracks could not be read. Try loading them again.',
     },
   ] as const)(
     'renders a retryable Home error for a $reason preference failure',
@@ -60,7 +60,7 @@ describe('Home overview page states', () => {
       render(await HomePage())
 
       expect(
-        screen.getByRole('heading', { name: 'Your practice paths did not load' }),
+        screen.getByRole('heading', { name: 'Your practice tracks did not load' }),
       ).toBeInTheDocument()
       expect(screen.getByRole('heading', { name: 'Home', level: 1 })).toHaveClass(
         'prompt-display',

@@ -1,6 +1,13 @@
 import type { Segment } from '@/lib/results/segments'
 import type { TranscriptWord } from '@/lib/deepgram/parse'
 import type { PracticeMode } from '@/lib/practice/contracts'
+import {
+  contentCheckLabel,
+  PAUSE_CHECK_LABELS,
+  SUSTAINED_EXPRESSION_LABEL,
+  WORD_CLARITY_LABEL,
+} from '@/lib/results/check-labels'
+import { conversationalFeedback } from '@/lib/results/feedback-copy'
 import { buildTokens } from '@/lib/scoring/tokens'
 import { AUDIO_THRESHOLDS_BY_MODE } from '@/lib/scoring/v3/audio'
 import { V3_CONTENT_CHECK_UNAVAILABLE_MESSAGE } from '@/lib/scoring/v3/content/contracts'
@@ -40,10 +47,7 @@ export interface V3MetricView {
   result: V3PersistedMetricScore
 }
 
-export function v3MetricResult(
-  payload: V3ScorePayload,
-  id: V3MetricId,
-): V3PersistedMetricScore {
+export function v3MetricResult(payload: V3ScorePayload, id: V3MetricId): V3PersistedMetricScore {
   const metrics = {
     ...payload.sections.what_you_said.metrics,
     ...payload.sections.how_you_sounded.metrics,
@@ -648,30 +652,14 @@ function transcriptDeduction(
 
 const LOCAL_CONTENT_METRICS = new Set<V3MetricId>(['conciseness', 'word_choice', 'grammar'])
 
-const CONCISENESS_HIGHLIGHT_LABELS: Readonly<Record<string, string>> = Object.freeze({
-  filler: 'unnecessary filler',
-  false_start: 'false start or restart',
-  repeated_idea: 'repeated idea',
-  redundant_sentence: 'redundant wording',
-  irrelevant_content: 'irrelevant detail',
-  unnecessary_tangent: 'unnecessary tangent',
-  unnecessary_qualifier: 'unnecessary qualifier or closer',
-})
-
 function findingHeading(metric: V3MetricId, kind: string): string {
-  if (metric === 'conciseness') {
-    return `Conciseness: ${CONCISENESS_HIGHLIGHT_LABELS[kind] ?? 'unnecessary wording'}`
-  }
-  if (metric === 'word_choice') return 'Word Choice: wording that could be more precise'
-  if (metric === 'grammar') return 'Grammar: spoken grammar that reduced clarity'
-  return V3_METRIC_LABELS[metric]
+  const label = contentCheckLabel(metric, kind)
+  return label ? `${V3_METRIC_LABELS[metric]}: ${label}` : V3_METRIC_LABELS[metric]
 }
 
-function suggestionText(metric: V3MetricId, suggestion: string | null): string[] {
+function suggestionText(_metric: V3MetricId, suggestion: string | null): string[] {
   if (!suggestion) return []
-  if (metric === 'word_choice') return [`More precise: ${suggestion}`]
-  if (metric === 'grammar') return [`Clearer form: ${suggestion}`]
-  return [`Try: ${suggestion}`]
+  return [`Try: ${conversationalFeedback(suggestion)}`]
 }
 
 function uniqueLines(lines: readonly string[]): string[] {
@@ -693,18 +681,37 @@ function contentTranscriptDeductions(
         evidence,
         uniqueLines([
           findingHeading(metric, detail.kind),
-          detail.observation,
+          conversationalFeedback(detail.observation),
           ...suggestionText(metric, detail.suggestion),
         ]),
       )
       return range ? [range] : []
     }),
   )
+  // Some stored findings keep a quote without its coordinate evidence. Only
+  // localize it when there is exactly one matching occurrence.
+  for (const detail of result.details) {
+    if (!detail.quote || detail.evidence.length > 0) continue
+    const from = transcript.indexOf(detail.quote)
+    if (from < 0 || transcript.lastIndexOf(detail.quote) !== from) continue
+    deductions.push({
+      from,
+      to: from + detail.quote.length,
+      details: uniqueLines([
+        findingHeading(metric, detail.kind),
+        conversationalFeedback(detail.observation),
+        ...suggestionText(metric, detail.suggestion),
+      ]),
+    })
+  }
   for (const evidence of result.evidence) {
     if (covered.has(detailEvidenceKey(evidence))) continue
+    // Standalone content evidence can be positive. A finding, or a reduced
+    // component, is needed to establish that this wording is an issue.
+    if (result.component === 1) continue
     const range = transcriptDeduction(transcript, evidence, [
       findingHeading(metric, ''),
-      evidence.detail,
+      conversationalFeedback(evidence.detail),
     ])
     if (range) deductions.push(range)
   }
@@ -724,9 +731,11 @@ function articulationDeductions(
   result: V3PersistedMetricScore,
 ): TranscriptDeduction[] {
   return result.evidence.flatMap((evidence) => {
+    if (evidence.source !== 'deepgram_word_confidence') return []
     const range = transcriptDeduction(transcript, evidence, [
-      'Articulation',
-      'This word was harder for speech recognition to understand.',
+      `Articulation: ${WORD_CLARITY_LABEL}`,
+      'Speech recognition is less sure about this word.',
+      ...(result.earned_points === result.max_points ? ["It doesn't lower your score."] : []),
     ])
     return range ? [range] : []
   })
@@ -740,6 +749,7 @@ function energyDeductions(
     if (
       evidence.source !== 'energy_flat_window' ||
       evidence.coordinate?.space !== 'audio_timeline' ||
+      evidence.coordinate.unit !== 'millisecond' ||
       evidence.start === null ||
       evidence.end === null
     ) {
@@ -755,7 +765,13 @@ function energyDeductions(
           {
             from: first.charStart,
             to: last.charEnd,
-            details: ['Energy', 'Your voice stayed fairly flat through this section.'],
+            details: [
+              `Energy: ${SUSTAINED_EXPRESSION_LABEL}`,
+              'Your voice stays on the same note through this part.',
+              ...(result.earned_points === result.max_points
+                ? ["This small difference doesn't lower your score."]
+                : []),
+            ],
           },
         ]
       : []
@@ -775,6 +791,7 @@ function pausedTimeMarkers(
   return result.evidence.flatMap((evidence) => {
     if (
       evidence.coordinate?.space !== 'audio_timeline' ||
+      evidence.coordinate.unit !== 'millisecond' ||
       evidence.start === null ||
       evidence.end === null ||
       evidence.end <= evidence.start
@@ -783,16 +800,22 @@ function pausedTimeMarkers(
     }
     const before = tokens.filter((token) => token.end * 1_000 <= evidence.start!).at(-1)
     const duration = (evidence.end - evidence.start) / 1_000
-    const formatted = `${duration.toFixed(1)} sec`
+    const formatted = duration < 0.05 ? '<0.1s' : `${duration.toFixed(1)}s`
+    const context = !before
+      ? PAUSE_CHECK_LABELS.beginning
+      : /natural.boundary/i.test(evidence.detail)
+        ? PAUSE_CHECK_LABELS.natural_boundary
+        : PAUSE_CHECK_LABELS.mid_thought
     return [
       {
         at: before?.charEnd ?? 0,
-        text: `+${formatted}`,
+        text: formatted,
         details: [
-          'Paused Time',
-          before
-            ? `${formatted} excessive pause.`
-            : `${formatted} excessive pause before you started.`,
+          `Paused Time: ${context}`,
+          `You pause an extra ${formatted} ${before ? 'here' : 'before you begin'}.`,
+          ...(result.earned_points === result.max_points
+            ? ["This extra pause time doesn't lower your score."]
+            : []),
         ],
       },
     ]
@@ -803,7 +826,7 @@ function sameDetails(left: readonly string[], right: readonly string[]): boolean
   return left.length === right.length && left.every((detail, index) => detail === right[index])
 }
 
-/** Amber marks only evidence that materially reduced displayed points and can be localized. */
+/** Highlight localized issues, including small issues that leave displayed points unchanged. */
 export function v3TranscriptSegments(
   transcript: string,
   payload: V3ScorePayload,
@@ -813,12 +836,7 @@ export function v3TranscriptSegments(
   const candidates: TranscriptDeduction[] = []
   const markers: TranscriptMarker[] = []
   for (const { id, result } of v3MetricViews(payload)) {
-    if (
-      result.status !== 'scored' ||
-      result.component === null ||
-      result.earned_points === null ||
-      result.earned_points >= result.max_points
-    ) {
+    if (result.status !== 'scored' || result.component === null || result.earned_points === null) {
       continue
     }
     candidates.push(...contentTranscriptDeductions(transcript, id, result))
@@ -857,7 +875,7 @@ export function v3TranscriptSegments(
     segments.push({
       type: 'highlight',
       text,
-      label: details[0] ?? 'Score deduction',
+      label: details[0] ?? 'Speech feedback',
       details,
     })
   }

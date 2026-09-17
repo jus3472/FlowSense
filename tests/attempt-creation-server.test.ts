@@ -42,9 +42,9 @@ const PAYLOAD: CreateAttemptPayload = {
   mode: 'conversation',
   difficulty: 'beginner',
   source: 'custom',
+  category: 'conversation',
   targetDurationSeconds: 30,
   retryOfAttemptId: null,
-  additionalContext: 'Keep the context private.',
   mimeType: MIME_TYPE,
   durationMs: 12_400,
 }
@@ -149,6 +149,7 @@ describe('server attempt creation reconciliation', () => {
       promptText: 'Describe a choice you made recently.',
       mode: 'interview',
       source: 'library',
+      category: undefined,
       additionalContext: undefined,
       targetDurationSeconds: 60,
       curriculum: {
@@ -227,6 +228,7 @@ describe('server attempt creation reconciliation', () => {
         promptText: 'Describe a choice you made recently.',
         mode: 'interview',
         source: 'library',
+        category: undefined,
         additionalContext: undefined,
         targetDurationSeconds: 60,
         curriculum: {
@@ -259,6 +261,7 @@ describe('server attempt creation reconciliation', () => {
       ...PAYLOAD,
       promptId: PROMPT_ID,
       source: 'library',
+      category: undefined,
       additionalContext: undefined,
       curriculum: {
         lessonId: LESSON_ID,
@@ -289,6 +292,7 @@ describe('server attempt creation reconciliation', () => {
       promptText: 'Describe a choice you made recently.',
       mode: 'interview',
       source: 'library',
+      category: undefined,
       additionalContext: undefined,
       targetDurationSeconds: 60,
       retryOfAttemptId: OTHER_ATTEMPT_ID,
@@ -364,6 +368,7 @@ describe('server attempt creation reconciliation', () => {
       promptText: 'Describe a choice you made recently.',
       mode: 'interview',
       source: 'library',
+      category: undefined,
       additionalContext: undefined,
       targetDurationSeconds: 60,
       retryOfAttemptId: OTHER_ATTEMPT_ID,
@@ -426,6 +431,7 @@ describe('server attempt creation reconciliation', () => {
       mode: 'practice',
       difficulty: 'beginner',
       source: 'library',
+      category: undefined,
       additionalContext: undefined,
     }
     const existing = readQuery({ data: null, error: null })

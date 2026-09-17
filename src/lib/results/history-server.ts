@@ -9,6 +9,8 @@ import {
 } from '@/lib/curriculum/contracts'
 import { isPassingScore, starsForScore } from '@/lib/curriculum/thresholds'
 import { readHistoryStoredResult } from '@/lib/results/history-result'
+import { applyResponseCategoryFilter } from '@/lib/practice/category-filter'
+import { practiceCategoryFromValue } from '@/lib/practice/category'
 import type { HistoryEntry, HistoryMetadataFilter, HistoryQuery } from '@/lib/results/history'
 import type { AttemptRow, Database } from '@/lib/types/database'
 
@@ -30,7 +32,7 @@ type HistoryAttemptRow = Omit<
     | 'lesson_id'
   >,
   'prompt_text'
-> & { prompt_text: string | null }
+> & { prompt_text: string | null; practice_category?: unknown }
 
 type HistoryPageRow = HistoryAttemptRow & { lesson: unknown }
 
@@ -51,12 +53,8 @@ function applyMetadataFilter<T>(query: T, metadata: HistoryMetadataFilter): T {
     not(column: string, operator: string, value: null): T
     or(filters: string): T
   }
-  if (metadata === 'general') return filter.or('practice_mode.eq.practice,practice_mode.is.null')
-  if (metadata === 'interview' || metadata === 'presentation' || metadata === 'conversation')
-    return filter.eq('practice_mode', metadata)
-  if (metadata === 'custom') return filter.eq('prompt_source', 'custom')
   if (metadata === 'retry') return filter.not('retry_of_attempt_id', 'is', null)
-  return query
+  return applyResponseCategoryFilter(query, metadata === 'general' ? 'practice' : metadata, true)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -137,6 +135,11 @@ function historyEntry(row: HistoryPageRow): HistoryEntry | null {
     resultKind: stored.kind,
     practiceMode: row.practice_mode,
     promptSource: row.prompt_source,
+    category: practiceCategoryFromValue(
+      row.practice_category,
+      row.practice_mode,
+      row.prompt_source,
+    ),
     retryOfAttemptId: row.retry_of_attempt_id,
     ...(terminalStatus ? { status: terminalStatus } : {}),
     failureCode: row.failure_code,
@@ -185,7 +188,7 @@ export async function loadHistoryPage(
     .from('attempts')
     .select(
       `id, created_at, prompt_text, score, section_scores, practice_mode, prompt_source,
-       retry_of_attempt_id, status, failure_code, lesson_id,
+       retry_of_attempt_id, status, failure_code, lesson_id, practice_category:metrics->practice->>category,
        lesson:practice_lessons!attempts_lesson_id_fkey(
          title, position, checkpoint,
          chapter:practice_chapters!practice_lessons_chapter_id_fkey(

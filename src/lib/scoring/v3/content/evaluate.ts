@@ -574,6 +574,49 @@ function parseMetric(
   }
 }
 
+/**
+ * Preserve safe metrics when one deduction cannot own its evidence. Cross-metric
+ * conflicts can be omitted immediately. Unreliable or mechanically owned text
+ * gets one corrective retry first, then the unsupported deduction is omitted.
+ * This enforces single ownership without charging the user for invalid evidence.
+ */
+function parseMetricWithSafeOmission(
+  value: unknown,
+  metric: WhatYouSaidMetricId,
+  context: ParseContext,
+  omitUnsafeEvidence: boolean,
+): V3ContentMetricResult {
+  const localContext: ParseContext = { ...context, claimed: [...context.claimed] }
+  try {
+    const parsed = parseMetric(value, metric, localContext)
+    context.claimed = localContext.claimed
+    return parsed
+  } catch (error) {
+    const canOmitFinding =
+      error instanceof V3ContentParseError &&
+      (error.reason === 'evidence_overlaps_metric' ||
+        (omitUnsafeEvidence &&
+          (error.reason === 'evidence_overlaps_unreliable' ||
+            error.reason === 'evidence_overlaps_mechanical')))
+    if (!canOmitFinding) {
+      throw error
+    }
+    return {
+      metric,
+      status: 'scored',
+      component: 1,
+      explanation:
+        error.reason === 'evidence_overlaps_metric'
+          ? 'No separate issue was counted for this metric.'
+          : 'No reliable issue was counted for this metric.',
+      measurements: {},
+      evidence: [],
+      details: [],
+      warnings: [],
+    }
+  }
+}
+
 function mechanicalDetail(span: V3MechanicallyOwnedSpan): V3MetricDetail {
   const observation = 'This false start adds unnecessary speech.'
   const evidence: V3ScoreEvidence = {
@@ -625,6 +668,7 @@ export function parseV3ContentResponse(
     V3ContentEvaluationInput,
     'transcript' | 'mechanicallyOwned' | 'unreliableTranscriptSpans'
   >,
+  options: { omitUnsafeEvidence?: boolean } = {},
 ): Omit<V3ContentEvaluation, 'provider' | 'calls'> {
   let payload: unknown
   try {
@@ -665,7 +709,12 @@ export function parseV3ContentResponse(
   }
   const parsed = {} as Record<WhatYouSaidMetricId, V3ContentMetricResult>
   for (const metric of CLAIM_PRECEDENCE) {
-    parsed[metric] = parseMetric(payload.metrics[metric], metric, context)
+    parsed[metric] = parseMetricWithSafeOmission(
+      payload.metrics[metric],
+      metric,
+      context,
+      options.omitUnsafeEvidence === true,
+    )
   }
 
   const noAnswer = parsed.answered_prompt.details.some(
@@ -693,7 +742,7 @@ export function parseV3ContentResponse(
   }
 }
 
-/** Retries once for recoverable transport or strict-schema failures, then fails all six metrics. */
+/** Retries once, preserving safe metrics only for bounded evidence-ownership failures. */
 export async function runV3ContentEvaluation(
   input: V3ContentEvaluationInput,
 ): Promise<V3ContentEvaluation> {
@@ -736,11 +785,15 @@ export async function runV3ContentEvaluation(
         retryInstruction,
       })
       return {
-        ...parseV3ContentResponse(raw, {
-          transcript: input.transcript,
-          mechanicallyOwned,
-          unreliableTranscriptSpans,
-        }),
+        ...parseV3ContentResponse(
+          raw,
+          {
+            transcript: input.transcript,
+            mechanicallyOwned,
+            unreliableTranscriptSpans,
+          },
+          { omitUnsafeEvidence: attempt > 0 },
+        ),
         provider: input.provider.name,
         calls,
       }

@@ -5,6 +5,7 @@ import {
   type PromptSource,
 } from '@/lib/practice/contracts'
 import type { ProgressAttemptInput } from '@/lib/progress/v3-aggregation'
+import { practiceCategoryFromValue } from '@/lib/practice/category'
 
 export type ProgressAttemptRowsOutcome =
   | { status: 'ready'; attempts: readonly ProgressAttemptInput[] }
@@ -49,6 +50,12 @@ function parseAttemptRow(value: unknown): ProgressAttemptInput | null {
     sectionScores: value.section_scores,
     practiceMode: value.practice_mode as PracticeMode,
     promptSource: value.prompt_source as PromptSource,
+    category:
+      practiceCategoryFromValue(
+        value.practice_category,
+        value.practice_mode,
+        value.prompt_source,
+      ) ?? undefined,
     rubricVersion: value.rubric_version,
     status: 'done',
   }

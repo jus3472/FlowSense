@@ -9,21 +9,12 @@ import { isAuthMode, validateEmail, validatePassword, type AuthMode } from '@/li
 /** Maps Supabase auth failures onto messages that say what to do next. */
 function messageFor(mode: AuthMode, raw: string): string {
   const text = raw.toLowerCase()
-  if (text.includes('already registered') || text.includes('already been registered')) {
-    return 'That email is already registered. Switch to log in.'
-  }
-  if (text.includes('invalid login credentials')) {
-    return 'Your email or password is not correct.'
-  }
-  if (text.includes('email not confirmed')) {
-    return 'Confirm your email address, then log in.'
-  }
   if (text.includes('rate limit') || text.includes('too many')) {
     return 'Too many attempts. Wait 60 seconds and try again.'
   }
   return mode === 'signup'
     ? 'Your account could not be created. Try again.'
-    : 'You could not be logged in. Try again.'
+    : 'Your email or password is not correct.'
 }
 
 export async function authenticate(
@@ -41,6 +32,7 @@ export async function authenticate(
     return {
       formError: null,
       notice: null,
+      email,
       fieldErrors: {
         ...(emailError ? { email: emailError } : {}),
         ...(passwordError ? { password: passwordError } : {}),
@@ -53,7 +45,7 @@ export async function authenticate(
   if (mode === 'signup') {
     const { data, error } = await supabase.auth.signUp({ email, password })
     if (error) {
-      return { formError: messageFor(mode, error.message), notice: null, fieldErrors: {} }
+      return { formError: messageFor(mode, error.message), notice: null, fieldErrors: {}, email }
     }
     if (!data.session) {
       // Only reachable if email confirmation gets turned on for the project.
@@ -61,6 +53,7 @@ export async function authenticate(
         formError: null,
         notice: 'Check your email for a confirmation link, then log in.',
         fieldErrors: {},
+        email,
       }
     }
     await clearCustomPracticeHandoffCookie()
@@ -69,7 +62,7 @@ export async function authenticate(
 
   const { error } = await supabase.auth.signInWithPassword({ email, password })
   if (error) {
-    return { formError: messageFor(mode, error.message), notice: null, fieldErrors: {} }
+    return { formError: messageFor(mode, error.message), notice: null, fieldErrors: {}, email }
   }
   await clearCustomPracticeHandoffCookie()
   redirect('/home')

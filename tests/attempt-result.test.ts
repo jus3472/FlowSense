@@ -19,7 +19,10 @@ function input(sectionScores: unknown = v3Snapshot()) {
 
 describe('attempt result decoding', () => {
   it('returns the current v3.2 payload', () => {
-    expect(readAttemptResult(input())).toMatchObject({ kind: 'v3', payload: { version: 'v3.score.2' } })
+    expect(readAttemptResult(input())).toMatchObject({
+      kind: 'v3',
+      payload: { version: 'v3.score.2' },
+    })
   })
 
   it('preserves a resultless terminal shape as incomplete', () => {
@@ -54,6 +57,8 @@ describe('attempt result decoding', () => {
     ]
     expect(storedTranscriptWords({ transcript: { words } })).toEqual(words)
     expect(storedTranscriptWords({ transcript: { words: [...words].reverse() } })).toEqual([])
-    expect(storedTranscriptWords({ transcript: { words: [{ ...words[0], confidence: 2 }] } })).toEqual([])
+    expect(
+      storedTranscriptWords({ transcript: { words: [{ ...words[0], confidence: 2 }] } }),
+    ).toEqual([])
   })
 })

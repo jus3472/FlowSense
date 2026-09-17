@@ -447,7 +447,9 @@ describe('RecordFlow runtime guards', () => {
         'timed_out',
       ),
     )
-    expect(await screen.findByRole('heading', { name: 'Scoring timed out' })).toBeVisible()
+    expect(
+      await screen.findByRole('heading', { name: 'Preparing your feedback took too long' }),
+    ).toBeVisible()
   })
 
   it('keeps an upload failure local and retries the same attempt without duplicate work', async () => {

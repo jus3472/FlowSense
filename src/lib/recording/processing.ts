@@ -8,9 +8,9 @@ export type TerminalStage = 'done' | 'failed' | 'timed_out'
 export type ProcessingStage = WorkStage | TerminalStage
 
 export const STAGE_LABEL: Record<WorkStage, string> = {
-  uploading: 'Saving',
-  transcribing: 'Transcribing',
-  scoring: 'Scoring',
+  uploading: 'Saving your response',
+  transcribing: 'Transcribing your response',
+  scoring: 'Reviewing what you said and how you sounded',
 }
 
 export interface ProcessingState {

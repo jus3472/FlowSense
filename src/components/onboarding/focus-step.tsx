@@ -1,46 +1,50 @@
 'use client'
 
-import { saveFocusAreas } from '@/actions/onboarding'
-import { PathPreferenceFields } from '@/components/onboarding/path-preference-fields'
+import { useEffect, useRef } from 'react'
+import { completeOnboarding } from '@/actions/onboarding'
 import { StepFrame } from '@/components/onboarding/step-frame'
+import { TrackIcon } from '@/components/curriculum/track-identity'
 import { SubmitButton } from '@/components/ui/submit-button'
-import type { PathSlug } from '@/lib/curriculum/contracts'
-import type { PathPreferenceOption } from '@/lib/path-preferences'
+import { TRACK_IDENTITY_LIST } from '@/lib/curriculum/track-identity'
+import { browserTimezone, UTC_TIMEZONE } from '@/lib/timezone'
 
-interface FocusStepProps {
-  paths: readonly PathPreferenceOption[]
-  initialPrimary: PathSlug
-  initialSecondaries: readonly PathSlug[]
-  error: 'primary' | 'save' | null
-}
+export function FocusStep({ error }: { error: boolean }) {
+  const timezoneInput = useRef<HTMLInputElement>(null)
 
-export function FocusStep({ paths, initialPrimary, initialSecondaries, error }: FocusStepProps) {
+  useEffect(() => {
+    if (timezoneInput.current) timezoneInput.current.value = browserTimezone()
+  }, [])
+
   return (
-    <StepFrame step={2} title="What do you want to get better at?">
+    <StepFrame step={2} title="Practice across four tracks">
       <div className="flex flex-col gap-6">
         <p className="text-muted text-base">
-          Choose one primary path and any additional paths you want to follow.
+          Home gives you four tracks. Start with the one that fits what you want to practice today.
         </p>
+
+        <ul className="grid gap-3 sm:grid-cols-2" aria-label="Available tracks">
+          {TRACK_IDENTITY_LIST.map((track) => (
+            <li
+              key={track.slug}
+              className="border-border bg-surface-sunken text-foreground rounded-input flex min-h-14 items-center gap-3 border px-4 py-3 text-sm font-medium"
+            >
+              <TrackIcon slug={track.slug} className="text-accent-ink size-5 shrink-0" />
+              {track.title}
+            </li>
+          ))}
+        </ul>
 
         {error ? (
           <p role="alert" className="text-negative text-sm">
-            {error === 'primary'
-              ? 'Choose one primary path.'
-              : 'Your choices did not save. Check your connection and try again.'}
+            Your setup did not save. Check your connection and try again.
           </p>
         ) : null}
 
-        <form action={saveFocusAreas} className="flex flex-col gap-8">
-          <PathPreferenceFields
-            paths={paths}
-            initialPrimary={initialPrimary}
-            initialSecondaries={initialSecondaries}
-          />
-          <div>
-            <SubmitButton size="lg" fullWidth loadingLabel="Saving">
-              Continue
-            </SubmitButton>
-          </div>
+        <form action={completeOnboarding} className="flex flex-col gap-8">
+          <input ref={timezoneInput} type="hidden" name="timezone" defaultValue={UTC_TIMEZONE} />
+          <SubmitButton size="lg" fullWidth loadingLabel="Opening Home">
+            Go to Home
+          </SubmitButton>
         </form>
       </div>
     </StepFrame>

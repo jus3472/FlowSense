@@ -33,7 +33,7 @@ function modeTitle(mode: string): string {
 function ModeHeader({ mode }: { mode: string }) {
   return (
     <div className="flex flex-col gap-2">
-      <Link href="/home" className="text-accent text-sm hover:underline">
+      <Link href="/home" className="text-accent-ink text-sm hover:underline">
         Home
       </Link>
       <PageTitle>{modeTitle(mode)}</PageTitle>

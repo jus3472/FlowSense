@@ -50,7 +50,13 @@ function fakeSampler() {
 }
 
 function build(
-  overrides: { maxDurationMs?: number; onRelease?: () => void; actualMimeType?: string } = {},
+  overrides: {
+    maxDurationMs?: number
+    onRelease?: () => void
+    actualMimeType?: string
+    onChunk?: (chunk: Blob) => void
+    timesliceMs?: number
+  } = {},
 ) {
   const created: FakeMediaRecorder[] = []
   const sampler = fakeSampler()
@@ -127,6 +133,32 @@ describe('AttemptRecorder', () => {
     // 'one' + 'two' + 'audio-bytes' with nothing repeated.
     expect(result.blob.size).toBe(3 + 3 + 11)
     expect(result.mimeType).toBe('audio/webm;codecs=opus')
+  })
+
+  it('mirrors slices from the single recorder without changing the saved blob', async () => {
+    const onChunk = vi.fn()
+    const { recorder, created } = build({ onChunk, timesliceMs: 250 })
+    const promise = recorder.start()
+
+    created[0]?.emitChunk('live')
+    recorder.stop()
+
+    const result = await promise
+    expect(created).toHaveLength(1)
+    expect(onChunk).toHaveBeenCalledTimes(2)
+    expect(result.blob.size).toBe(4 + 11)
+  })
+
+  it('continues recording when the optional live consumer fails', async () => {
+    const { recorder } = build({
+      onChunk: () => {
+        throw new Error('live socket failed')
+      },
+      timesliceMs: 250,
+    })
+    const promise = recorder.start()
+    recorder.stop()
+    await expect(promise).resolves.toMatchObject({ mimeType: 'audio/webm;codecs=opus' })
   })
 
   it('ignores empty chunks', async () => {

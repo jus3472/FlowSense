@@ -18,8 +18,8 @@ import {
 
 const valid = {
   promptText: 'Explain a choice you made.',
+  category: 'practice' as const,
   mode: 'practice' as const,
-  additionalContext: 'Keep it brief.',
   targetDurationSeconds: 30,
 }
 const userId = '10000000-0000-4000-8000-000000000001'
@@ -37,10 +37,9 @@ describe('custom practice input', () => {
   })
   it.each([
     { ...valid, promptText: ' ' },
-    { ...valid, mode: 'other' },
+    { ...valid, category: 'debate' },
     { ...valid, targetDurationSeconds: 14 },
     { ...valid, targetDurationSeconds: 61 },
-    { ...valid, additionalContext: 'x'.repeat(1001) },
   ])('rejects malformed or out-of-range input', (input) => {
     expect(parseCustomPracticeInput(input)).toBeNull()
   })
@@ -52,9 +51,24 @@ describe('custom practice input', () => {
     const result = validateCustomPracticeInput({
       ...valid,
       promptText: '🙂'.repeat(600),
-      additionalContext: '界'.repeat(600),
     })
     expect(result).toEqual({ ok: false, reason: 'too_large' })
+  })
+  it('maps Other to General Speaking scoring and drops the removed context input', () => {
+    expect(
+      parseCustomPracticeInput({
+        promptText: 'Describe a topic outside the Tracks.',
+        category: 'other',
+        mode: 'interview',
+        additionalContext: 'This field is no longer collected.',
+        targetDurationSeconds: 30,
+      }),
+    ).toEqual({
+      promptText: 'Describe a topic outside the Tracks.',
+      category: 'other',
+      mode: 'practice',
+      targetDurationSeconds: 30,
+    })
   })
   it.each([undefined, '0', 'true', ['1'], ['1', '1'], 1])(
     'does not activate a custom session for an invalid marker',
@@ -76,21 +90,22 @@ describe('custom practice input', () => {
     )
   })
   it('keeps custom prompt transport out of the public prompt library', () => {
-    expect(readFileSync('src/actions/custom-practice.ts', 'utf8')).not.toContain(".from('prompts')")
+    const action = readFileSync('src/actions/custom-practice.ts', 'utf8')
+    expect(action).not.toContain(".from('prompts')")
+    expect(action).not.toContain('additional_context')
   })
 })
 
 describe('custom practice handoff', () => {
   it.each([
     valid,
-    { ...valid, additionalContext: undefined },
+    { ...valid, category: 'other' as const, mode: 'practice' as const },
     { ...valid, targetDurationSeconds: 15 },
     { ...valid, targetDurationSeconds: 60 },
   ])('encrypts and opens a user-bound session without plaintext in the token', (input) => {
     const token = sealCustomPracticeHandoff(input, userId, secret, { now, iv })
     expect(token).not.toBeNull()
     expect(token).not.toContain(input.promptText)
-    if (input.additionalContext) expect(token).not.toContain(input.additionalContext)
     expect(Buffer.byteLength(token ?? '', 'utf8')).toBeLessThanOrEqual(
       CUSTOM_HANDOFF_COOKIE_VALUE_MAX_BYTES,
     )

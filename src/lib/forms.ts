@@ -10,12 +10,14 @@ export interface AuthFormState {
   formError: string | null
   notice: string | null
   fieldErrors: { email?: string; password?: string }
+  email: string
 }
 
 export const initialAuthFormState: AuthFormState = {
   formError: null,
   notice: null,
   fieldErrors: {},
+  email: '',
 }
 
 export interface ProfileFormState {

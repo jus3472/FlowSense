@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
 
 import type { ComponentProps } from 'react'
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 import { ProgressDashboard } from '@/components/progress/progress-dashboard'
 import { ProgressTrend } from '@/components/progress/progress-trend'
-import { progressFilterHref } from '@/lib/progress/display'
 import type { ProgressDashboardData } from '@/lib/progress/server'
 import {
   PROGRESS_DIMENSION_IDS,
@@ -21,10 +20,7 @@ import {
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }))
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => navigation,
-}))
-
+vi.mock('next/navigation', () => ({ useRouter: () => navigation }))
 vi.mock('next/link', () => ({
   default: ({ href, ...props }: ComponentProps<'a'>) => <a href={String(href)} {...props} />,
 }))
@@ -114,10 +110,6 @@ function dashboard(): ProgressDashboardData {
   }
 }
 
-afterEach(() => {
-  navigation.push.mockReset()
-})
-
 describe('ProgressDashboard', () => {
   it('renders three overview trends and the exact six and four metric groups', () => {
     render(<ProgressDashboard dashboard={dashboard()} filter="all" />)
@@ -145,23 +137,18 @@ describe('ProgressDashboard', () => {
     expect(screen.queryByText(/track progress|stars|lessons/i)).not.toBeInTheDocument()
   })
 
-  it('routes the mode filter without losing the progress route', () => {
+  it('shows every mode in one compact shared filter and navigates by URL', () => {
     render(<ProgressDashboard dashboard={dashboard()} filter="all" />)
 
-    const select = screen.getByLabelText('Show responses')
-    expect(select).toHaveAttribute('id', 'progress-response-filter')
-    expect(select).toHaveClass('min-h-11', 'appearance-none', 'pr-12', 'cursor-pointer')
-    expect(select.parentElement?.querySelector('svg[aria-hidden="true"]')).toHaveClass(
-      'right-4',
-      'size-5',
-      'pointer-events-none',
-    )
+    const filters = screen.getByRole('navigation', { name: 'Response filter' })
+    const select = within(filters).getByRole('combobox', { name: 'Show responses' })
+    expect(select).toHaveValue('all')
     expect(
-      within(select)
+      within(filters)
         .getAllByRole('option')
         .map((option) => ({
           label: option.textContent,
-          value: option.getAttribute('value'),
+          value: (option as HTMLOptionElement).value,
         })),
     ).toEqual([
       { label: 'All', value: 'all' },
@@ -169,13 +156,11 @@ describe('ProgressDashboard', () => {
       { label: 'Interviews', value: 'interview' },
       { label: 'Presentations', value: 'presentation' },
       { label: 'Conversations', value: 'conversation' },
+      { label: 'Custom Prompts', value: 'custom' },
+      { label: 'Other', value: 'other' },
     ])
-
-    fireEvent.change(select, {
-      target: { value: 'interview' },
-    })
-
-    expect(navigation.push).toHaveBeenCalledWith(progressFilterHref('interview'))
+    fireEvent.change(select, { target: { value: 'interview' } })
+    expect(navigation.push).toHaveBeenCalledWith('/progress?mode=interview')
   })
 
   it('keeps charts chronological and lists expanded responses newest first', () => {
@@ -188,9 +173,11 @@ describe('ProgressDashboard', () => {
     fireEvent.click(card)
 
     expect(card).toHaveAttribute('aria-expanded', 'true')
-    const history = screen.getByRole('region', {
+    const history = screen.getByRole('dialog', {
       name: 'Answered the Prompt response history',
     })
+    expect(history).toHaveAttribute('aria-modal', 'true')
+    expect(history).toHaveAccessibleDescription(/Average 70%.*oldest to latest.*newest first/)
     const links = within(history).getAllByRole('link')
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
       '/attempts/attempt-2',
@@ -206,7 +193,7 @@ describe('ProgressDashboard', () => {
     expect(within(history).getByRole('img')).toHaveAttribute('data-values', '60,80')
   })
 
-  it('uses the whole collapsed card as a button and collapses from its header without intercepting links', () => {
+  it('opens an accessible focused dialog and closes with Escape or the backdrop', async () => {
     render(
       <ProgressTrend
         label="Overall"
@@ -218,24 +205,32 @@ describe('ProgressDashboard', () => {
     const trigger = screen.getByRole('button', { name: 'View Overall response history' })
     expect(trigger.tagName).toBe('BUTTON')
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
-    expect(trigger.querySelector('svg[aria-hidden="true"]')).toHaveClass('size-6')
+    expect(trigger).toHaveAttribute('aria-haspopup', 'dialog')
+    expect(trigger.querySelector('svg[aria-hidden="true"]')).not.toBeInTheDocument()
 
     fireEvent.click(trigger)
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
-    expect(trigger).toHaveAccessibleName('Hide Overall response history')
-    expect(trigger.querySelector('svg[aria-hidden="true"]')).toHaveClass('rotate-180')
+    const dialog = screen.getByRole('dialog', { name: 'Overall response history' })
+    const close = within(dialog).getByRole('button', { name: 'Close' })
+    const links = within(dialog).getAllByRole('link')
+    expect(close).toHaveFocus()
+    expect(document.body.style.overflow).toBe('hidden')
 
-    const history = screen.getByRole('region', { name: 'Overall response history' })
-    const resultLink = within(history).getAllByRole('link')[0]!
-    resultLink.addEventListener('click', (event) => event.preventDefault(), { once: true })
-    fireEvent.click(resultLink)
-    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true })
+    expect(links.at(-1)).toHaveFocus()
+    fireEvent.keyDown(dialog, { key: 'Tab' })
+    expect(close).toHaveFocus()
+
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(trigger).toHaveFocus())
+    expect(document.body.style.overflow).toBe('')
 
     fireEvent.click(trigger)
-    expect(trigger).toHaveAttribute('aria-expanded', 'false')
-    expect(
-      screen.queryByRole('region', { name: 'Overall response history' }),
-    ).not.toBeInTheDocument()
+    const reopened = screen.getByRole('dialog', { name: 'Overall response history' })
+    fireEvent.mouseDown(reopened.parentElement!)
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(trigger).toHaveFocus())
   })
 
   it('uses the last ten observations in the chart and all observations when expanded', () => {
@@ -255,12 +250,19 @@ describe('ProgressDashboard', () => {
         .map((item) => item.value)
         .join(','),
     )
+    expect(
+      container
+        .querySelector('[data-chart-size="compact"]')
+        ?.querySelectorAll('[data-point-label]'),
+    ).toHaveLength(10)
     fireEvent.click(screen.getByRole('button', { name: 'View Overall response history' }))
-    expect(screen.getAllByRole('link')).toHaveLength(12)
-    expect(container.querySelector('[data-chart-size="expanded"]')).toHaveAttribute(
-      'data-values',
-      points.map((item) => item.value).join(','),
-    )
+    expect(within(screen.getByRole('dialog')).getAllByRole('link')).toHaveLength(12)
+    const expandedChart = container.querySelector('[data-chart-size="expanded"]')
+    expect(expandedChart).toHaveAttribute('data-values', points.map((item) => item.value).join(','))
+    expect(expandedChart).toHaveAccessibleName(/Values from oldest to latest: 0 to 5 to 10/)
+    expect(expandedChart?.querySelectorAll('[data-point-label]')).toHaveLength(6)
+    expect(expandedChart?.querySelector('[data-point-label="history-1"]')).toHaveTextContent('0%')
+    expect(expandedChart?.querySelector('[data-point-label="history-12"]')).toHaveTextContent('55%')
   })
 
   it('renders deliberate empty and one-point states', () => {
@@ -287,8 +289,12 @@ describe('ProgressDashboard', () => {
     ])
     render(<ProgressTrend label="Pace" series={pace} timezone="UTC" metric="pace" />)
 
-    expect(screen.getByText('6 / 8 · 80%')).toBeInTheDocument()
+    const average = screen.getByText('Average')
+    expect(average).toBeInTheDocument()
+    expect(average.nextElementSibling).toHaveTextContent('80%')
+    expect(screen.queryByText('6 / 8 · 80%')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'View Pace response history' }))
+    expect(screen.getByText('6 / 8 · 80%')).toBeInTheDocument()
     expect(screen.getByText('144 WPM')).toBeInTheDocument()
   })
 })

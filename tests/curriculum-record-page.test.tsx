@@ -135,10 +135,7 @@ function useClient(parent: unknown = retryParent()) {
   return { operations, query }
 }
 
-async function renderPage(
-  outcome: CurriculumLessonAccessOutcome,
-  retry?: string | string[],
-) {
+async function renderPage(outcome: CurriculumLessonAccessOutcome, retry?: string | string[]) {
   mocks.lessonAccess.mockResolvedValueOnce(outcome)
   const page = await CurriculumLessonRecordPage({
     params: Promise.resolve({ pathSlug: PATH_SLUG, lessonSlug: LESSON_SLUG }),
@@ -202,7 +199,9 @@ describe('structured lesson record route', () => {
 
     await renderPage(ALLOWED, retry)
 
-    expect(screen.getByRole('heading', { name: 'That lesson retry is not available' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'That lesson retry is not available' }),
+    ).toBeInTheDocument()
     expect(mocks.createClient).not.toHaveBeenCalled()
     expect(mocks.recordFlow).not.toHaveBeenCalled()
   })
@@ -212,7 +211,9 @@ describe('structured lesson record route', () => {
 
     await renderPage(ALLOWED, ATTEMPT_ID)
 
-    expect(screen.getByRole('heading', { name: 'That lesson retry is not available' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'That lesson retry is not available' }),
+    ).toBeInTheDocument()
     expect(mocks.recordFlow).not.toHaveBeenCalled()
   })
 

@@ -62,7 +62,8 @@ describe('path preference parsing', () => {
       usedDefaultPreference: false,
     })
     expect(
-      loaded && samePathPreferenceOrder(loaded, ['interviews', 'presentations', 'general-speaking']),
+      loaded &&
+        samePathPreferenceOrder(loaded, ['interviews', 'presentations', 'general-speaking']),
     ).toBe(true)
   })
 
@@ -81,11 +82,9 @@ describe('path preference parsing', () => {
   })
 
   it('requires a valid distinct primary and secondary submission', () => {
-    expect(parseSubmittedPathPreferences('interviews', ['presentations', 'conversations'])).toEqual([
-      'interviews',
-      'presentations',
-      'conversations',
-    ])
+    expect(parseSubmittedPathPreferences('interviews', ['presentations', 'conversations'])).toEqual(
+      ['interviews', 'presentations', 'conversations'],
+    )
     expect(parseSubmittedPathPreferences(null, [])).toBeNull()
     expect(parseSubmittedPathPreferences('interviews', ['interviews'])).toBeNull()
     expect(parseSubmittedPathPreferences('unknown', [])).toBeNull()

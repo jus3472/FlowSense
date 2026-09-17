@@ -45,6 +45,10 @@ function setup(rows: readonly ReturnType<typeof attemptRow>[], failFrom?: number
         operations.push({ method: 'in', column, value })
         return query
       }),
+      or: vi.fn((value: string) => {
+        operations.push({ method: 'or', value })
+        return query
+      }),
       lte: vi.fn((column: string, value: unknown) => {
         operations.push({ method: 'lte', column, value })
         return query
@@ -125,10 +129,11 @@ describe('progress server loading', () => {
     const fake = setup([attemptRow('attempt')])
     mocks.createClient.mockResolvedValue(fake.client)
 
-    await getProgressDashboardData('user-1', {
+    const result = await getProgressDashboardData('user-1', {
       now: new Date('2026-09-05T12:00:00.000Z'),
       filter: 'practice',
     })
+    expect(result.status).toBe('ready')
 
     expect(fake.operations).toContainEqual({ method: 'eq', column: 'user_id', value: 'user-1' })
     expect(fake.operations).toContainEqual({ method: 'eq', column: 'status', value: 'done' })

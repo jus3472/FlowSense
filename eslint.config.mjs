@@ -43,7 +43,16 @@ const eslintConfig = defineConfig([
     files: ['scripts/**'],
     rules: { 'no-restricted-syntax': 'off' },
   },
-  globalIgnores(['.next/**', 'out/**', 'build/**', 'coverage/**', 'next-env.d.ts', 'supabase/**']),
+  globalIgnores([
+    '.next/**',
+    'out/**',
+    'build/**',
+    'coverage/**',
+    'playwright-report/**',
+    'test-results/**',
+    'next-env.d.ts',
+    'supabase/**',
+  ]),
 ])
 
 export default eslintConfig

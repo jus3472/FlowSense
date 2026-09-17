@@ -34,6 +34,8 @@ import {
 } from '@/lib/recording/audio-sampler'
 import { assessCaptureReadiness } from '@/lib/recording/capture-readiness'
 import { countdownSecondsFor } from '@/lib/recording/countdown'
+import { LiveTranscriber } from '@/lib/recording/live-transcription'
+import { EMPTY_LIVE_TRANSCRIPT, type LiveTranscriptState } from '@/lib/recording/live-transcript'
 import { acquireMicrophone, stopMediaStream } from '@/lib/recording/microphone'
 import {
   INITIAL_PROCESSING_STATE,
@@ -82,15 +84,16 @@ export function RecordFlow({ session }: RecordFlowProps) {
 
   const [phase, setPhase] = useState<Phase>({ name: 'requesting' })
   const [processing, setProcessing] = useState<ProcessingState>(INITIAL_PROCESSING_STATE)
-  const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [recording, setRecording] = useState<AttemptRecording | null>(null)
+  const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptState>(EMPTY_LIVE_TRANSCRIPT)
+  const [liveTranscriptUnavailable, setLiveTranscriptUnavailable] = useState(false)
 
   // Everything below survives re-renders without driving them, and gives the
   // retry path a way to skip work that already succeeded.
   const streamRef = useRef<MediaStream | null>(null)
   const samplerRef = useRef<AudioSampler | null>(null)
   const recorderRef = useRef<AttemptRecorder | null>(null)
-  const objectUrlRef = useRef<string | null>(null)
+  const liveTranscriberRef = useRef<LiveTranscriber | null>(null)
   const creationRef = useRef<CreateAttemptInput | null>(null)
   const attemptRef = useRef<{ attemptId: string; storagePath: string } | null>(null)
   const uploadedRef = useRef(false)
@@ -119,6 +122,8 @@ export function RecordFlow({ session }: RecordFlowProps) {
   const cancelCaptureForHistoryTraversal = useCallback(() => {
     const wasRecording = phase.name === 'recording'
     recorderRef.current?.cancel()
+    liveTranscriberRef.current?.close()
+    liveTranscriberRef.current = null
     releaseStream()
     abandonUnfinishedUpload()
     if (wasRecording && mountedRef.current) {
@@ -147,11 +152,9 @@ export function RecordFlow({ session }: RecordFlowProps) {
       window.removeEventListener('pagehide', handlePageHide)
       abandonUnfinishedUpload()
       recorderRef.current?.cancel()
+      liveTranscriberRef.current?.close()
+      liveTranscriberRef.current = null
       releaseStream()
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current)
-        objectUrlRef.current = null
-      }
     }
   }, [abandonUnfinishedUpload, releaseStream])
 
@@ -245,6 +248,7 @@ export function RecordFlow({ session }: RecordFlowProps) {
   const handleRecorded = useCallback(
     (recording: AttemptRecording) => {
       if (!mountedRef.current) return
+      liveTranscriberRef.current?.finish()
       const readiness = assessCaptureReadiness(recording)
       if (!readiness.ok) {
         recorderRef.current = null
@@ -252,10 +256,7 @@ export function RecordFlow({ session }: RecordFlowProps) {
         return
       }
 
-      const url = URL.createObjectURL(recording.blob)
-      objectUrlRef.current = url
       setRecording(recording)
-      setAudioUrl(url)
       setPhase({ name: 'processing' })
       void runPipeline(recording)
     },
@@ -273,6 +274,7 @@ export function RecordFlow({ session }: RecordFlowProps) {
       .catch((error: unknown) => {
         // Cancellation is the unmount path and needs no screen.
         if (error instanceof RecorderError && error.message.includes('cancelled')) return
+        liveTranscriberRef.current?.close()
         releaseStream()
         if (mountedRef.current) {
           setPhase({ name: 'recorder-failed', message: describeError(error) })
@@ -291,6 +293,10 @@ export function RecordFlow({ session }: RecordFlowProps) {
     }
 
     requestingMicrophoneRef.current = true
+    liveTranscriberRef.current?.close()
+    liveTranscriberRef.current = null
+    setLiveTranscript(EMPTY_LIVE_TRANSCRIPT)
+    setLiveTranscriptUnavailable(false)
     setPhase({ name: 'requesting' })
 
     let stream: MediaStream
@@ -320,15 +326,32 @@ export function RecordFlow({ session }: RecordFlowProps) {
       const sampler = createAudioSampler(stream)
       samplerRef.current = sampler
 
+      const liveTranscriber = new LiveTranscriber({
+        onTranscript: (transcript) => {
+          if (mountedRef.current) setLiveTranscript(transcript)
+        },
+        onUnavailable: () => {
+          if (mountedRef.current) setLiveTranscriptUnavailable(true)
+        },
+      })
+      liveTranscriberRef.current = liveTranscriber
+      // Open the live connection during the countdown so the token request and
+      // WebSocket handshake do not delay the first words after recording starts.
+      void liveTranscriber.connect()
+
       // One recorder, one stream, one attempt. AttemptRecorder refuses a second start.
       recorderRef.current = new AttemptRecorder({
         mimeType: support.mimeType,
         createRecorder: (mimeType) => new MediaRecorder(stream, { mimeType }),
         sampler,
         maxDurationMs: MAX_RECORDING_MS,
+        timesliceMs: 100,
+        onChunk: (chunk) => liveTranscriber.send(chunk),
         onRelease: releaseStream,
       })
     } catch (error) {
+      liveTranscriberRef.current?.close()
+      liveTranscriberRef.current = null
       releaseStream()
       if (mountedRef.current) {
         setPhase({ name: 'recorder-failed', message: describeError(error) })
@@ -417,21 +440,15 @@ export function RecordFlow({ session }: RecordFlowProps) {
         promptText={promptText}
         maxDurationMs={MAX_RECORDING_MS}
         getLevel={getLevel}
+        transcript={liveTranscript}
+        transcriptUnavailable={liveTranscriptUnavailable}
         onStop={() => recorderRef.current?.stop()}
       />
     )
   }
 
   if (phase.name === 'processing') {
-    return (
-      <ProcessingStep
-        promptText={promptText}
-        audioUrl={audioUrl}
-        durationMs={recording?.durationMs ?? 0}
-        state={processing}
-        onRetry={retry}
-      />
-    )
+    return <ProcessingStep promptText={promptText} state={processing} onRetry={retry} />
   }
 
   return (

@@ -10,9 +10,10 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 import { Card } from '@/components/ui/card'
-import { buttonClasses } from '@/components/ui/button'
+import { Button, buttonClasses } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
-import { FIELD_CONTROL_CLASS } from '@/components/ui/text-field'
+import { ModalLayer } from '@/components/ui/modal-layer'
+import { ResponseFilter } from '@/components/ui/response-filter'
 import { deleteAttempt } from '@/lib/results/api'
 import {
   METADATA_FILTER_LABEL,
@@ -38,6 +39,7 @@ const METADATA_FILTERS: HistoryMetadataFilter[] = [
   'presentation',
   'conversation',
   'custom',
+  'other',
   'retry',
 ]
 
@@ -89,12 +91,14 @@ export function HistoryList({
   const cancelDeleteButtonRef = useRef<HTMLButtonElement>(null)
   const focusAfterDismissRef = useRef<string | null>(null)
   const focusAfterDeleteRef = useRef<{ targetId: string | null } | null>(null)
+  const deletingRef = useRef<string | null>(null)
 
   const entries = initial.filter((entry) => !removedIds.has(entry.id))
   const groups = groupByDay(entries, new Date(renderedAt), timezone)
 
   const dismissConfirmation = useCallback((id: string, returnFocus: boolean) => {
     if (returnFocus) focusAfterDismissRef.current = id
+    setError(null)
     setConfirming(null)
   }, [])
 
@@ -141,6 +145,12 @@ export function HistoryList({
     const cancel = cancelDeleteButtonRef.current
     if (!confirm || !cancel) return
 
+    if (busy === confirming) {
+      event.preventDefault()
+      cancel.focus()
+      return
+    }
+
     event.preventDefault()
     if (event.shiftKey) {
       ;(document.activeElement === confirm ? cancel : confirm).focus()
@@ -150,9 +160,11 @@ export function HistoryList({
   }
 
   const remove = async (id: string) => {
-    if (busy === id) return
+    if (deletingRef.current !== null) return
+    deletingRef.current = id
     setBusy(id)
     setError(null)
+    let failed = false
     try {
       await deleteAttempt(id)
       const removedIndex = entries.findIndex((entry) => entry.id === id)
@@ -164,10 +176,12 @@ export function HistoryList({
       setAnnouncement('Response deleted.')
       router.refresh()
     } catch (thrown) {
+      failed = true
       setError(thrown instanceof Error ? thrown.message : 'It could not be deleted.')
-      dismissConfirmation(id, true)
     } finally {
+      deletingRef.current = null
       setBusy(null)
+      if (failed) requestAnimationFrame(() => confirmDeleteButtonRef.current?.focus())
     }
   }
 
@@ -188,40 +202,22 @@ export function HistoryList({
       role="region"
       tabIndex={-1}
       aria-label="History responses"
-      className="focus-visible:ring-accent-soft flex flex-col gap-6 focus-visible:ring-2 focus-visible:outline-none"
+      className="focus-visible:ring-accent-ink flex flex-col gap-6 focus-visible:ring-2 focus-visible:outline-none"
     >
       <p role="status" aria-live="polite" className="sr-only">
         {announcement}
       </p>
-      <Card className="p-4 sm:p-6">
-        <label
-          className="text-foreground flex flex-col gap-2 text-sm font-medium"
-          htmlFor="history-metadata-filter"
-        >
-          Show responses
-          <select
-            id="history-metadata-filter"
-            value={query.metadata}
-            onChange={(event) =>
-              router.push(
-                historyHref({
-                  metadata: event.target.value as HistoryMetadataFilter,
-                  page: 1,
-                }),
-              )
-            }
-            className={FIELD_CONTROL_CLASS}
-          >
-            {METADATA_FILTERS.map((value) => (
-              <option key={value} value={value}>
-                {METADATA_FILTER_LABEL[value]}
-              </option>
-            ))}
-          </select>
-        </label>
-      </Card>
+      <ResponseFilter
+        id="history-response-filter-label"
+        selected={query.metadata}
+        options={METADATA_FILTERS.map((value) => ({
+          value,
+          label: METADATA_FILTER_LABEL[value],
+          href: historyHref({ metadata: value, page: 1 }),
+        }))}
+      />
 
-      {error ? (
+      {error && confirming === null ? (
         <p role="alert" className="text-negative text-sm">
           {error}
         </p>
@@ -249,7 +245,7 @@ export function HistoryList({
                   href={attemptHref(entry.id)}
                   aria-hidden={confirming === entry.id || undefined}
                   tabIndex={confirming === entry.id ? -1 : undefined}
-                  className="border-border bg-surface shadow-card rounded-card hover:bg-surface-sunken focus:ring-accent flex min-h-20 cursor-pointer items-start justify-between gap-4 border p-6 pr-16 transition duration-150 ease-out focus:ring-2 focus:outline-none"
+                  className="border-border bg-surface shadow-card rounded-card hover:bg-surface-sunken focus:ring-accent-ink flex min-h-20 cursor-pointer items-start justify-between gap-4 border p-6 pr-16 transition duration-150 ease-out focus:ring-2 focus:outline-none"
                 >
                   <div className="min-w-0 flex-1">
                     {entry.lesson ? (
@@ -285,7 +281,7 @@ export function HistoryList({
                     {historyStarsLabel(entry) ? (
                       <span
                         aria-label={`${entry.lesson?.stars ?? 0} stars`}
-                        className="text-accent text-xs"
+                        className="text-accent-ink text-xs"
                       >
                         {historyStarsLabel(entry)}
                       </span>
@@ -310,6 +306,7 @@ export function HistoryList({
                     title="Delete response"
                     onClick={() => {
                       setAnnouncement('')
+                      setError(null)
                       setConfirming(entry.id)
                     }}
                     className={`${ICON_BUTTON} absolute top-4 right-3`}
@@ -324,7 +321,7 @@ export function HistoryList({
       ))}
 
       {confirming ? (
-        <div className="bg-foreground/20 fixed inset-0 z-50 flex items-center justify-center p-4">
+        <ModalLayer>
           <Card
             role="alertdialog"
             aria-modal="true"
@@ -349,34 +346,39 @@ export function HistoryList({
                 Progress, streak, stars, and lesson unlocks may change.
               </p>
             </div>
+            {error ? (
+              <p
+                role="alert"
+                className="bg-negative-soft text-negative rounded-input px-4 py-3 text-sm"
+              >
+                {error}
+              </p>
+            ) : null}
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <button
+              <Button
                 ref={cancelDeleteButtonRef}
-                type="button"
+                variant="secondary"
                 aria-label="Cancel delete"
                 aria-disabled={busy === confirming || undefined}
                 onClick={() => {
                   if (busy !== confirming) dismissConfirmation(confirming, true)
                 }}
-                className={buttonClasses({ variant: 'secondary' })}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 ref={confirmDeleteButtonRef}
-                type="button"
+                variant="destructive"
                 aria-label="Confirm delete"
-                aria-disabled={busy === confirming || undefined}
+                loading={busy === confirming}
+                loadingLabel="Deleting response"
                 onClick={() => void remove(confirming)}
-                className={buttonClasses({
-                  variant: 'destructive',
-                })}
               >
-                {busy === confirming ? 'Deleting response' : 'Delete response'}
-              </button>
+                Delete response
+              </Button>
             </div>
           </Card>
-        </div>
+        </ModalLayer>
       ) : null}
 
       {hasPrevious || hasNext ? (

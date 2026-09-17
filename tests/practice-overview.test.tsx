@@ -180,8 +180,8 @@ beforeEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('curriculum overview preference ordering', () => {
-  it('puts the primary path first, selected secondaries by rank, and others canonically', () => {
+describe('curriculum overview ordering', () => {
+  it('uses canonical track order regardless of historical preferences', () => {
     const built = buildCurriculumOverview(allPaths().reverse(), [
       { pathId: 'conversations-path', rank: 1 },
       { pathId: 'interviews-path', rank: 0 },
@@ -190,50 +190,21 @@ describe('curriculum overview preference ordering', () => {
     expect(built.ok).toBe(true)
     if (!built.ok) return
     expect(built.value.paths.map((item) => item.progress.path.slug)).toEqual([
-      'interviews',
-      'conversations',
       'general-speaking',
+      'interviews',
       'presentations',
-    ])
-    expect(built.value.paths.map((item) => item.selection)).toEqual([
-      'primary',
-      'selected',
-      'available',
-      'available',
+      'conversations',
     ])
   })
 
-  it('uses General Speaking as the sole selected primary for a legitimate empty set', () => {
-    const built = buildCurriculumOverview(allPaths(), [])
-
-    expect(built.ok).toBe(true)
-    if (!built.ok) return
-    expect(built.value.usedDefaultPreference).toBe(true)
-    expect(built.value.paths[0]).toMatchObject({
-      selection: 'primary',
-      preferenceRank: 0,
-      progress: { path: { slug: 'general-speaking' } },
-    })
-    expect(built.value.paths.slice(1).every((item) => item.selection === 'available')).toBe(true)
-  })
-
-  it('rejects malformed, duplicate, gapped, and unknown preferences instead of guessing', () => {
+  it('retains strict preference parsing for backwards-compatible account data helpers', () => {
     expect(parseCurriculumPreferenceRows([{ path_id: '', rank: 0 }])).toBeNull()
     expect(
       parseCurriculumPreferenceRows([{ path_id: 'general-speaking-path', rank: '0' }]),
     ).toBeNull()
-    expect(
-      buildCurriculumOverview(allPaths(), [
-        { pathId: 'interviews-path', rank: 0 },
-        { pathId: 'interviews-path', rank: 1 },
-      ]),
-    ).toMatchObject({ ok: false, error: { code: 'invalid_preference_order' } })
-    expect(
-      buildCurriculumOverview(allPaths(), [{ pathId: 'interviews-path', rank: 1 }]),
-    ).toMatchObject({ ok: false, error: { code: 'invalid_preference_order' } })
-    expect(
-      buildCurriculumOverview(allPaths(), [{ pathId: 'unknown-path', rank: 0 }]),
-    ).toMatchObject({ ok: false, error: { code: 'unknown_preference_path' } })
+    expect(parseCurriculumPreferenceRows([{ path_id: 'general-speaking-path', rank: 0 }])).toEqual([
+      { pathId: 'general-speaking-path', rank: 0 },
+    ])
   })
 
   it('fails closed when a chapter is inactive', () => {
@@ -279,7 +250,7 @@ describe('curriculum overview preference ordering', () => {
 })
 
 describe('curriculum overview server boundary', () => {
-  it('queries preferences for the owner, loads every path, and never mutates preferences', async () => {
+  it('loads every path without reading or mutating historical preferences', async () => {
     const setup = preferenceClient([
       { path_id: 'interviews-path', rank: 0 },
       { path_id: 'conversations-path', rank: 1 },
@@ -294,12 +265,7 @@ describe('curriculum overview server boundary', () => {
     const result = await loadCurriculumOverviewForUser(setup.client, USER_ID, pathLoader)
 
     expect(result.status).toBe('ready')
-    expect(setup.client.from).toHaveBeenCalledWith('profile_path_preferences')
-    expect(setup.query.operations).toEqual([
-      { method: 'select', args: ['path_id, rank'] },
-      { method: 'eq', args: ['user_id', USER_ID] },
-      { method: 'order', args: ['rank', { ascending: true }] },
-    ])
+    expect(setup.client.from).not.toHaveBeenCalled()
     expect(pathLoader).toHaveBeenCalledTimes(PATH_SLUGS.length)
     expect(pathLoaderMock.mock.calls.map((call) => call[2])).toEqual(PATH_SLUGS)
     expect(setup.insert).not.toHaveBeenCalled()
@@ -307,26 +273,8 @@ describe('curriculum overview server boundary', () => {
     expect(setup.rpc).not.toHaveBeenCalled()
   })
 
-  it('keeps preference query failure distinct and does not load guessed paths', async () => {
+  it('keeps path failures typed', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const setup = preferenceClient(null, { code: 'NETWORK' })
-    const pathLoader = vi.fn() as CurriculumPathLoader
-
-    const result = await loadCurriculumOverviewForUser(setup.client, USER_ID, pathLoader)
-
-    expect(result).toEqual({ status: 'failure', reason: 'query', operation: 'preferences' })
-    expect(pathLoader).not.toHaveBeenCalled()
-  })
-
-  it('keeps malformed preferences and path failures typed instead of treating them as empty', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const malformed = preferenceClient([{ path_id: 'interviews-path', rank: '0' }])
-    const pathLoader = vi.fn() as CurriculumPathLoader
-    await expect(
-      loadCurriculumOverviewForUser(malformed.client, USER_ID, pathLoader),
-    ).resolves.toEqual({ status: 'failure', reason: 'invalid_response', operation: 'preferences' })
-    expect(pathLoader).not.toHaveBeenCalled()
-
     const valid = preferenceClient([])
     const failedLoader = vi.fn(async () => ({
       status: 'failure' as const,
@@ -341,7 +289,7 @@ describe('curriculum overview server boundary', () => {
 
 describe('Home curriculum overview', () => {
   it('shows each track in order with only its immediate lesson and direct action', () => {
-    render(<HomeOverview overview={overview()} />)
+    const { container } = render(<HomeOverview overview={overview()} />)
 
     expect(screen.getByRole('heading', { name: 'Home', level: 1 })).toHaveClass(
       'prompt-display',
@@ -352,7 +300,16 @@ describe('Home curriculum overview', () => {
       within(tracks)
         .getAllByRole('heading', { level: 2 })
         .map((heading) => heading.textContent),
-    ).toEqual(['Interviews', 'Conversations', 'General Speaking', 'Presentations'])
+    ).toEqual(['General Speaking', 'Interviews', 'Presentations', 'Conversations'])
+    for (const slug of PATH_SLUGS) {
+      expect(container.querySelector(`[data-track-icon="${slug}"]`)).toBeInTheDocument()
+    }
+    expect(
+      screen.getByText('Build clear, focused responses for everyday speaking.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Answer questions directly with specific support.')).toBeInTheDocument()
+    expect(screen.getByText('Structure ideas for a clear spoken delivery.')).toBeInTheDocument()
+    expect(screen.getByText('Respond naturally and keep ideas moving.')).toBeInTheDocument()
     expect(screen.queryByText('Primary path')).not.toBeInTheDocument()
     expect(screen.queryByText('Selected path')).not.toBeInTheDocument()
     expect(screen.queryByText('Available')).not.toBeInTheDocument()
@@ -365,52 +322,52 @@ describe('Home curriculum overview', () => {
     expect(screen.queryByText(/\d+ \/ 30 passed/)).not.toBeInTheDocument()
     expect(screen.queryByText(/\d+ \/ 90 stars/)).not.toBeInTheDocument()
     expect(screen.queryByText('Not passed yet')).not.toBeInTheDocument()
-    expect(screen.getAllByRole('img', { name: '0 of 3 stars' })).toHaveLength(3)
+    expect(screen.queryByRole('img', { name: /stars/ })).not.toBeInTheDocument()
 
-    expect(
-      screen.getAllByRole('link', { name: 'Continue' }).map((link) => link.getAttribute('href')),
-    ).toEqual([
-      '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record?retry=attempt-interviews-1',
-      '/practice/paths/conversations/lessons/conversations-beginner-03-skill-3/record',
-    ])
-    expect(screen.getByRole('link', { name: 'Start' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Start Lesson' })).toHaveAttribute(
       'href',
       '/practice/paths/general-speaking/lessons/general-speaking-beginner-01-skill-1/record',
     )
-    expect(screen.getByRole('link', { name: 'View Path' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Try Again' })).toHaveAttribute(
       'href',
-      '/practice/paths/presentations',
+      '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record?retry=attempt-interviews-1',
+    )
+    expect(screen.getByRole('link', { name: 'Next Lesson' })).toHaveAttribute(
+      'href',
+      '/practice/paths/conversations/lessons/conversations-beginner-03-skill-3/record',
+    )
+    expect(screen.getByRole('link', { name: 'Practice Again' })).toHaveAttribute(
+      'href',
+      '/practice/paths/presentations/lessons/presentations-beginner-01-skill-1/record',
     )
     expect(screen.getByText('Path complete')).toBeInTheDocument()
   })
 
-  it('links every track card to its path without nesting the lesson actions', () => {
+  it('makes only the two explicit card actions interactive', () => {
     const { container } = render(<HomeOverview overview={overview()} />)
 
-    for (const [title, slug] of [
-      ['General Speaking', 'general-speaking'],
-      ['Interviews', 'interviews'],
-      ['Presentations', 'presentations'],
-      ['Conversations', 'conversations'],
-    ] as const) {
-      const cardLink = screen.getByRole('link', { name: `View ${title} track` })
-      expect(cardLink).toHaveAttribute('href', `/practice/paths/${slug}`)
-      expect(cardLink).toHaveClass('cursor-pointer', 'focus-visible:ring-2')
-      cardLink.focus()
-      expect(cardLink).toHaveFocus()
-    }
-
+    expect(screen.queryByRole('link', { name: /View .* track/ })).not.toBeInTheDocument()
     expect(container.querySelectorAll('a a')).toHaveLength(0)
     expect(
-      screen.getAllByRole('link', { name: 'Continue' }).map((link) => link.getAttribute('href')),
+      screen
+        .getAllByRole('link', { name: 'View Lessons' })
+        .map((link) => link.getAttribute('href')),
     ).toEqual([
-      '/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record?retry=attempt-interviews-1',
-      '/practice/paths/conversations/lessons/conversations-beginner-03-skill-3/record',
+      '/practice/paths/general-speaking',
+      '/practice/paths/interviews',
+      '/practice/paths/presentations',
+      '/practice/paths/conversations',
     ])
-    expect(screen.getByRole('link', { name: 'Start' })).toHaveAttribute(
-      'href',
-      '/practice/paths/general-speaking/lessons/general-speaking-beginner-01-skill-1/record',
-    )
+    for (const link of screen.getAllByRole('link', { name: 'View Lessons' })) {
+      expect(link).toHaveClass(
+        'border',
+        'bg-surface',
+        'hover:bg-surface-sunken',
+        'active:bg-accent-soft',
+      )
+      expect(link).not.toHaveClass('bg-accent')
+    }
+    expect(screen.getAllByRole('link')).toHaveLength(9)
   })
 
   it('keeps neutral activity in the action state without adding status copy', () => {
@@ -427,7 +384,7 @@ describe('Home curriculum overview', () => {
     expect(screen.queryByText('You have activity here, but no score.')).not.toBeInTheDocument()
     expect(screen.queryByText('Your last response was not scored.')).not.toBeInTheDocument()
     expect(
-      screen.getAllByRole('link', { name: 'Continue' }).map((link) => link.getAttribute('href')),
+      screen.getAllByRole('link', { name: 'Try Again' }).map((link) => link.getAttribute('href')),
     ).toContain(
       '/practice/paths/general-speaking/lessons/general-speaking-beginner-01-skill-1/record',
     )
@@ -457,7 +414,7 @@ describe('Home curriculum overview', () => {
     const page = readFileSync('src/app/(app)/home/page.tsx', 'utf8')
     const promptServer = readFileSync('src/lib/prompts/server.ts', 'utf8')
 
-    expect(component).toContain('min-w-0 flex-wrap')
+    expect(component).toContain('grid min-w-0')
     expect(component).toContain('break-words')
     expect(component).toContain('text-foreground')
     expect(component).toContain('text-muted')

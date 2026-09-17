@@ -1,7 +1,11 @@
-import { PRACTICE_MODES, type PracticeMode } from '@/lib/practice/contracts'
+import {
+  parsePracticeCategory,
+  practiceModeForCategory,
+  type PracticeCategory,
+} from '@/lib/practice/category'
+import type { PracticeMode } from '@/lib/practice/contracts'
 
 export const MAX_CUSTOM_PROMPT_LENGTH = 1_000
-export const MAX_CUSTOM_CONTEXT_LENGTH = 1_000
 /** Leaves room for the authenticated-encryption envelope and cookie attributes. */
 export const MAX_CUSTOM_HANDOFF_INPUT_BYTES = 2_300
 export const MIN_CUSTOM_TARGET_DURATION_SECONDS = 15
@@ -9,8 +13,8 @@ export const MAX_CUSTOM_TARGET_DURATION_SECONDS = 60
 
 export interface CustomPracticeInput {
   promptText: string
+  category: PracticeCategory
   mode: PracticeMode
-  additionalContext?: string
   targetDurationSeconds: number
 }
 
@@ -32,13 +36,11 @@ export function validateCustomPracticeInput(value: unknown): CustomPracticeInput
     return { ok: false, reason: 'invalid' }
   const record = value as Record<string, unknown>
   const promptText = text(record.promptText, MAX_CUSTOM_PROMPT_LENGTH)
-  const context = text(record.additionalContext ?? '', MAX_CUSTOM_CONTEXT_LENGTH)
-  const mode = record.mode
+  const category = parsePracticeCategory(record.category)
   const targetDurationSeconds = record.targetDurationSeconds
   if (
     !promptText ||
-    context === null ||
-    !PRACTICE_MODES.includes(mode as PracticeMode) ||
+    !category ||
     !Number.isInteger(targetDurationSeconds) ||
     typeof targetDurationSeconds !== 'number' ||
     targetDurationSeconds < MIN_CUSTOM_TARGET_DURATION_SECONDS ||
@@ -47,8 +49,8 @@ export function validateCustomPracticeInput(value: unknown): CustomPracticeInput
     return { ok: false, reason: 'invalid' }
   const input: CustomPracticeInput = {
     promptText,
-    mode: mode as PracticeMode,
-    ...(context ? { additionalContext: context } : {}),
+    category,
+    mode: practiceModeForCategory(category),
     targetDurationSeconds,
   }
   return storageBytes(input) <= MAX_CUSTOM_HANDOFF_INPUT_BYTES

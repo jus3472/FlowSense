@@ -1,6 +1,6 @@
 import type { Route } from 'next'
 import { PATH_SLUGS, type PathSlug } from '@/lib/curriculum/contracts'
-import { curriculumLessonRecordHref } from '@/lib/curriculum/routes'
+import { curriculumLessonRecordHref, curriculumPathHref } from '@/lib/curriculum/routes'
 import { isUuid } from '@/lib/practice/session'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -8,15 +8,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Resolves a fresh-retry route only from the current immutable attempt snapshot. */
-export function attemptRetryHref(input: {
+interface AttemptRetryInput {
   attemptId: string
   lessonId: string | null
   metrics: unknown
-}): Route | null {
-  if (!isUuid(input.attemptId)) return null
-  if (input.lessonId === null) {
-    return `/record?retry=${encodeURIComponent(input.attemptId)}` as Route
-  }
+}
+
+function structuredRetryTarget(input: AttemptRetryInput): {
+  pathSlug: PathSlug
+  lessonSlug: string
+} | null {
   if (!isUuid(input.lessonId) || !isRecord(input.metrics)) return null
 
   const creation = input.metrics.creation
@@ -33,5 +34,22 @@ export function attemptRetryHref(input: {
     return null
   }
 
-  return curriculumLessonRecordHref(pathSlug as PathSlug, lessonSlug, input.attemptId)
+  return { pathSlug: pathSlug as PathSlug, lessonSlug }
+}
+
+export function attemptRetryHref(input: AttemptRetryInput): Route | null {
+  if (!isUuid(input.attemptId)) return null
+  if (input.lessonId === null) {
+    return `/record?retry=${encodeURIComponent(input.attemptId)}` as Route
+  }
+  const target = structuredRetryTarget(input)
+  return target
+    ? curriculumLessonRecordHref(target.pathSlug, target.lessonSlug, input.attemptId)
+    : null
+}
+
+/** Returns the structured Track route only when the stored lesson identity is coherent. */
+export function attemptTrackHref(input: AttemptRetryInput): Route | null {
+  const target = structuredRetryTarget(input)
+  return target ? curriculumPathHref(target.pathSlug) : null
 }

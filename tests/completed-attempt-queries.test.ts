@@ -10,7 +10,7 @@ describe('completed attempt query boundaries', () => {
     const progress = source('src/lib/progress/server.ts')
 
     expect(progress).toContain(
-      "'id, finished_at, prompt_text, retry_of_attempt_id, score, section_scores, practice_mode, prompt_source, rubric_version, status'",
+      "'id, finished_at, prompt_text, retry_of_attempt_id, score, section_scores, practice_mode, prompt_source, rubric_version, status, practice_category:metrics->practice->>category'",
     )
     expect(progress.match(/\.eq\('status', 'done'\)/g)).toHaveLength(1)
     expect(progress).not.toContain('Task B')
@@ -32,6 +32,7 @@ describe('completed attempt query boundaries', () => {
     expect(history).not.toContain('summarizeHistoryScoreCohort')
     expect(history).not.toContain('score.not.is.null')
     expect(history).not.toContain('section_scores.not.is.null')
+    expect(history).toContain('practice_category:metrics->practice->>category')
   })
 
   it('does not hide an explicitly opened owned result behind completion status', () => {

@@ -10,9 +10,17 @@ import {
 } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { ModalLayer } from '@/components/ui/modal-layer'
 import { deleteAttempt } from '@/lib/results/api'
+import { cn } from '@/lib/utils'
 
-export function DeleteResponseControl({ attemptId }: { attemptId: string }) {
+export function DeleteResponseControl({
+  attemptId,
+  fullWidth = false,
+}: {
+  attemptId: string
+  fullWidth?: boolean
+}) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -20,6 +28,7 @@ export function DeleteResponseControl({ attemptId }: { attemptId: string }) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const cancelRef = useRef<HTMLButtonElement>(null)
   const deleteRef = useRef<HTMLButtonElement>(null)
+  const deletingRef = useRef(false)
 
   const close = useCallback(() => {
     if (busy) return
@@ -30,7 +39,10 @@ export function DeleteResponseControl({ attemptId }: { attemptId: string }) {
   useEffect(() => {
     if (!open) return
     cancelRef.current?.focus()
+  }, [open])
 
+  useEffect(() => {
+    if (!open) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || busy) return
       event.preventDefault()
@@ -40,11 +52,21 @@ export function DeleteResponseControl({ attemptId }: { attemptId: string }) {
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [busy, close, open])
 
+  useEffect(() => {
+    if (open && error && !busy) deleteRef.current?.focus()
+  }, [busy, error, open])
+
   const trapFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'Tab') return
     const cancel = cancelRef.current
     const remove = deleteRef.current
     if (!cancel || !remove) return
+
+    if (busy) {
+      event.preventDefault()
+      cancel.focus()
+      return
+    }
 
     if (event.shiftKey && document.activeElement === cancel) {
       event.preventDefault()
@@ -56,7 +78,8 @@ export function DeleteResponseControl({ attemptId }: { attemptId: string }) {
   }
 
   const remove = async () => {
-    if (busy) return
+    if (deletingRef.current) return
+    deletingRef.current = true
     setBusy(true)
     setError(null)
     try {
@@ -65,15 +88,18 @@ export function DeleteResponseControl({ attemptId }: { attemptId: string }) {
       router.refresh()
     } catch (thrown) {
       setError(thrown instanceof Error ? thrown.message : 'The response could not be deleted.')
+      deletingRef.current = false
       setBusy(false)
     }
   }
 
   return (
-    <div className="flex flex-col items-start gap-2">
+    <div className={cn('flex flex-col items-start gap-2', fullWidth && 'w-full')}>
       <Button
         ref={triggerRef}
-        variant="ghost"
+        variant={fullWidth ? 'secondary' : 'ghost'}
+        size={fullWidth ? 'lg' : 'md'}
+        fullWidth={fullWidth}
         className="text-negative"
         onClick={() => {
           setError(null)
@@ -90,7 +116,7 @@ export function DeleteResponseControl({ attemptId }: { attemptId: string }) {
       ) : null}
 
       {open ? (
-        <div className="bg-foreground/20 fixed inset-0 z-50 flex items-center justify-center p-4">
+        <ModalLayer>
           <Card
             role="alertdialog"
             aria-modal="true"
@@ -138,7 +164,7 @@ export function DeleteResponseControl({ attemptId }: { attemptId: string }) {
               </Button>
             </div>
           </Card>
-        </div>
+        </ModalLayer>
       ) : null}
     </div>
   )

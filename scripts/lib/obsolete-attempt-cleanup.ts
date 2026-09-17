@@ -401,7 +401,7 @@ export async function buildCleanupPlan(
   terminalAttemptIds: readonly string[] = [],
 ): Promise<CleanupPlan> {
   const rows = await loadMaintenanceAttempts(client)
-  if ((generations.length > 0) === (terminalAttemptIds.length > 0)) {
+  if (generations.length > 0 === terminalAttemptIds.length > 0) {
     throw new Error('A cleanup plan requires exactly one selector.')
   }
   const attempts =

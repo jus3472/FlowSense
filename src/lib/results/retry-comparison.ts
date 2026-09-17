@@ -1,9 +1,5 @@
 import { v3MetricIds, v3MetricResult } from '@/lib/results/v3'
-import {
-  V3_METRIC_LABELS,
-  type V3MetricId,
-  type V3ScorePayload,
-} from '@/lib/scoring/v3/contracts'
+import { V3_METRIC_LABELS, type V3MetricId, type V3ScorePayload } from '@/lib/scoring/v3/contracts'
 
 /** A display hint only. It never suppresses numeric stored-result evidence. */
 export const RETRY_COMPARISON_NOISE_POINTS = 2

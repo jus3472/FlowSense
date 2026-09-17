@@ -67,7 +67,7 @@ export function PromptFilters({ mode, difficulty, collectionId, collections }: P
             {collectionId ? (
               <Link
                 href={practiceBrowseHref(mode, { difficulty })}
-                className="text-accent min-h-11 py-3 text-sm font-medium hover:underline"
+                className="text-accent-ink min-h-11 py-3 text-sm font-medium hover:underline"
               >
                 Clear collection
               </Link>

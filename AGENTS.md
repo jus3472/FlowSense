@@ -34,7 +34,7 @@ Read [README.md](README.md) and [PROJECT.md](PROJECT.md) before making product o
 ## Interface and Copy
 
 - Use semantic tokens from `src/app/globals.css`, never component hex values or Tailwind color-scale classes. Follow the existing spacing scale and responsive constraints.
-- Maintain the minimal single-column FlowSense interface. The score bar is a literal proportion of 100, not a gauge. Amber transcript marks mean a deduction, never a generic warning.
+- Maintain the minimal single-column FlowSense interface. The score bar is a literal proportion of 100, not a gauge. Amber transcript marks identify localized issues, including issues that do not reduce displayed points. Never highlight positive evidence or whole-response omissions.
 - User-facing copy uses short, second-person, present-tense statements. Do not use em dashes, exclamation marks, generic praise, scolding, or prohibited product terminology. Recommendation positives must remain grounded in the strongest scored metric.
 - Do not add comparisons, benchmarks, professional-only assumptions, or features that turn the product into vocabulary training, an accent judgment, or a free-form rewriting tool.
 

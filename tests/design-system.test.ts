@@ -102,11 +102,7 @@ describe('design system', () => {
 })
 
 describe('server only keys', () => {
-  const SECRETS = [
-    'SUPABASE_SECRET_KEY',
-    'DEEPGRAM_API_KEY',
-    'DEEPSEEK_API_KEY',
-  ]
+  const SECRETS = ['SUPABASE_SECRET_KEY', 'DEEPGRAM_API_KEY', 'DEEPSEEK_API_KEY']
   const SERVER_ONLY_CONFIGURATION = [...SECRETS]
 
   it('reads the secrets in exactly one module', () => {

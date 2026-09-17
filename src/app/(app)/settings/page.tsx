@@ -15,6 +15,17 @@ export const metadata: Metadata = {
   title: 'Settings',
 }
 
+function AccountIdentity({ email }: { email: string | undefined }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <p className="text-foreground text-sm font-medium">Email</p>
+      <p className="text-muted text-sm break-all">
+        {email ?? 'No email is available for this account.'}
+      </p>
+    </div>
+  )
+}
+
 export default async function SettingsPage({
   searchParams,
 }: {
@@ -36,6 +47,7 @@ export default async function SettingsPage({
     return (
       <PageShell width="column">
         <PageTitle>Settings</PageTitle>
+        <AccountIdentity email={user.email} />
         <ErrorState
           title="Your settings did not load"
           description="The connection to your account failed. Your saved settings are unchanged."
@@ -51,36 +63,37 @@ export default async function SettingsPage({
     <PageShell width="column">
       <PageTitle>Settings</PageTitle>
 
-      <Card className="flex flex-col gap-6 sm:p-8">
+      <Card
+        role="region"
+        aria-labelledby="profile-account-heading"
+        className="flex flex-col gap-6 sm:p-8"
+      >
         <div className="flex flex-col gap-1">
-          <h2 className="prompt-display text-foreground text-xl">Profile</h2>
-          <p className="text-muted text-sm">Update how your name appears in FlowSense.</p>
+          <h2 id="profile-account-heading" className="prompt-display text-foreground text-xl">
+            Profile &amp; account
+          </h2>
+          <p className="text-muted text-sm">Manage your profile and sign-in.</p>
         </div>
+        <AccountIdentity email={user.email} />
         <SettingsForm displayName={profile.data.displayName} />
+        <div className="border-border border-t pt-6">
+          <LogoutForm failed={query.logout === 'failed'} />
+        </div>
       </Card>
 
-      <section
-        aria-labelledby="account-heading"
-        className="border-border flex flex-col gap-4 border-t pt-8"
-      >
-        <h2 id="account-heading" className="text-foreground text-lg font-medium">
-          Account
-        </h2>
-        <LogoutForm failed={query.logout === 'failed'} />
-      </section>
-
-      <section
+      <Card
+        role="region"
         aria-labelledby="data-account-heading"
-        className="border-border flex flex-col gap-6 border-t pt-8"
+        className="flex flex-col gap-6 sm:p-8"
       >
         <div className="flex flex-col gap-1">
-          <h2 id="data-account-heading" className="text-foreground text-lg font-medium">
-            Data &amp; account
+          <h2 id="data-account-heading" className="prompt-display text-foreground text-xl">
+            Data &amp; privacy
           </h2>
           <p className="text-muted text-sm">Manage your practice history or your account.</p>
         </div>
         <DataAndAccountActions />
-      </section>
+      </Card>
     </PageShell>
   )
 }

@@ -63,7 +63,7 @@ describe('AppHeader', () => {
     )
 
     expect(
-      screen.getByRole('img', { name: "3 day streak. Today's practice complete." }),
+      screen.getByRole('button', { name: "3 day streak. Today's practice complete." }),
     ).toHaveTextContent('3')
   })
 })

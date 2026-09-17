@@ -18,7 +18,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/actions/auth', () => ({ logOut: vi.fn() }))
 vi.mock('@/actions/account', () => ({ deleteAccount: vi.fn(), resetProgress: vi.fn() }))
 vi.mock('@/actions/profile', () => ({ updateProfile: vi.fn() }))
-vi.mock('@/actions/onboarding', () => ({ saveFocusAreas: vi.fn() }))
+vi.mock('@/actions/onboarding', () => ({ completeOnboarding: vi.fn() }))
 
 import SettingsPage from '@/app/(app)/settings/page'
 import FocusPage from '@/app/onboarding/focus/page'
@@ -101,7 +101,10 @@ function client(options: ClientOptions) {
   )
   return {
     auth: {
-      getUser: vi.fn(async () => ({ data: { user: { id: USER_ID } }, error: null })),
+      getUser: vi.fn(async () => ({
+        data: { user: { id: USER_ID, email: 'signed-in@example.com' } },
+        error: null,
+      })),
     },
     from: vi.fn((table: string) => {
       if (table === 'profiles') return profileQuery
@@ -117,11 +120,6 @@ async function renderSettings(options: ClientOptions) {
   mocks.createClient.mockResolvedValue(setup)
   render(await SettingsPage({ searchParams: Promise.resolve({}) }))
   return setup
-}
-
-async function renderFocus(options: ClientOptions) {
-  mocks.createClient.mockResolvedValue(client(options))
-  render(await FocusPage({ searchParams: Promise.resolve({}) }))
 }
 
 beforeEach(() => {
@@ -143,28 +141,12 @@ describe('preference page load failures', () => {
     })
 
     expect(screen.getByRole('heading', { name: 'Your settings did not load' })).toBeInTheDocument()
+    expect(screen.getByText('signed-in@example.com')).toBeInTheDocument()
     expect(screen.queryByLabelText('Display name')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(mocks.refresh).toHaveBeenCalledTimes(1)
     expect(logging).toHaveBeenCalledWith('[profiles] preference load failed', {
       operation: 'settings',
-      reason: 'query_error',
-      code: 'PGRST500',
-    })
-    expect(JSON.stringify(logging.mock.calls)).not.toContain(PRIVATE_ERROR_TEXT)
-  })
-
-  it('keeps onboarding unavailable after a path preference query failure', async () => {
-    const logging = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    await renderFocus({
-      profile: { data: null, error: null },
-      preferences: { data: null, error: { code: 'PGRST500', message: PRIVATE_ERROR_TEXT } },
-    })
-
-    expect(screen.getByRole('heading', { name: 'Your paths did not load' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument()
-    expect(logging).toHaveBeenCalledWith('[paths] preference operation failed', {
-      operation: 'onboarding',
       reason: 'query_error',
       code: 'PGRST500',
     })
@@ -183,19 +165,22 @@ describe('preference page load failures', () => {
   })
 })
 
-describe('path preference forms', () => {
-  it('uses General Speaking as the safe required default with no skip action', async () => {
-    await renderFocus({
-      profile: { data: null, error: null },
-      preferences: { data: [], error: null },
-    })
+describe('onboarding track introduction', () => {
+  it('shows all four tracks without asking for a primary track', async () => {
+    const setup = client({ profile: { data: null, error: null } })
+    mocks.createClient.mockResolvedValue(setup)
+    render(await FocusPage({ searchParams: Promise.resolve({}) }))
 
-    expect(
-      screen.getByRole('heading', { name: 'What do you want to get better at?' }),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('radio', { name: 'General Speaking' })).toBeChecked()
-    expect(screen.queryByRole('button', { name: 'Skip for now' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Practice across four tracks' })).toBeInTheDocument()
+    const list = screen.getByRole('list', { name: 'Available tracks' })
+    for (const name of ['General Speaking', 'Interviews', 'Presentations', 'Conversations']) {
+      expect(list).toHaveTextContent(name)
+    }
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.queryByText('Primary track')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Go to Home' })).toBeInTheDocument()
+    expect(setup.from).not.toHaveBeenCalled()
   })
 
   it('renders only the remaining profile fields in Settings', async () => {
@@ -220,17 +205,19 @@ describe('path preference forms', () => {
     expect(screen.queryByText('Additional paths')).not.toBeInTheDocument()
     expect(screen.queryByText('Primary', { exact: true })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument()
-  })
-
-  it('lets the user change the primary and add another path without changing availability', async () => {
-    await renderFocus({ profile: { data: null, error: null } })
-
-    fireEvent.click(screen.getByRole('radio', { name: 'Interviews' }))
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Presentations' }))
-
-    expect(screen.getByRole('radio', { name: 'Interviews' })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: 'Presentations' })).toBeChecked()
-    expect(screen.getByRole('radio', { name: 'Conversations' })).toBeEnabled()
+    expect(screen.getByRole('region', { name: 'Profile & account' })).toContainElement(
+      screen.getByText('signed-in@example.com'),
+    )
+    expect(screen.getByRole('region', { name: 'Profile & account' })).toContainElement(
+      screen.getByRole('button', { name: 'Log out' }),
+    )
+    expect(screen.getByRole('region', { name: 'Data & privacy' })).toContainElement(
+      screen.getByRole('button', { name: 'Reset progress' }),
+    )
+    expect(screen.getByRole('region', { name: 'Data & privacy' })).toContainElement(
+      screen.getByRole('button', { name: 'Delete account' }),
+    )
+    expect(screen.queryByRole('textbox', { name: 'Email' })).not.toBeInTheDocument()
   })
 
   it('loads null pre-v2 profile fields with UTC fallback', async () => {

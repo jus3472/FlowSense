@@ -32,11 +32,21 @@ interface FakeAttempt {
   failure_code: string | null
   lesson_id: string | null
   lesson: unknown
+  metrics?: Json | null
 }
 
 interface Operation {
   method: string
   args: unknown[]
+}
+
+function categoryValue(row: FakeAttempt): unknown {
+  const metrics = row.metrics
+  if (!metrics || typeof metrics !== 'object' || Array.isArray(metrics)) return null
+  const practice = metrics.practice
+  return practice && typeof practice === 'object' && !Array.isArray(practice)
+    ? practice.category
+    : null
 }
 
 function attempt(index: number, over: Partial<FakeAttempt> = {}): FakeAttempt {
@@ -138,7 +148,11 @@ class FakeQuery implements PromiseLike<{ data: FakeAttempt[] | null; error: unkn
     for (const operation of this.operations) {
       const [column, value] = operation.args
       if (operation.method === 'eq')
-        output = output.filter((row) => row[column as keyof FakeAttempt] === value)
+        output = output.filter((row) =>
+          column === 'metrics->practice->>category'
+            ? categoryValue(row) === value
+            : row[column as keyof FakeAttempt] === value,
+        )
       if (operation.method === 'not' && column === 'score')
         output = output.filter((row) => row.score !== null)
       if (operation.method === 'not' && column === 'retry_of_attempt_id')
@@ -149,9 +163,16 @@ class FakeQuery implements PromiseLike<{ data: FakeAttempt[] | null; error: unkn
         )
       if (operation.method === 'or' && value === undefined) {
         const filters = String(column)
-        if (filters.includes('practice_mode'))
+        if (filters === 'practice_mode.eq.practice,practice_mode.is.null')
           output = output.filter(
             (row) => row.practice_mode === 'practice' || row.practice_mode === null,
+          )
+        if (filters.includes('metrics->practice->>category'))
+          output = output.filter(
+            (row) =>
+              row.practice_mode === null ||
+              row.prompt_source !== 'custom' ||
+              categoryValue(row) !== 'other',
           )
       }
       if (operation.method === 'gte' && column === 'score')
@@ -171,7 +192,8 @@ class FakeQuery implements PromiseLike<{ data: FakeAttempt[] | null; error: unkn
     if (range) output = output.slice(Number(range.args[0]), Number(range.args[1]) + 1)
     const limit = this.operations.find((operation) => operation.method === 'limit')
     if (limit) output = output.slice(0, Number(limit.args[0]))
-    return Promise.resolve({ data: output, error: null }).then(onfulfilled, onrejected)
+    const data = output.map((row) => ({ ...row, practice_category: categoryValue(row) }))
+    return Promise.resolve({ data, error: null }).then(onfulfilled, onrejected)
   }
 }
 
@@ -188,6 +210,45 @@ function fakeSupabase(rows: FakeAttempt[], failSelect: (select: string) => boole
 }
 
 describe('history server loading', () => {
+  it('filters matching custom categories before pagination and preserves legacy modes', async () => {
+    const rows = [
+      attempt(1, { prompt_source: 'custom', metrics: { practice: { category: 'other' } } }),
+      attempt(2, { prompt_source: 'custom' }),
+      attempt(3),
+      attempt(4, {
+        practice_mode: 'interview',
+        prompt_source: 'custom',
+        metrics: { practice: { category: 'interview' } },
+      }),
+      attempt(5, { practice_mode: 'interview' }),
+      attempt(6, { practice_mode: null, prompt_source: null }),
+      attempt(7, {
+        practice_mode: 'interview',
+        prompt_source: 'custom',
+        metrics: { practice: { category: 'other' } },
+      }),
+      ...Array.from({ length: 25 }, (_, index) =>
+        attempt(index + 10, { practice_mode: 'conversation' }),
+      ),
+    ]
+    for (const [metadata, ids] of [
+      ['other', ['attempt-001']],
+      ['custom', ['attempt-007', 'attempt-004', 'attempt-002', 'attempt-001']],
+      ['general', ['attempt-006', 'attempt-003', 'attempt-002']],
+      ['interview', ['attempt-007', 'attempt-005', 'attempt-004']],
+    ] as const) {
+      const result = await loadHistoryPage(fakeSupabase(rows).client, 'user-1', {
+        metadata,
+        page: 1,
+      })
+      expect(result.status).toBe('ready')
+      if (result.status !== 'ready') throw new Error('Expected ready history')
+      expect(result.data.entries.map((entry) => entry.id)).toEqual(ids)
+      if (metadata === 'other') expect(result.data.entries[0]?.category).toBe('other')
+      expect(result.data.hasNext).toBe(false)
+    }
+  })
+
   it('keeps diagnostics bounded to a safe code and never logs database messages', () => {
     expect(safeHistoryErrorCode({ code: 'PGRST500', message: 'private database text' })).toBe(
       'PGRST500',

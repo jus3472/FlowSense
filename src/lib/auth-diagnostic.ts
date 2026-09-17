@@ -1,4 +1,4 @@
-export type AuthOperation = 'sign_out' | 'logout_cleanup'
+export type AuthOperation = 'sign_out' | 'logout_cleanup' | 'oauth_callback' | 'oauth_cleanup'
 
 export interface AuthDiagnostic {
   operation: AuthOperation

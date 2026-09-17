@@ -3,15 +3,57 @@ import type { PracticeMode } from '@/lib/practice/contracts'
 const V2_WEIGHTS: Record<PracticeMode, Record<string, number>> = {
   practice: { fluency: 22, clarity: 20, vocabulary: 12, grammar: 12, structure: 18, delivery: 16 },
   interview: { fluency: 18, clarity: 22, vocabulary: 14, grammar: 12, structure: 22, delivery: 12 },
-  presentation: { fluency: 16, clarity: 20, vocabulary: 14, grammar: 10, structure: 20, delivery: 20 },
-  conversation: { fluency: 24, clarity: 22, vocabulary: 12, grammar: 12, structure: 14, delivery: 16 },
+  presentation: {
+    fluency: 16,
+    clarity: 20,
+    vocabulary: 14,
+    grammar: 10,
+    structure: 20,
+    delivery: 20,
+  },
+  conversation: {
+    fluency: 24,
+    clarity: 22,
+    vocabulary: 12,
+    grammar: 12,
+    structure: 14,
+    delivery: 16,
+  },
 }
 
 const WHAT_WEIGHTS: Record<PracticeMode, Record<string, number>> = {
-  practice: { answered_prompt: 10, specificity: 9, structure: 9, conciseness: 8, word_choice: 7, grammar: 7 },
-  interview: { answered_prompt: 12, specificity: 11, structure: 10, conciseness: 6, word_choice: 6, grammar: 5 },
-  presentation: { answered_prompt: 9, specificity: 9, structure: 12, conciseness: 7, word_choice: 7, grammar: 6 },
-  conversation: { answered_prompt: 9, specificity: 8, structure: 7, conciseness: 10, word_choice: 8, grammar: 8 },
+  practice: {
+    answered_prompt: 10,
+    specificity: 9,
+    structure: 9,
+    conciseness: 8,
+    word_choice: 7,
+    grammar: 7,
+  },
+  interview: {
+    answered_prompt: 12,
+    specificity: 11,
+    structure: 10,
+    conciseness: 6,
+    word_choice: 6,
+    grammar: 5,
+  },
+  presentation: {
+    answered_prompt: 9,
+    specificity: 9,
+    structure: 12,
+    conciseness: 7,
+    word_choice: 7,
+    grammar: 6,
+  },
+  conversation: {
+    answered_prompt: 9,
+    specificity: 8,
+    structure: 7,
+    conciseness: 10,
+    word_choice: 8,
+    grammar: 8,
+  },
 }
 
 const SOUNDED_WEIGHTS: Record<PracticeMode, Record<string, number>> = {
@@ -34,45 +76,53 @@ export const legacySectionSnapshot = {
   },
 }
 
-export function obsoleteV2Snapshot(options: {
-  mode?: PracticeMode
-  component?: number
-  notCheckedCategory?: string
-} = {}) {
+export function obsoleteV2Snapshot(
+  options: {
+    mode?: PracticeMode
+    component?: number
+    notCheckedCategory?: string
+  } = {},
+) {
   const mode = options.mode ?? 'practice'
   const component = options.component ?? 0.8
-  const categories = Object.fromEntries(Object.entries(V2_WEIGHTS[mode]).map(([category, max]) => [
-    category,
-    category === options.notCheckedCategory ? {
+  const categories = Object.fromEntries(
+    Object.entries(V2_WEIGHTS[mode]).map(([category, max]) => [
       category,
-      availability: 'available',
-      status: 'not_checked',
-      component: null,
-      earned_points: null,
-      max_points: max,
-      measurements: {},
-      evidence: [],
-      deductions: [],
-      warnings: ['Not checked.'],
-    } : {
-      category,
-      availability: 'available',
-      status: 'scored',
-      component,
-      earned_points: Math.round(component * max),
-      max_points: max,
-      measurements: {},
-      evidence: [],
-      deductions: [],
-      warnings: [],
-    },
-  ]))
+      category === options.notCheckedCategory
+        ? {
+            category,
+            availability: 'available',
+            status: 'not_checked',
+            component: null,
+            earned_points: null,
+            max_points: max,
+            measurements: {},
+            evidence: [],
+            deductions: [],
+            warnings: ['Not checked.'],
+          }
+        : {
+            category,
+            availability: 'available',
+            status: 'scored',
+            component,
+            earned_points: Math.round(component * max),
+            max_points: max,
+            measurements: {},
+            evidence: [],
+            deductions: [],
+            warnings: [],
+          },
+    ]),
+  )
   const complete = Object.values(categories).every((item) => item.status === 'scored')
   return {
     version: 'v2.score.1',
     rubric_version: 'v2',
     mode,
-    total_earned_points: complete ? Object.values(categories).reduce((sum, item) => sum + (item.earned_points ?? 0), 0) : null,
+    total_earned_points: complete
+      ? Object.values(categories).reduce((sum, item) => sum + (item.earned_points ?? 0), 0)
+      : null,
     total_max_points: 100,
     categories,
     warnings: [],
@@ -97,8 +147,12 @@ function metric(metricId: string, maxPoints: number, component: number) {
 export function obsoleteV3Snapshot(options: { mode?: PracticeMode; component?: number } = {}) {
   const mode = options.mode ?? 'practice'
   const component = options.component ?? 0.8
-  const whatMetrics = Object.fromEntries(Object.entries(WHAT_WEIGHTS[mode]).map(([id, max]) => [id, metric(id, max, component)]))
-  const soundedMetrics = Object.fromEntries(Object.entries(SOUNDED_WEIGHTS[mode]).map(([id, max]) => [id, metric(id, max, component)]))
+  const whatMetrics = Object.fromEntries(
+    Object.entries(WHAT_WEIGHTS[mode]).map(([id, max]) => [id, metric(id, max, component)]),
+  )
+  const soundedMetrics = Object.fromEntries(
+    Object.entries(SOUNDED_WEIGHTS[mode]).map(([id, max]) => [id, metric(id, max, component)]),
+  )
   const section = (sectionId: string, metrics: Record<string, ReturnType<typeof metric>>) => ({
     section: sectionId,
     status: 'scored',

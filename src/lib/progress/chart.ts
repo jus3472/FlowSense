@@ -53,3 +53,19 @@ export function progressChartPath(coordinates: readonly ProgressChartCoordinate[
     .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
     .join(' ')
 }
+
+/** Keeps expanded point values readable without turning longer histories into a wall of labels. */
+export function progressChartLabelIndexes(
+  pointCount: number,
+  maximumLabels = 6,
+): readonly number[] {
+  if (!Number.isInteger(pointCount) || pointCount <= 0 || maximumLabels <= 0) return []
+  if (maximumLabels === 1) return [pointCount - 1]
+  if (pointCount <= maximumLabels) return Array.from({ length: pointCount }, (_, index) => index)
+
+  const indexes = new Set<number>()
+  for (let slot = 0; slot < maximumLabels; slot += 1) {
+    indexes.add(Math.round((slot / (maximumLabels - 1)) * (pointCount - 1)))
+  }
+  return [...indexes].sort((left, right) => left - right)
+}

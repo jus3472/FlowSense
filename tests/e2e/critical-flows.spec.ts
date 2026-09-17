@@ -38,7 +38,7 @@ interface E2EAttempt {
     }
   } | null
   metrics: {
-    practice: { target_duration_seconds: number; additional_context?: string }
+    practice: { target_duration_seconds: number; additional_context?: string; category?: string }
     upload: { storage_path: string; mime_type: string }
   }
 }
@@ -74,6 +74,10 @@ interface E2ECurriculumSeed {
   pathSlug: string
   passedLessons: number
   score?: number
+}
+
+function homeTrackCard(page: Page, title: string) {
+  return page.getByRole('article', { name: title })
 }
 
 async function blockExternalNetwork(page: Page) {
@@ -232,9 +236,18 @@ async function recordOne(page: Page) {
 test.beforeEach(async ({ page, request }) => {
   await reset(request)
   await blockExternalNetwork(page)
+  // Live captions are best effort. Keep browser tests fully local and exercise
+  // the same graceful fallback used when a temporary Deepgram token is unavailable.
+  await page.route('**/api/transcribe/live-token', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'Live transcription is unavailable.' }),
+    })
+  })
 })
 
-test('new user chooses an ordered primary and secondary path during onboarding', async ({
+test('new user learns about all tracks and completes onboarding without a primary track', async ({
   page,
   request,
   context,
@@ -249,29 +262,29 @@ test('new user chooses an ordered primary and secondary path during onboarding',
   const allow = page.getByRole('button', { name: 'Allow microphone access' })
   if (await allow.isVisible()) await allow.click()
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
-  await expect(
-    page.getByRole('heading', { name: 'What do you want to get better at?' }),
-  ).toBeVisible()
-  await expect(page.getByRole('radio', { name: 'General Speaking' })).toBeChecked()
-  await page.getByRole('group', { name: 'Primary track' }).getByText('Interviews').click()
-  await page.getByRole('group', { name: 'Additional paths' }).getByText('Presentations').click()
-  await page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Practice across four tracks' })).toBeVisible()
+  const tracks = page.getByRole('list', { name: 'Available tracks' })
+  for (const title of ['General Speaking', 'Interviews', 'Presentations', 'Conversations']) {
+    await expect(tracks.getByText(title, { exact: true })).toBeVisible()
+  }
+  await expect(page.getByRole('radio')).toHaveCount(0)
+  await expect(page.getByRole('checkbox')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Go to Home' }).click()
   await expect(page).toHaveURL(/\/home$/)
   await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'View Interviews track' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'View Presentations track' })).toBeVisible()
+  await expect(
+    homeTrackCard(page, 'Interviews').getByRole('link', { name: 'View Lessons' }),
+  ).toBeVisible()
+  await expect(
+    homeTrackCard(page, 'Presentations').getByRole('link', { name: 'View Lessons' }),
+  ).toBeVisible()
 
   const state = await currentState(request)
   expect(state.pathPreferences).toEqual([
     {
       user_id: '00000000-0000-4000-8000-000000000001',
-      path_id: '30000000-0000-4000-8000-000000000002',
+      path_id: '30000000-0000-4000-8000-000000000001',
       rank: 0,
-    },
-    {
-      user_id: '00000000-0000-4000-8000-000000000001',
-      path_id: '30000000-0000-4000-8000-000000000003',
-      rank: 1,
     },
   ])
   expect(state.profile.timezone).not.toBeNull()
@@ -305,9 +318,15 @@ test('selects library and custom prompts through real screens', async ({ page })
   await expect(page.getByText('Tell me about a time you solved a difficult problem.')).toBeVisible()
   await expect(page.getByText('One prompt, 60 seconds')).toHaveCount(0)
   await page.goto('/practice/custom')
+  await page.getByRole('button', { name: 'Explain a complex idea to a beginner.' }).click()
+  await expect(page.getByLabel('Prompt or question')).toHaveValue(
+    'Explain a complex idea to a beginner.',
+  )
+  await expect(page.getByLabel('Prompt or question')).toBeFocused()
+  await expect(page.getByLabel('Planned response length')).toBeVisible()
   await page.getByLabel('Prompt or question').fill('Explain a choice you made today.')
-  await page.getByLabel('Practice mode').selectOption('conversation')
-  await page.getByLabel(/Additional context/).fill('Keep the answer private and concise.')
+  await page.getByLabel('Category', { exact: true }).selectOption('conversation')
+  await expect(page.getByLabel(/Additional context/)).toHaveCount(0)
   await page.getByRole('button', { name: 'Continue to record' }).click()
   await expect(page).toHaveURL(/\/record\?custom=1/)
   await expect(page.getByText('Explain a choice you made today.')).toBeVisible()
@@ -316,10 +335,63 @@ test('selects library and custom prompts through real screens', async ({ page })
   await page.goto('/practice')
   await expect(page).toHaveURL(/\/home$/)
   await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible()
-  await page.getByRole('link', { name: 'Start' }).first().click()
+  await page.getByRole('link', { name: 'Start Lesson' }).first().click()
   await expect(page).toHaveURL(/\/practice\/paths\/.*\/record$/)
   await expect(page.getByText('Give a clear response for beginner lesson 1.')).toBeVisible()
   await expect(page.getByText('One prompt, 60 seconds')).toHaveCount(0)
+})
+
+test('Other custom responses persist their category without curriculum progression', async ({
+  page,
+  request,
+}) => {
+  await processingMocks(page)
+  await logIn(page)
+  await page.goto('/practice/custom')
+  await page.getByRole('button', { name: 'Explain a complex idea to a beginner.' }).click()
+  await page.getByLabel('Category', { exact: true }).selectOption('other')
+  await page.getByRole('button', { name: 'Continue to record' }).click()
+  await recordOne(page)
+  const state = await currentState(request)
+  const attempt = attemptAt(state, 0)
+  expect(attempt).toMatchObject({
+    prompt_source: 'custom',
+    practice_mode: 'practice',
+    lesson_id: null,
+  })
+  expect(attempt.metrics.practice.category).toBe('other')
+  expect(attempt.metrics.practice.additional_context).toBeUndefined()
+  expect(state.lessonProgress).toHaveLength(0)
+  await page.getByRole('link', { name: 'Try Again' }).click()
+  await expect(page).toHaveURL(`${APP}/record?retry=${attempt.id}`)
+  await expect(page.getByText('Explain a complex idea to a beginner.')).toBeVisible()
+})
+
+test('wrong-password login preserves email and logout returns to the public landing page', async ({
+  page,
+}) => {
+  await page.goto('/login?mode=login')
+  await page.getByLabel('Email').fill('speaker@example.test')
+  await page.getByLabel('Password').fill('wrong-test-password')
+  await page.locator('form').getByRole('button', { name: 'Log in' }).click()
+  await expect(page.locator('form').getByRole('alert')).toContainText(
+    'Your email or password is not correct.',
+  )
+  await expect(page.getByLabel('Email')).toHaveValue('speaker@example.test')
+  await expect(page.getByLabel('Password')).toBeFocused()
+  await page.getByLabel('Password').fill('safe-test-password')
+  await page.locator('form').getByRole('button', { name: 'Log in' }).click()
+  await expect(page).toHaveURL(`${APP}/home`)
+  await page.goto('/settings')
+  const account = page.getByRole('region', { name: 'Profile & account' })
+  await expect(account.getByText('speaker@example.test', { exact: true })).toBeVisible()
+  await account.getByRole('button', { name: 'Log out' }).click()
+  await expect(page).toHaveURL(`${APP}/`)
+  await expect(page.getByRole('heading', { name: 'Home', exact: true })).toHaveCount(0)
+  await page.goBack()
+  await expect(page).not.toHaveURL(/\/(home|settings)$/)
+  await page.goto('/home')
+  await expect(page).toHaveURL(`${APP}/login`)
 })
 
 test('keeps direct standalone practice routes valid without rediscovering them', async ({
@@ -339,7 +411,30 @@ test('keeps direct standalone practice routes valid without rediscovering them',
   }
 })
 
-test('opens path overviews from track cards', async ({ page }) => {
+test('Google initiation uses PKCE and a same-origin callback without an unsafe return URL', async ({
+  page,
+}) => {
+  await page.goto('/login?mode=login')
+  await page.route('**/auth/v1/authorize?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: '<p>Local OAuth handoff fixture</p>',
+    })
+  })
+  const authorization = page.waitForRequest('**/auth/v1/authorize?**')
+  await page.getByRole('button', { name: 'Continue with Google' }).click()
+  const url = new URL((await authorization).url())
+  expect(url.searchParams.get('provider')).toBe('google')
+  expect(url.searchParams.get('redirect_to')).toBe(`${APP}/auth/callback`)
+  expect(url.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]+$/)
+  expect(url.searchParams.get('code_challenge_method')?.toLowerCase()).toBe('s256')
+  await page.goto(`${APP}/auth/callback?next=https://example.invalid`)
+  await expect(page).toHaveURL(`${APP}/login?mode=login&oauth=failed`)
+  await expect(page.getByText('Google sign-in did not finish. Try again.')).toBeVisible()
+})
+
+test('uses explicit practice and lesson-list actions on track cards', async ({ page }) => {
   await logIn(page)
 
   const tracks = [
@@ -358,7 +453,10 @@ test('opens path overviews from track cards', async ({ page }) => {
     await page.setViewportSize(viewport)
     await page.goto('/home')
     for (const [title] of tracks) {
-      await expect(page.getByRole('link', { name: `View ${title} track` })).toBeVisible()
+      const card = homeTrackCard(page, title)
+      await expect(page.getByRole('link', { name: `View ${title} track` })).toHaveCount(0)
+      await expect(card.getByRole('link', { name: 'Start Lesson' })).toBeVisible()
+      await expect(card.getByRole('link', { name: 'View Lessons' })).toBeVisible()
     }
     expect(
       await page.evaluate(
@@ -369,8 +467,7 @@ test('opens path overviews from track cards', async ({ page }) => {
 
   await page.goto('/home')
   for (const [title, slug] of tracks) {
-    const cardLink = page.getByRole('link', { name: `View ${title} track` })
-    const action = cardLink.locator('..').getByRole('link', { name: 'Start' })
+    const action = homeTrackCard(page, title).getByRole('link', { name: 'Start Lesson' })
     await expect(action).toHaveAttribute(
       'href',
       `/practice/paths/${slug}/lessons/${slug}-beginner-01-skill-1/record`,
@@ -378,17 +475,13 @@ test('opens path overviews from track cards', async ({ page }) => {
   }
   expect(await page.locator('a a').count()).toBe(0)
 
-  await page
-    .getByRole('link', { name: 'View General Speaking track' })
-    .locator('..')
-    .getByRole('link', { name: 'Start' })
-    .click()
+  await homeTrackCard(page, 'General Speaking').getByRole('link', { name: 'Start Lesson' }).click()
   await expect(page).toHaveURL(
     /\/practice\/paths\/general-speaking\/lessons\/general-speaking-beginner-01-skill-1\/record$/,
   )
   await page.goto('/home')
 
-  const interviews = page.getByRole('link', { name: 'View Interviews track' })
+  const interviews = homeTrackCard(page, 'Interviews').getByRole('link', { name: 'View Lessons' })
   await interviews.focus()
   await expect(interviews).toBeFocused()
   await page.keyboard.press('Enter')
@@ -396,7 +489,7 @@ test('opens path overviews from track cards', async ({ page }) => {
 
   for (const [title, slug] of tracks) {
     await page.goto('/home')
-    await page.getByRole('link', { name: `View ${title} track` }).click()
+    await homeTrackCard(page, title).getByRole('link', { name: 'View Lessons' }).click()
     await expect(page).toHaveURL(new RegExp(`/practice/paths/${slug}$`))
     await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible()
   }
@@ -464,22 +557,21 @@ test('Progress shows current performance histories, exact result links, and ever
   expect(attempts.every((attempt) => attempt.rubric_version === 'v3')).toBe(true)
   expect(attempts.every((attempt) => attempt.section_scores?.version === 'v3.score.2')).toBe(true)
 
-  const filter = page.getByLabel('Show responses')
+  const filter = page.getByRole('combobox', { name: 'Show responses' })
   await expect(filter.getByRole('option')).toHaveText([
     'All',
     'General Speaking',
     'Interviews',
     'Presentations',
     'Conversations',
+    'Custom Prompts',
+    'Other',
   ])
-  expect(
-    await filter
-      .getByRole('option')
-      .evaluateAll((options) => options.map((option) => option.getAttribute('value'))),
-  ).toEqual(['all', 'practice', 'interview', 'presentation', 'conversation'])
 
   const overall = page.getByRole('button', { name: 'View Overall Score response history' })
   await expect(overall).not.toContainText(/responses from oldest to latest/i)
+  await expect(overall.getByText('Average')).toBeVisible()
+  await expect(overall).not.toContainText(/\d+\s*\/\s*100/)
   await expect(overall.getByRole('img')).toHaveAttribute(
     'data-values',
     attempts
@@ -487,12 +579,16 @@ test('Progress shows current performance histories, exact result links, and ever
       .map((attempt) => attempt.score)
       .join(','),
   )
+  await expect(overall.locator('[data-point-label]')).toHaveText(
+    attempts.slice(-10).map((attempt) => `${attempt.score}%`),
+  )
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
 
   await overall.click()
-  const overallHistory = page.getByRole('region', { name: 'Overall Score response history' })
+  const overallHistory = page.getByRole('dialog', { name: 'Overall Score response history' })
+  await expect(overallHistory).toHaveAttribute('aria-modal', 'true')
   const overallLinks = overallHistory.getByRole('link')
   await expect(overallLinks).toHaveCount(attempts.length)
   expect(
@@ -511,7 +607,8 @@ test('Progress shows current performance histories, exact result links, and ever
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
-  await page.getByRole('button', { name: 'Hide Overall Score response history' }).click()
+  await overallHistory.getByRole('button', { name: 'Close' }).click()
+  await expect(overall).toBeFocused()
 
   const contentToggle = page.getByRole('button', {
     name: 'View Answered the Prompt response history',
@@ -519,31 +616,39 @@ test('Progress shows current performance histories, exact result links, and ever
   await contentToggle.focus()
   await expect(contentToggle).toBeFocused()
   await page.keyboard.press('Enter')
-  await expect(
-    page.getByRole('button', { name: 'Hide Answered the Prompt response history' }),
-  ).toHaveAttribute('aria-expanded', 'true')
-  const contentHistory = page.getByRole('region', {
+  await expect(contentToggle).toHaveAttribute('aria-expanded', 'true')
+  const contentHistory = page.getByRole('dialog', {
     name: 'Answered the Prompt response history',
   })
   await expect(contentHistory.getByRole('link')).toHaveCount(attempts.length)
-  await page.getByRole('button', { name: 'Hide Answered the Prompt response history' }).click()
+  await page.keyboard.press('Escape')
+  await expect(contentHistory).not.toBeVisible()
+  await expect(contentToggle).toBeFocused()
 
-  await page.getByRole('button', { name: 'View Pace response history' }).click()
-  const audioHistory = page.getByRole('region', { name: 'Pace response history' })
+  const paceCard = page.getByRole('button', { name: 'View Pace response history' })
+  await paceCard.click()
+  const audioHistory = page.getByRole('dialog', { name: 'Pace response history' })
   await expect(audioHistory.getByRole('link')).toHaveCount(attempts.length)
   await expect(audioHistory.getByText('120 WPM')).toBeVisible()
-  await page.getByRole('button', { name: 'Hide Pace response history' }).click()
+  await audioHistory.getByRole('button', { name: 'Close' }).click()
+  await expect(paceCard).toBeFocused()
 
-  for (const [value, mode] of [
-    ['practice', 'practice'],
-    ['interview', 'interview'],
-    ['presentation', 'presentation'],
-    ['conversation', 'conversation'],
-    ['all', null],
+  await filter.focus()
+  await expect(filter).toBeFocused()
+  await filter.selectOption('interview')
+  await expect(page).toHaveURL(`${APP}/progress?mode=interview`)
+  await expect(filter).toHaveValue('interview')
+
+  for (const [, mode] of [
+    ['General Speaking', 'practice'],
+    ['Interviews', 'interview'],
+    ['Presentations', 'presentation'],
+    ['Conversations', 'conversation'],
+    ['All', null],
   ] as const) {
-    await filter.selectOption(value)
+    await filter.selectOption(mode ?? 'all')
     await expect(page).toHaveURL(mode === null ? `${APP}/progress` : `${APP}/progress?mode=${mode}`)
-    await expect(filter).toHaveValue(value)
+    await expect(filter).toHaveValue(mode ?? 'all')
     const selectedAttempts =
       mode === null ? attempts : attempts.filter((attempt) => attempt.practice_mode === mode)
     const selectedOverall = page.getByRole('button', {
@@ -569,14 +674,76 @@ test('@mobile Progress remains usable when a full history is expanded', async ({
   await page.goto('/progress')
 
   await expect(page.getByRole('heading', { name: 'Progress', level: 1 })).toBeVisible()
-  await expect(page.getByLabel('Show responses').getByRole('option')).toHaveCount(5)
+  await expect(
+    page.getByRole('combobox', { name: 'Show responses' }).getByRole('option'),
+  ).toHaveCount(7)
   await page.getByRole('button', { name: 'View Pace response history' }).click()
   await expect(
-    page.getByRole('region', { name: 'Pace response history' }).getByRole('link'),
+    page.getByRole('dialog', { name: 'Pace response history' }).getByRole('link'),
   ).toHaveCount(12)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
+})
+
+test('History and Progress share category semantics including legacy/custom and Other', async ({
+  page,
+  request,
+}) => {
+  await request.post(`${MOCK}/__e2e/reset`, {
+    data: { onboarded: true, progress: true, categories: true },
+  })
+  await logIn(page)
+  const state = await currentState(request)
+  for (const [, historyKey, progressKey] of [
+    ['General Speaking', 'general', 'practice'],
+    ['Interviews', 'interview', 'interview'],
+    ['Presentations', 'presentation', 'presentation'],
+    ['Conversations', 'conversation', 'conversation'],
+    ['Custom Prompts', 'custom', 'custom'],
+    ['Other', 'other', 'other'],
+  ] as const) {
+    const matching = state.attempts.filter((attempt) =>
+      progressKey === 'custom'
+        ? attempt.prompt_source === 'custom'
+        : attempt.metrics.practice.category === progressKey,
+    )
+    await page.goto('/history')
+    const historyFilters = page.getByRole('combobox', { name: 'Show responses' })
+    await expect(historyFilters.getByRole('option')).toHaveText([
+      'All',
+      'General Speaking',
+      'Interviews',
+      'Presentations',
+      'Conversations',
+      'Custom Prompts',
+      'Other',
+      'Retries',
+    ])
+    await historyFilters.selectOption(historyKey)
+    await expect(page).toHaveURL(`${APP}/history?show=${historyKey}`)
+    const historyLinks = page.locator('a[href^="/attempts/"]')
+    await expect(historyLinks).toHaveCount(matching.length)
+    expect(
+      (
+        await historyLinks.evaluateAll((links) => links.map((link) => link.getAttribute('href')))
+      ).sort(),
+    ).toEqual(matching.map((attempt) => `/attempts/${attempt.id}`).sort())
+    await page.goto('/progress')
+    await page.getByRole('combobox', { name: 'Show responses' }).selectOption(progressKey)
+    await expect(page).toHaveURL(`${APP}/progress?mode=${progressKey}`)
+    await page.getByRole('button', { name: 'View Overall Score response history' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Overall Score response history' })
+    await expect(dialog.getByRole('link')).toHaveCount(matching.length)
+    expect(
+      (
+        await dialog
+          .getByRole('link')
+          .evaluateAll((links) => links.map((link) => link.getAttribute('href')))
+      ).sort(),
+    ).toEqual(matching.map((attempt) => `/attempts/${attempt.id}`).sort())
+    await page.keyboard.press('Escape')
+  }
 })
 
 test('Progress cards remain balanced across responsive breakpoints and dark mode', async ({
@@ -603,19 +770,24 @@ test('Progress cards remain balanced across responsive breakpoints and dark mode
             return { height: bounds.height, top: Math.round(bounds.top) }
           },
         )
-      const select = document.querySelector('#progress-response-filter')
-      const selectBounds = select?.getBoundingClientRect()
+      const filter = document.querySelector<HTMLSelectElement>('#progress-response-filter-label')
+      const filterBounds = filter?.getBoundingClientRect()
       return {
         innerWidth: window.innerWidth,
         scrollWidth: document.documentElement.scrollWidth,
-        selectHeight: selectBounds?.height ?? 0,
+        filter: filterBounds
+          ? { height: filterBounds.height, left: filterBounds.left, right: filterBounds.right }
+          : null,
         overview: cards('performance-overview-heading'),
         sound: cards('audio-metrics-heading'),
       }
     })
 
     expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.innerWidth)
-    expect(geometry.selectHeight).toBeGreaterThanOrEqual(44)
+    expect(geometry.filter).not.toBeNull()
+    expect(geometry.filter?.height).toBeGreaterThanOrEqual(44)
+    expect(geometry.filter?.left).toBeGreaterThanOrEqual(0)
+    expect(geometry.filter?.right).toBeLessThanOrEqual(geometry.innerWidth)
     expect(new Set(geometry.overview.map(({ top }) => top)).size).toBe(overviewRows)
     expect(new Set(geometry.sound.map(({ top }) => top)).size).toBe(soundRows)
     for (const cards of [geometry.overview, geometry.sound]) {
@@ -703,7 +875,9 @@ test('records once, shows processing and v3 results, retries, compares, filters,
     'aria-expanded',
     'true',
   )
-  await expect(page.getByText('Ideal range', { exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Pace details' })).toContainText(
+    /words per minute, .* the .* range used for this practice/,
+  )
   await page.getByRole('button', { name: 'Hide Pace details' }).click()
   await expect(page.getByRole('button', { name: 'Show Pace details' })).toHaveAttribute(
     'aria-expanded',
@@ -796,8 +970,7 @@ test('records once, shows processing and v3 results, retries, compares, filters,
     'scoring',
     'done',
   ])
-  await expect(page.getByLabel('Previous response comparison')).toContainText('Overall')
-  await expect(page.getByRole('link', { name: 'View previous response' })).toHaveCount(0)
+  await expect(page.getByText('Previous response', { exact: true })).toHaveCount(0)
   await page.goto('/progress')
   await expect(page.getByRole('heading', { name: 'Performance overview' })).toBeVisible()
   const progressOverall = page.getByRole('button', {
@@ -806,10 +979,10 @@ test('records once, shows processing and v3 results, retries, compares, filters,
   await expect(progressOverall).not.toContainText(/responses from oldest to latest/i)
   await progressOverall.click()
   await expect(
-    page.getByRole('region', { name: 'Overall Score response history' }).getByRole('link'),
+    page.getByRole('dialog', { name: 'Overall Score response history' }).getByRole('link'),
   ).toHaveCount(2)
   await page.goto('/history')
-  await page.getByLabel('Show responses').selectOption('retry')
+  await page.getByRole('combobox', { name: 'Show responses' }).selectOption('retry')
   await expect(page.getByText(/Interview · Library prompt · Retry/)).toBeVisible()
   const deleteButton = page.getByRole('button', { name: 'Delete response' }).first()
   await deleteButton.click()
@@ -850,7 +1023,7 @@ test('provider failure persists explicit not-checked content metrics', async ({
   await recordOne(page)
   await expect(page.getByRole('region', { name: 'Result summary' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Overall score' })).toHaveCount(0)
-  await expect(page.getByText('Overall unavailable')).toBeVisible()
+  await expect(page.getByText('Result unavailable')).toBeVisible()
   const whatYouSaid = page.getByRole('region', { name: 'What You Said' })
   await expect(whatYouSaid.getByText(/^Not checked \/ /)).toHaveCount(6)
   const failureState = await currentState(page.request)
@@ -884,8 +1057,8 @@ test('structured lessons retry thresholds without reducing durable progress', as
   await page.goto(firstLesson)
   await expect(page).toHaveURL(/interviews-beginner-01-skill-1\/record$/)
   await recordOne(page)
-  await expect(page.getByRole('heading', { name: 'Lesson not passed' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Continue' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Not passed yet' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Next Lesson' })).toHaveCount(0)
 
   const failedState = await currentState(request)
   const failedAttempt = attemptAt(failedState, 0)
@@ -899,16 +1072,16 @@ test('structured lessons retry thresholds without reducing durable progress', as
 
   await page.goto('/home')
   await expect(
-    page.getByRole('img', { name: "1 day streak. Today's practice complete." }),
+    page.getByRole('button', { name: "1 day streak. Today's practice complete." }),
   ).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible()
-  const interviewsCard = page.getByRole('link', { name: 'View Interviews track' }).locator('..')
+  const interviewsCard = homeTrackCard(page, 'Interviews')
   await expect(interviewsCard.getByText('Lesson 1 of 10', { exact: true })).toBeVisible()
-  await interviewsCard.getByRole('link', { name: 'Continue' }).click()
+  await interviewsCard.getByRole('link', { name: 'Try Again' }).click()
   await expect(page).toHaveURL(/\/record\?retry=/)
 
   await recordOne(page)
-  await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Lesson passed' })).toBeVisible()
   await expect(page.getByText('Best: 74')).toBeVisible()
   await expect(page.getByText('Lesson 2 is available.')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Beginner lesson 1', exact: true })).toHaveCount(0)
@@ -933,6 +1106,14 @@ test('structured lessons retry thresholds without reducing durable progress', as
   await expect(
     page.locator(`a[href="/attempts/${failedAttempt.id}"]`).filter({ hasText: '64 / 100' }),
   ).toBeVisible()
+  const resultActions = page.getByRole('group', { name: 'Result actions' })
+  await expect(resultActions.getByRole('link')).toHaveText([
+    'Next Lesson',
+    'Try Again',
+    'Back to Track',
+  ])
+  await expect(resultActions.getByRole('button', { name: 'Delete response' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Next steps' })).toHaveCount(0)
 
   for (const viewport of [
     { width: 390, height: 844 },
@@ -943,26 +1124,58 @@ test('structured lessons retry thresholds without reducing durable progress', as
     await page.setViewportSize(viewport)
     const summaryBox = await page.getByRole('region', { name: 'Result summary' }).boundingBox()
     const historyBox = await page.getByRole('region', { name: 'Previous attempts' }).boundingBox()
-    const recordingBox = await page
-      .getByRole('heading', { name: 'Recording' })
-      .locator('..')
-      .boundingBox()
+    const lessonBox = await page.locator('[data-result-review-card="lesson"]').boundingBox()
+    const recordingBox = await page.locator('[data-result-review-card="recording"]').boundingBox()
+    const actionBoxes = await resultActions.locator('a, button').evaluateAll((actions) =>
+      actions.map((action) => {
+        const box = action.getBoundingClientRect()
+        return { x: box.x, y: box.y, width: box.width, height: box.height }
+      }),
+    )
     expect(summaryBox).not.toBeNull()
     expect(historyBox).not.toBeNull()
+    expect(lessonBox).not.toBeNull()
     expect(recordingBox).not.toBeNull()
-    if (!summaryBox || !historyBox || !recordingBox) continue
+    if (!summaryBox || !historyBox || !lessonBox || !recordingBox) continue
+    // The recording card stays compact without retry comparison rows.
+    expect(recordingBox.height).toBeLessThan(450)
+    expect(actionBoxes).toHaveLength(4)
+    for (let index = 1; index < actionBoxes.length; index += 1) {
+      const firstAction = actionBoxes[0]
+      const previousAction = actionBoxes[index - 1]
+      const currentAction = actionBoxes[index]
+      if (!firstAction || !previousAction || !currentAction) {
+        throw new Error('Expected four visible result actions.')
+      }
+      expect(Math.abs(currentAction.x - firstAction.x)).toBeLessThan(2)
+      expect(Math.abs(currentAction.width - firstAction.width)).toBeLessThan(2)
+      expect(currentAction.y).toBeGreaterThan(previousAction.y + previousAction.height)
+    }
     if (viewport.width >= 1024) {
       expect(Math.abs(summaryBox.y - historyBox.y)).toBeLessThan(4)
+      expect(Math.abs(summaryBox.height - historyBox.height)).toBeLessThan(2)
       expect(historyBox.x).toBeGreaterThan(summaryBox.x + summaryBox.width)
+      expect(Math.abs(lessonBox.y - recordingBox.y)).toBeLessThan(2)
+      expect(Math.abs(lessonBox.width - recordingBox.width)).toBeLessThan(2)
+      expect(Math.abs(lessonBox.height - recordingBox.height)).toBeLessThan(2)
     } else {
       expect(Math.abs(summaryBox.x - historyBox.x)).toBeLessThan(4)
       expect(historyBox.y).toBeGreaterThan(recordingBox.y + recordingBox.height)
+      expect(Math.abs(lessonBox.x - recordingBox.x)).toBeLessThan(2)
+      expect(Math.abs(lessonBox.width - recordingBox.width)).toBeLessThan(2)
+      expect(recordingBox.y).toBeGreaterThan(lessonBox.y + lessonBox.height)
     }
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true)
+    if (viewport.width === 390 || viewport.width === 1280) {
+      await page.screenshot({
+        path: test.info().outputPath(`result-${viewport.width}.png`),
+        fullPage: true,
+      })
+    }
   }
 
   await page.goto('/practice/paths/interviews')
@@ -983,11 +1196,11 @@ test('structured lessons retry thresholds without reducing durable progress', as
   ).toBeVisible()
 
   await page.goto('/home')
-  const interviewsHomeCard = page.getByRole('link', { name: 'View Interviews track' }).locator('..')
+  const interviewsHomeCard = homeTrackCard(page, 'Interviews')
   await expect(interviewsHomeCard.getByText('Lesson 2 of 10', { exact: true })).toBeVisible()
   await expect(page.getByText('Beginner lesson 2', { exact: true })).toHaveCount(0)
   await expect(page.getByText(/\d+ \/ 30 lessons passed/)).toHaveCount(0)
-  await interviewsHomeCard.getByRole('link', { name: 'Continue' }).click()
+  await interviewsHomeCard.getByRole('link', { name: 'Next Lesson' }).click()
   await expect(page).toHaveURL(/interviews-beginner-02-skill-2\/record$/)
   await expect(page.getByText('Give a clear response for beginner lesson 2.')).toBeVisible()
 
@@ -1009,11 +1222,11 @@ test('structured lessons retry thresholds without reducing durable progress', as
 
   await page.goto(firstLesson)
   await expect(page).toHaveURL(new RegExp(`/attempts/${passedAttempt.id}$`))
-  await page.getByRole('link', { name: 'Retry for 3 stars' }).click()
+  await page.getByRole('link', { name: 'Try Again' }).click()
   await recordOne(page)
   await expect(page.getByText('Best: 86')).toBeVisible()
   await expect(page.getByLabel('2 of 3 stars').first()).toBeVisible()
-  await page.getByRole('link', { name: 'Retry for 3 stars' }).click()
+  await page.getByRole('link', { name: 'Try Again' }).click()
   await recordOne(page)
   await expect(page.getByText('Best: 86')).toBeVisible()
 
@@ -1034,7 +1247,7 @@ test('structured lessons retry thresholds without reducing durable progress', as
     page.getByRole('link', { name: /Lesson 1.*View Best Result/s }).first(),
   ).toHaveAttribute('href', `/attempts/${attempt86.id}`)
   await page.goto(`/attempts/${attempt72.id}`)
-  await page.getByRole('link', { name: 'Retry for 3 stars' }).click()
+  await page.getByRole('link', { name: 'Try Again' }).click()
   await recordOne(page)
   await expect(page.getByText('Best: 92')).toBeVisible()
   await expect(page.getByLabel('3 of 3 stars').first()).toBeVisible()
@@ -1080,11 +1293,11 @@ test('structured lessons retry thresholds without reducing durable progress', as
   })
   await page.goto('/home')
   await expect(
-    page.getByRole('img', { name: "1 day streak. Today's practice complete." }),
+    page.getByRole('button', { name: "1 day streak. Today's practice complete." }),
   ).toBeVisible()
-  const homeInterviewsCard = page.getByRole('link', { name: 'View Interviews track' }).locator('..')
+  const homeInterviewsCard = homeTrackCard(page, 'Interviews')
   await expect(homeInterviewsCard.getByText('Lesson 2 of 10', { exact: true })).toBeVisible()
-  await expect(homeInterviewsCard.getByRole('img', { name: '0 of 3 stars' })).toBeVisible()
+  await expect(homeInterviewsCard.getByRole('img', { name: /stars/ })).toHaveCount(0)
   await expect(page.getByText('Beginner lesson 2', { exact: true })).toHaveCount(0)
   await expect(page.getByText(/\d+ \/ 90 stars/)).toHaveCount(0)
 
@@ -1092,8 +1305,8 @@ test('structured lessons retry thresholds without reducing durable progress', as
   await page.goto('/practice/paths/interviews/lessons/interviews-beginner-10-skill-10')
   await expect(page).toHaveURL(/interviews-beginner-10-skill-10\/record$/)
   await recordOne(page)
-  await expect(page.getByRole('heading', { name: 'Lesson not passed' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Continue' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Not passed yet' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Next Lesson' })).toHaveCount(0)
 
   const failedCheckpointState = await currentState(request)
   const attempt68 = attemptAt(failedCheckpointState, 0)
@@ -1103,8 +1316,8 @@ test('structured lessons retry thresholds without reducing durable progress', as
 
   await page.getByRole('link', { name: 'Try Again' }).click()
   await recordOne(page)
-  await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
-  await page.getByRole('link', { name: 'Continue' }).click()
+  await expect(page.getByRole('heading', { name: 'Lesson passed' })).toBeVisible()
+  await page.getByRole('link', { name: 'Next Lesson' }).click()
   await expect(page).toHaveURL(/interviews-intermediate-01-skill-1\/record$/)
   await expect(page.getByText('Give a clear response for intermediate lesson 1.')).toBeVisible()
 
@@ -1137,15 +1350,15 @@ test('later checkpoints unlock the next chapter and finish the path', async ({
   await page.goto(intermediateCheckpoint)
   await expect(page).toHaveURL(/interviews-intermediate-10-skill-10\/record$/)
   await recordOne(page)
-  await expect(page.getByRole('heading', { name: 'Lesson not passed' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Not passed yet' })).toBeVisible()
   await page.goto('/practice/paths/interviews/lessons/interviews-advanced-01-skill-1')
   await expect(page.getByRole('heading', { name: 'Lesson locked' })).toBeVisible()
 
   await page.goto(intermediateCheckpoint)
   await page.getByRole('link', { name: 'Try Again' }).click()
   await recordOne(page)
-  await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
-  await page.getByRole('link', { name: 'Continue' }).click()
+  await expect(page.getByRole('heading', { name: 'Lesson passed' })).toBeVisible()
+  await page.getByRole('link', { name: 'Next Lesson' }).click()
   await expect(page).toHaveURL(/interviews-advanced-01-skill-1\/record$/)
   await expect(page.getByText('Give a clear response for advanced lesson 1.')).toBeVisible()
 
@@ -1153,18 +1366,17 @@ test('later checkpoints unlock the next chapter and finish the path', async ({
   await page.goto('/practice/paths/interviews/lessons/interviews-advanced-10-skill-10')
   await expect(page).toHaveURL(/interviews-advanced-10-skill-10\/record$/)
   await recordOne(page)
-  await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
-  await expect(page.getByText('Path complete', { exact: true })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'View Path' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Continue' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Lesson passed' })).toBeVisible()
+  await expect(page.getByText('Track complete', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Back to Track' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Next Lesson' })).toHaveCount(0)
 
   await page.goto('/home')
-  const completedInterviewsCard = page
-    .getByRole('link', { name: 'View Interviews track' })
-    .locator('..')
+  const completedInterviewsCard = homeTrackCard(page, 'Interviews')
   await expect(completedInterviewsCard.getByText('Path complete', { exact: true })).toBeVisible()
   await expect(page.getByText(/\d+ \/ 30 lessons passed/)).toHaveCount(0)
-  await expect(completedInterviewsCard.getByRole('link', { name: 'View Path' })).toBeVisible()
+  await expect(completedInterviewsCard.getByRole('link', { name: 'Practice Again' })).toBeVisible()
+  await expect(completedInterviewsCard.getByRole('link', { name: 'View Lessons' })).toBeVisible()
 })
 
 test('structured provider-neutral retry counts activity without changing progress', async ({
@@ -1210,13 +1422,10 @@ test('structured provider-neutral retry counts activity without changing progres
 
   await page.goto('/home')
   await expect(
-    page.getByRole('img', { name: "1 day streak. Today's practice complete." }),
+    page.getByRole('button', { name: "1 day streak. Today's practice complete." }),
   ).toBeVisible()
   await expect(
-    page
-      .getByRole('link', { name: 'View Interviews track' })
-      .locator('..')
-      .getByText('Lesson 1 of 10', { exact: true }),
+    homeTrackCard(page, 'Interviews').getByText('Lesson 1 of 10', { exact: true }),
   ).toBeVisible()
   await page.goto('/practice/paths/interviews/lessons/interviews-beginner-02-skill-2')
   await expect(page.getByRole('heading', { name: 'Lesson locked' })).toBeVisible()
@@ -1230,10 +1439,7 @@ test('Settings omits track controls and preserves prior path progress', async ({
   await logIn(page)
   await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible()
   await expect(
-    page
-      .getByRole('link', { name: 'View Interviews track' })
-      .locator('..')
-      .getByText('Lesson 2 of 10', { exact: true }),
+    homeTrackCard(page, 'Interviews').getByText('Lesson 2 of 10', { exact: true }),
   ).toBeVisible()
 
   await page.goto('/settings')
@@ -1247,10 +1453,7 @@ test('Settings omits track controls and preserves prior path progress', async ({
 
   await page.goto('/home')
   await expect(
-    page
-      .getByRole('link', { name: 'View Interviews track' })
-      .locator('..')
-      .getByText('Lesson 2 of 10', { exact: true }),
+    homeTrackCard(page, 'Interviews').getByText('Lesson 2 of 10', { exact: true }),
   ).toBeVisible()
 
   const state = await currentState(request)
@@ -1314,25 +1517,19 @@ test('Home advances each Track from its durable curriculum progress', async ({
 
   await page.goto('/practice/paths/interviews/lessons/interviews-beginner-01-skill-1/record')
   await recordOne(page)
-  await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Lesson passed' })).toBeVisible()
   await page.goto('/home')
   await expect(
-    page
-      .getByRole('link', { name: 'View Interviews track' })
-      .locator('..')
-      .getByText('Lesson 2 of 10', { exact: true }),
+    homeTrackCard(page, 'Interviews').getByText('Lesson 2 of 10', { exact: true }),
   ).toBeVisible()
 
   await page.goto('/practice/paths/presentations/lessons/presentations-beginner-01-skill-1/record')
   await recordOne(page)
-  await expect(page.getByRole('heading', { name: 'Lesson complete' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Lesson passed' })).toBeVisible()
 
   await page.goto('/home')
   await expect(
-    page
-      .getByRole('link', { name: 'View Presentations track' })
-      .locator('..')
-      .getByText('Lesson 2 of 10', { exact: true }),
+    homeTrackCard(page, 'Presentations').getByText('Lesson 2 of 10', { exact: true }),
   ).toBeVisible()
 })
 

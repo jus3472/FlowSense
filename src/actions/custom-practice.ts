@@ -16,8 +16,7 @@ export async function beginCustomPractice(formData: FormData) {
   const target = Number(formData.get('target_duration_seconds'))
   const result = validateCustomPracticeInput({
     promptText: formData.get('prompt'),
-    mode: formData.get('mode'),
-    additionalContext: formData.get('additional_context'),
+    category: formData.get('category'),
     targetDurationSeconds: target,
   })
   if (!result.ok)

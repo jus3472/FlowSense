@@ -9,6 +9,8 @@ describe('progress filter display contract', () => {
       'interview',
       'presentation',
       'conversation',
+      'custom',
+      'other',
     ])
     expect(parseProgressFilter(undefined)).toEqual({ status: 'valid', filter: 'all' })
     for (const filter of PROGRESS_FILTERS.slice(1)) {
@@ -16,9 +18,8 @@ describe('progress filter display contract', () => {
     }
   })
 
-  it('rejects legacy, custom, and repeated query values', () => {
+  it('rejects legacy and repeated query values', () => {
     expect(parseProgressFilter('free-practice')).toEqual({ status: 'invalid' })
-    expect(parseProgressFilter('custom')).toEqual({ status: 'invalid' })
     expect(parseProgressFilter(['interview', 'practice'])).toEqual({ status: 'invalid' })
   })
 
@@ -28,5 +29,7 @@ describe('progress filter display contract', () => {
     expect(progressFilterHref('interview')).toBe('/progress?mode=interview')
     expect(progressFilterHref('presentation')).toBe('/progress?mode=presentation')
     expect(progressFilterHref('conversation')).toBe('/progress?mode=conversation')
+    expect(progressFilterHref('custom')).toBe('/progress?mode=custom')
+    expect(progressFilterHref('other')).toBe('/progress?mode=other')
   })
 })

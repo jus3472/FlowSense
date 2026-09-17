@@ -88,6 +88,68 @@ describe('practice session descriptor', () => {
     })
   })
 
+  it('preserves a custom Other category while keeping the scoring mode as practice', () => {
+    expect(
+      retrySessionFromAttempt({
+        id: ATTEMPT_ID,
+        prompt_id: null,
+        prompt_text: 'Describe a topic outside the Tracks.',
+        practice_mode: 'practice',
+        prompt_source: 'custom',
+        prompt_difficulty: 'beginner',
+        metrics: { practice: { target_duration_seconds: 30, category: 'other' } },
+      }),
+    ).toEqual({
+      promptText: 'Describe a topic outside the Tracks.',
+      promptId: null,
+      mode: 'practice',
+      difficulty: 'beginner',
+      source: 'custom',
+      targetDurationSeconds: 30,
+      retryOfAttemptId: ATTEMPT_ID,
+      category: 'other',
+    })
+  })
+
+  it('treats a contradictory stored category as legacy mode metadata', () => {
+    expect(
+      retrySessionFromAttempt({
+        id: ATTEMPT_ID,
+        prompt_id: null,
+        prompt_text: 'Describe a useful routine.',
+        practice_mode: 'interview',
+        prompt_source: 'custom',
+        prompt_difficulty: 'beginner',
+        metrics: { practice: { target_duration_seconds: 30, category: 'conversation' } },
+      }),
+    ).toEqual({
+      promptText: 'Describe a useful routine.',
+      promptId: null,
+      mode: 'interview',
+      difficulty: 'beginner',
+      source: 'custom',
+      targetDurationSeconds: 30,
+      retryOfAttemptId: ATTEMPT_ID,
+    })
+  })
+
+  it('ignores category metadata on a library retry', () => {
+    expect(
+      retrySessionFromAttempt({
+        id: ATTEMPT_ID,
+        prompt_id: PROMPT_ID,
+        prompt_text: LIBRARY_SESSION.promptText,
+        practice_mode: 'practice',
+        prompt_source: 'library',
+        prompt_difficulty: 'beginner',
+        metrics: { practice: { target_duration_seconds: 30, category: 'practice' } },
+      }),
+    ).toEqual({
+      ...LIBRARY_SESSION,
+      retryOfAttemptId: ATTEMPT_ID,
+    })
+  })
+
   it('returns no retry session for unavailable or contradictory stored metadata', () => {
     expect(retrySessionFromAttempt(null)).toBeNull()
     expect(

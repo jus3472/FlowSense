@@ -35,7 +35,9 @@ describe('v3 product contract documentation', () => {
   it('requires current versioning and fail-closed non-current results', () => {
     for (const document of documents) {
       expect(document.contents).toMatch(/rubric `v3`[\s\S]*`v3\.score\.2`/i)
-      expect(document.contents).toMatch(/(other|unknown)[\s\S]*formats?[\s\S]*fail closed|unsupported/i)
+      expect(document.contents).toMatch(
+        /(other|unknown)[\s\S]*formats?[\s\S]*fail closed|unsupported/i,
+      )
       expect(document.contents).toMatch(/resultless terminal attempts?/i)
     }
   })
